@@ -18,8 +18,8 @@
   --shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
   --radius: 8px;
   --topbar-h: 56px;
-  --strip-h: 42px;
-  --sidebar-w: 340px;
+  --sidebar-w: 300px;
+  --inspector-w: 320px;
 }
 
 * { box-sizing: border-box; }
@@ -119,11 +119,11 @@ button { cursor: pointer; }
 }
 .btn-primary:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 .btn-accent {
-  background: #0f766e;
-  border-color: #0f766e;
+  background: var(--blue);
+  border-color: var(--blue);
   color: #fff;
 }
-.btn-accent:hover { background: #115e59; border-color: #115e59; }
+.btn-accent:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
 .btn-danger {
   background: var(--red);
   border-color: var(--red);
@@ -148,25 +148,16 @@ button { cursor: pointer; }
 .icon-btn:hover { background: var(--panel-2); border-color: var(--line); color: var(--text); }
 .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-/* ---------- page strip ---------- */
-.page-strip {
-  height: var(--strip-h);
-  flex: 0 0 var(--strip-h);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-  background: #fbfcfd;
-  border-bottom: 1px solid var(--line);
-}
-
+/* ---------- page tabs ---------- */
 .page-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
   overflow-x: auto;
   scrollbar-width: thin;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 420px;
 }
 
 .page-tab {
@@ -185,8 +176,6 @@ button { cursor: pointer; }
   color: var(--blue-dark);
   font-weight: 600;
 }
-
-.page-actions { display: flex; gap: 2px; }
 
 /* ---------- main layout ---------- */
 .main {
@@ -231,11 +220,26 @@ button { cursor: pointer; }
   background: #f8fbff;
 }
 
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #fcfdff;
+  flex: 0 0 auto;
+}
+.panel-toolbar .hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .sidebar-panel {
   padding: 10px;
   overflow: auto;
-  min-height: 110px;
-  flex: 1 1 45%;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .panel-empty {
@@ -335,14 +339,16 @@ button { cursor: pointer; }
 }
 .layer-sub { color: var(--faint); font-size: 10px; }
 
-/* property panel */
-.property-section {
-  flex: 0 0 44%;
-  min-height: 190px;
-  border-top: 1px solid var(--line);
+/* property inspector */
+.inspector {
+  width: var(--inspector-w);
+  flex: 0 0 var(--inspector-w);
+  min-height: 0;
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   background: #fcfdff;
+  z-index: 2;
 }
 
 .property-heading {
@@ -375,6 +381,7 @@ button { cursor: pointer; }
   padding: 10px 12px 18px;
   overflow: auto;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .prop-group {
@@ -517,6 +524,40 @@ button { cursor: pointer; }
   background-size: 16px 16px;
 }
 
+.canvas-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  max-width: calc(100% - 24px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 5px 7px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.canvas-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.canvas-toolbar-pages { flex: 0 1 auto; }
+.canvas-toolbar .page-tabs { max-width: 420px; }
+.canvas-toolbar .page-tab { padding: 5px 10px; }
+
+.toolbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  margin: 0 2px;
+}
+
 .leafer-view {
   position: absolute;
   inset: 0;
@@ -534,7 +575,7 @@ button { cursor: pointer; }
 .empty-hint {
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: 54%;
   transform: translate(-50%, -50%);
   z-index: 2;
   text-align: center;
@@ -710,7 +751,9 @@ button { cursor: pointer; }
 }
 
 @media (max-width: 1180px) {
-  :root { --sidebar-w: 310px; }
+  :root { --sidebar-w: 280px; --inspector-w: 300px; }
   .topbar-actions { gap: 4px; }
   .btn { padding: 6px 8px; }
+  .canvas-toolbar { gap: 4px; padding: 4px 6px; }
+  .canvas-toolbar .page-tabs { max-width: 300px; }
 }

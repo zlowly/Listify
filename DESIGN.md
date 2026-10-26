@@ -1,0 +1,357 @@
+---
+name: 歌单排版生成器
+description: 零构建、纯本地的歌单排版工坊，把文本歌单排成手机分享图
+colors:
+  workshop-blue: "#2563eb"
+  workshop-blue-deep: "#1d4ed8"
+  workshop-blue-soft: "#dbeafe"
+  selection-wash: "#eff6ff"
+  selection-border: "#bfdbfe"
+  ink: "#1f2937"
+  ink-muted: "#6b7280"
+  ink-faint: "#9ca3af"
+  paper: "#ffffff"
+  paper-sunken: "#f7f8fa"
+  workbench: "#e9edf2"
+  line: "#e2e6ec"
+  line-strong: "#cbd2dc"
+  row-hover-line: "#b7c3d4"
+  placed-green: "#059669"
+  placed-green-soft: "#d1fae5"
+  overflow-red: "#dc2626"
+  overflow-red-soft: "#fee2e2"
+  proof-amber: "#b45309"
+  scrim: "rgba(15, 23, 42, 0.38)"
+typography:
+  brand:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "16px"
+    fontWeight: 700
+    letterSpacing: "0.02em"
+  headline:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "14px"
+    fontWeight: 700
+  title:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "12px"
+    fontWeight: 700
+    letterSpacing: "0.04em"
+  body:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.5
+  control:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "12px"
+    fontWeight: 400
+  label:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "11px"
+    fontWeight: 400
+  micro:
+    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif'
+    fontSize: "10px"
+    fontWeight: 400
+rounded:
+  xs: "5px"
+  sm: "6px"
+  md: "7px"
+  lg: "8px"
+  xl: "10px"
+  pill: "999px"
+spacing:
+  "2": "2px"
+  "4": "4px"
+  "6": "6px"
+  "8": "8px"
+  "10": "10px"
+  "12": "12px"
+  "16": "16px"
+  "24": "24px"
+components:
+  button:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.sm}"
+    padding: "6px 11px"
+  button-hover:
+    backgroundColor: "{colors.paper-sunken}"
+  button-primary:
+    backgroundColor: "{colors.workshop-blue}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.sm}"
+    padding: "6px 11px"
+  button-primary-hover:
+    backgroundColor: "{colors.workshop-blue-deep}"
+  button-ghost:
+    backgroundColor: transparent
+    textColor: "{colors.ink-muted}"
+    rounded: "{rounded.sm}"
+    size: "28px"
+  input:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.xs}"
+    padding: "3px 7px"
+    height: "27px"
+  page-tab-active:
+    backgroundColor: "{colors.workshop-blue-soft}"
+    textColor: "{colors.workshop-blue-deep}"
+    rounded: "{rounded.sm}"
+    padding: "5px 12px"
+  list-row:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.md}"
+    padding: "9px 9px"
+  selection-label:
+    backgroundColor: "{colors.workshop-blue-soft}"
+    textColor: "{colors.workshop-blue-deep}"
+    rounded: "{rounded.pill}"
+    padding: "2px 8px"
+  pill-placed:
+    backgroundColor: "{colors.placed-green-soft}"
+    textColor: "#047857"
+    rounded: "{rounded.pill}"
+    padding: "2px 7px"
+---
+
+# Design System: 歌单排版生成器
+
+## Overview
+
+**Creative North Star: "数字印前工坊"**
+
+这是一间数字印前工坊：中央是一张待出片的"纸"，四周是固定的设备——顶栏是项目命令条，画布工具条是活件列表与插入动作，左栏是分类与图层清单，右栏是检查表（属性面板）。界面不表演设计，它让像素、边距、列宽和溢出状态变得可读、可点、可校对。判断一次界面改动是否成立，看它是否让"检查—调整—出片"更快，而不是看它是否更漂亮。
+
+基调是**冷静、精确、不打扰**。信息密度高而控件小：正文 13px、控件高 27px、结构靠 1px 边框与底色差完成，阴影是稀有资源。所有编辑辅助——虚线边界、蓝色手柄、页边距参考线、红色溢出徽标——只在编辑态出现，导出图里必须干净。数字（尺寸、边距、列宽、字号）始终以等宽数字右对齐呈现，因为这里的用户是在校对数值，不是在浏览内容。
+
+明确的**反参考**：不要像消费级 App（大圆角、大色块、渐变主按钮、插画、弹性动效）；不要像传统桌面软件（灰色系统控件、浮雕边框、拟物图标）；不要像设计工具官网（大标题、玻璃拟态、炫技动效）。唯一被允许的渐变是顶栏品牌标记 ♫ 的底色，且它属于可替换的装饰，而不是身份核心。
+
+**Key Characteristics:**
+- 单一强调色：工坊蓝只标记"可操作 / 已选中 / 焦点"。
+- 纸与墨：白纸、冷灰工作台、三阶墨色文字。
+- 扁平优先：1px 边框与底色分层；阴影只给真浮层。
+- 小字号、密排布：13px 基准，27px 控件，6–8px 间距。
+- 编辑辅助与成片分离：任何虚线、手柄、警示都不得进入导出。
+
+## Colors
+
+冷灰工作台上的一张白纸，配一支蓝笔；除状态编码外不出现第二个彩色信号。
+
+### Primary
+
+- **工坊蓝** (#2563eb): 主操作（导入）、选中描边、输入焦点环、页边距参考线、选中页标签与选中图层行。它是界面上唯一的"可交互"信号。
+- **深工坊蓝** (#1d4ed8): 蓝底上的文字与悬停态——主按钮 hover、激活标签文字、选区标签文字。
+- **稀释工坊蓝** (#dbeafe): 选中背景与浅色徽标底，让选中状态不用投影也能成立。
+- **选中洗蓝** (#eff6ff): 图层行与选择卡片的选中底、卡片悬停底；比稀释蓝更接近纸白，只用于大面积选中表面。
+- **选中描边** (#bfdbfe): 激活页标签的 1px 边与选中行的内描边，是"选中"的第二重信号。
+
+### Neutral
+
+- **纸白** (#ffffff): 顶栏、侧栏、输入框、列表行卡片的底。
+- **浅纸** (#f7f8fa): 悬停底色与次级区块。
+- **工作台灰** (#e9edf2): 画布底，上覆 16px 点阵，表示"工作台"而不是内容。
+- **墨色** (#1f2937): 正文与控件文字。
+- **次级墨** (#6b7280): 分区标题、字段标签、非激活图标。
+- **淡墨** (#9ca3af): 单位、提示、非激活图标。
+- **分隔线** (#e2e6ec): 1px 结构线，分隔区域而不分隔注意力。
+- **强分隔线** (#cbd2dc): 可交互控件的描边，与结构线区分开。
+- **行悬停描边** (#b7c3d4): 列表行 hover 时的描边，比强分隔线深一档，表示"可点"。
+- **遮罩** (rgba(15, 23, 42, 0.38)): 模态背景；同一墨蓝也用于浮层阴影色。
+
+纸色是连续梯队而不是离散色：除纸白与浅纸外，还有几个半档过渡——模态页脚 `#fbfcfd`、属性区 `#fcfdff`、激活的侧栏标签 `#f8fbff`、选中行 `#eff6ff`。它们属于同一纸白梯队的中间步，不要把它们当成新的语义色，也不要在新界面里另造近似白。
+
+### Status (not accents)
+
+- **已放置绿** (#059669, 软底 #d1fae5): 只表示"该分类已经放到页面上"。
+- **溢出红** (#dc2626, 软底 #fee2e2): 列过窄、单元格内容溢出、错误提示；危险按钮 hover 用深红 #b91c1c。
+- **校样琥珀** (#b45309): 提醒型提示文字（`hint.warn`），比红色轻一档。
+
+空状态提示贴（#7b8798 文字、#94a3b8 图标、#c3ccd8 虚线）与导入错误清单（#fff7f7 底、#fecaca 边、#991b1b 文字）使用场景专属的浅色。它们属于对应组件，不进入全局色板；需要复用时从 Components 章节取值，不要另造近似色。
+
+### Named Rules
+
+**The One Blue Rule.** 工坊蓝是唯一强调色，只出现在可操作、已选中、有焦点三种状态。导出按钮也复用这一支蓝；任何新的"重要操作"都复用它，而不是再引入一种颜色。
+
+**The Status-Only Color Rule.** 绿、红、琥珀只编码状态，不做装饰、不做分区标题、不做图标底色。状态色一旦用来"好看"，用户就会失去对溢出的警觉。
+
+**The Paper-and-Ink Rule.** 正文只用三阶墨色。彩色文字只允许出现在状态徽标和提示语句里；行标题、按钮文字、字段值一律保持墨色。
+
+## Typography
+
+**Display Font:** 系统界面栈（"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif）
+**Canvas Font:** "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif（导出内容的默认字体族，可在属性面板逐区修改）
+**Label/Mono Font:** 无专用等宽字体；所有数字字段使用 `font-variant-numeric: tabular-nums`。
+
+**Character:** 完全依赖本机字体（运行时零网络，不能加载 webfont），因此语气由字号、字重与字距承担，而不是字族。结果是中性、可预期、没有品牌字体记忆点——这符合工坊身份：字体是工具，不是表达。
+
+### Hierarchy
+
+- **Brand** (16px / 700 / 0.02em / 行高正常): 顶栏品牌名，全界面最大字号。
+- **Headline** (14px / 700): 模态标题。
+- **Title** (12px / 700 / 0.03–0.04em): 侧栏分区标题、属性分组标题。
+- **Body** (13px / 400 / 行高 1.5): 面板正文、分类名、空状态说明。
+- **Control** (12px / 400): 输入框、下拉、页标签、表格卡片正文、小号按钮。
+- **Label** (11px / 400 / 行高 1.3): 字段标签、单位说明、提示文字。
+- **Micro** (10px / 400): 徽标、次级说明、选择标签；9px 仅用于紧邻表格内容的警示徽标。
+- 数值输入、边距、列宽、字号一律使用等宽数字并右对齐；不要把数字排成比例字。
+- 图标字形（品牌标记 17px、模态关闭 × 20px、空状态 ♫ 34px）是图形尺寸，不属于排版层级，不要当作文字尺度引用。
+
+### Named Rules
+
+**The 11px Floor Rule.** 11px 及以下只承担标注，不承载独立可点击操作；可点击控件的文字最小 12px，唯一例外是分段控件的 11px（密排枚举选择，靠整块点击区保证可点性）。低于 11px 的文字必须紧邻它所修饰的对象，不能独立成句。
+
+**The No-Webfont Rule.** 不引入 webfont、图标字体或网络字体。字体栈必须在本机可用，缺字时回退 `system-ui`。
+
+## Layout
+
+固定框架 + 弹性画布：`#app` 为全高纵向 flex，`min-width: 900px`，`body` 禁止滚动。顶栏固定 56px（`--topbar-h`），其下是 `main` 三列：左素材栏、中央画布、右属性检查栏；只有中央画布伸缩。
+
+- **左素材栏**：300px（`--sidebar-w`）；窗口 ≤1180px 时收窄到 280px。内部只有视图标签与分类/图层清单；分类视图顶部有一条静态导入工具条（`导入歌单` + `或拖入 .txt`）。
+- **右检查栏**：320px（`--inspector-w`）；窗口 ≤1180px 时收窄到 300px。属性标题固定，内容区独立滚动；不参与画布缩放。
+- **画布**：占满剩余空间；页面按比例居中适配，顶部为浮动工具条预留“工具条高度 + 24px”；画布底是工作台灰 + 16px 点阵（`#cfd6e0`，0.7px 圆点）；页面带 1px 边框与实体纸投影，页边距用蓝色 5/5 虚线标出。
+- **属性面板网格**：`72px` 标签列 + `1fr` 控件列，行间距 7px；表格卡片内收窄为 `58px` 标签列、行距 6px；模态表单为 `96px` 标签列、行距 10px。所有输入框宽 100%，不允许撑破面板。
+- **密度**：控件高 27px（模态内 30px）；按钮内边距 6×11（小号 4×8）；列表行内边距 8–9px；同级间距 6–8px；区块间距 10–12px；面板内边距 10–12px。
+- **不响应式重排**：这是桌面工作台，窄于 900px 时横向挤压而不是改布局；不为手机浏览器设计第二套布局。画布工具条在窄画布下换行，页签区单独横向滚动。
+
+### Named Rules
+
+**The Fixed Frame Rule.** 顶栏、左右两栏的尺寸由工作流决定，不随内容或页面类型改变。只有画布随窗口伸缩。新增工具应进入现有命令条、侧栏或画布工具条，不要新增整行工具栏。
+
+**The Inspector Grid Rule.** 属性面板的标签列宽度是跨组件的契约（72px / 58px / 96px 三档）。控件的左边缘必须对齐，方便竖向扫读数值。
+
+## Elevation & Depth
+
+扁平优先。面板、列表行、卡片在静止态没有阴影，层级由 1px 边框和底色差（纸白 → 浅纸 → 工作台灰）表达。阴影只属于真正离开平面的东西：模态框、提示条、行内文字编辑器，以及画布上那张代表实体纸的页面。选中状态一律用蓝色描边或蓝色内描边表达，绝不用"浮起来"表达。
+
+### Shadow Vocabulary
+
+- **浮层** (`0 10px 30px rgba(15, 23, 42, 0.12)`): 模态框，配合 0.38 遮罩。
+- **提示条** (`0 6px 20px rgba(15, 23, 42, 0.25)`): 底部 toast，深墨底。
+- **行内编辑** (`0 2px 12px rgba(37, 99, 235, 0.18)`): 画布上的行内文字编辑框，蓝色暗示编辑态。
+- **实体纸** (画布绘制：`0 8px 24px rgba(15, 23, 42, 0.28)`): 页面在工作台上的投影，不随导出输出。
+- **选中内描边** (`inset 0 0 0 1px #bfdbfe`): 选中图层行，用内描边代替外阴影。
+- **焦点环** (`0 0 0 2px rgba(37, 99, 235, 0.12)`): 输入框聚焦，蓝色外扩 2px。
+
+### Named Rules
+
+**The Flat-By-Default Rule.** 静止态的面板与卡片没有阴影。需要区分层级时，先换底色，再加边框，最后才考虑阴影。
+
+**The Shadow-Is-Floating Rule.** 阴影只表示"这一层离开了平面"。选中、激活、悬停都不是浮起，禁止用阴影表达它们。
+
+## Shapes
+
+控件用小圆角：输入框与分段控件 5px，按钮与图标按钮 6px，列表行与选择卡片 7px，品牌标记与容器 8px，浮层 10px，状态标签全圆角（999px）。边框恒为 1px；只有选中态允许 2px 下划线（侧栏标签）或 2px 描边（画布选中）。
+
+整体轮廓是矩形工作台：没有斜切、没有超大圆角、没有药丸形操作按钮（全圆角只属于状态徽标与选择标签）。页标签的激活态是"浅蓝底 + 1px 边"，不是下划线；侧栏标签才用 2px 蓝色下划线。两种标签形态并存是有意的：页标签是对象，侧栏标签是视图。
+
+### Named Rule
+
+**The 5-to-10 Rule.** 圆角只在 5 / 6 / 7 / 8 / 10 / 999 六档内取。不要引入 12px 以上的容器圆角。两处例外：空状态提示贴 12px（它是"一块纸上的提示贴"而不是控件），画布行内文字编辑器 2px（它要贴合文字块，看起来像选区而不是控件）。
+
+## Components
+
+### Buttons
+
+- **Shape:** 6px 圆角，1px 描边，6×11 内边距，12–13px 文字，`cursor: pointer`。
+- **Primary:** 工坊蓝底 + 白字，用于"导入歌单"这类进入主流程的动作；hover 转深工坊蓝。
+- **Default:** 纸白底 + 强分隔线描边 + 墨色字；hover 底色转浅纸、描边加深。保存、加载、添加文字/图片都用它。
+- **Ghost / Icon:** 28×28 透明底，默认次级墨色；hover 出现浅纸底与结构线。用于增删页、关闭模态、行内删除。
+- **Danger:** 溢出红底 + 白字，仅用于不可逆的删除确认。
+- **Small:** 4×8 内边距、12px 文字，只出现在列表行与卡片内。
+- **Transitions:** 背景、描边、文字色各 0.12s；不做位移、缩放或阴影动画。
+- **Legacy drift:** 无。导出按钮已与主操作统一使用工坊蓝。
+
+### Brand Mark
+
+顶栏左侧 28×28 的圆角方块（8px），底色是 145° 渐变 `#3b82f6 → #1d4ed8`，白色 ♫ 17px，外加 `0 4px 10px rgba(37, 99, 235, 0.28)` 蓝色投影。它是全界面唯一的渐变与唯一的彩色阴影，也是可替换的装饰：不要围绕它建立 Logo 系统、不要让其他元素复用这套渐变。
+
+### Inputs / Fields
+
+- **Style:** 高 27px（模态内 30px），5px 圆角，纸白底，强分隔线描边，12px 文字，3×7 内边距。
+- **Focus:** 描边转工坊蓝，并加 2px 半透明蓝色焦点环；不使用浏览器默认 outline。
+- **Number / Range / Checkbox:** 数字右对齐并使用等宽数字；滑杆与复选框用 `accent-color: var(--blue)`。
+- **Color:** 34×27 色块，2px 内边距，与输入框同高，点击打开系统取色器。
+- **Disabled:** 统一 0.45 透明度，光标 `not-allowed`，不改变结构。
+
+### Segmented Control
+
+一段式选择器（填充顺序、对齐方式、行列模式）：外层 1px 描边 + 5px 圆角，内部按钮等分、白底、11px 次要墨；选中项浅蓝底 + 深工坊蓝 + 600 字重。分段之间只有 1px 结构线，不用间隙。
+
+### Tabs
+
+- **Page tab:** 对象级标签，12px，5×12 内边距，6px 圆角；激活为浅蓝底 + 浅蓝描边 + 深蓝 600；未激活透明底、次级墨色。
+- **Sidebar tab:** 视图级标签，13px，等分宽度，激活为工坊蓝 2px 下划线 + 深蓝文字 + `#f8fbff` 底。
+- **Behavior:** 页标签位于画布工具条内，横向滚动（细滚动条）；新增/删除按钮固定在页签组右侧，不进入滚动区。
+
+### Canvas Toolbar
+
+画布左上角的浮动 chrome：`top/left: 12px`，纸白底、1px 结构线、8px 圆角、5×7 内边距、6px 间距，**无阴影**。它只包住内容宽度（`max-width: calc(100% - 24px)`），不横贯整行；页签组与插入组之间用 1px 竖线分隔。
+
+- **Page group:** `第 N 页` 标签 + 新增/删除页图标按钮；页签区最大 420px，超出横向滚动。
+- **Insert group:** `添加文字`、`添加图片` 两个小号默认按钮，作用于当前页。
+- **Narrow behavior:** 工具条允许 `flex-wrap`；窄画布下插入组换到第二行，页签区继续独立滚动。≤1180px 时间距收窄到 4px、内边距 4×6。
+- **Layer:** 在 `#leafer-view` 与 `#overlay` 之上（z-index 6），行内文字编辑器之下（z-index 8）；只存在于编辑界面，不进入导出。
+
+### Rows / Cards
+
+- **Category row:** 纸白底、7px 圆角、1px 结构线、9px 内边距；左侧 3px 竖条编码状态——绿色=已放置，灰色=未放置。悬停只改描边与底色，不位移。
+- **Layer row:** 8px 内边距；选中为工坊蓝描边 + `#eff6ff` 底 + 1px 蓝色内描边；22px 方形图标底（5px 圆角，浅灰）。
+- **Table card:** 6px 圆角、1px 结构线、7px 内边距，内部标签列 58px；一张卡片对应一个表格，颜色随所属表格序号。
+- **Pills / badges:** 全圆角，10px 文字，2×7 内边距：已放置=绿软底 + `#047857` 字、未放置=`#f1f5f9` 底 + `#64748b` 字、表格计数=蓝软底 + 深蓝字；`badge-warn` 为 9px 红软底，紧贴表格标题。
+- **Selection label:** 右侧属性检查栏标题右侧的蓝色胶囊，10px，最大宽度 170px，超长省略。
+
+### Modal
+
+560px 宽（`min(560px, 100%)`），10px 圆角，纸白底，0.38 墨蓝遮罩，进入动画 0.14s `ease-out`（位移 8px + 轻微缩放）。头部 14×16 内边距、14px 粗标题；主体 16px 内边距、1.7 行高；底部右对齐按钮，12×16 内边距、浅纸底与 1px 上边线。导入结果、错误清单、新页选项都拥有同一外壳。
+
+导入错误清单是模态内的专属块：6px 圆角、`#fff7f7` 底、`#fecaca` 1px 边、`#991b1b` 12px 文字、26px 左内边距、最大高 260px 并滚动。它只用于"文件解析失败/重名"这类可逐条列出的错误。
+
+### Toast
+
+底部居中，距底 28px；深墨底（90% 不透明）+ 白字 12px，7px 圆角，`0 6px 20px` 阴影，0.16s 淡入上移 5px。成功为 `rgba(4, 120, 87, 0.95)`、错误为 `rgba(185, 28, 28, 0.95)`；最大宽度 70vw；不接收指针事件。
+
+### Empty State
+
+画布中央的虚线提示贴：12px 圆角、1px 虚线 (`#c3ccd8`)、70% 纸白 + 2px 背景模糊，34px ♫ 图标 (`#94a3b8`)，13px 文字 (`#7b8798`)，两行说明。它只在没有页面内容时出现，属于画布而不是侧栏。
+
+### Canvas Affordances (edit-only)
+
+- **元素边界:** 未选中 1px 虚线 `#94a3b8`；选中 2px 工坊蓝实线。
+- **页边距参考线:** 工坊蓝 48% 透明、5/5 虚线；四边中点各一枚 4px 白底蓝描边圆手柄。
+- **溢出:** 页面外圈 8/5 红色虚线 + 右上角红色胶囊（`⚠ N 个元素超出页面`）；表格内溢出的单元格填红软底。
+- **表格列线:** 1px `#cbd5e1`，只在编辑态绘制。
+- **选择框:** 1.5px 工坊蓝，8 个白色方块手柄（1.5px 蓝描边），随缩放保持屏幕尺寸。
+- **页面尺寸手柄:** 页面右下角外侧 10px 处的 12px 白底蓝描边方块，拖动改页面尺寸；与页边距圆手柄区分开（方形=纸张，圆形=边距）。
+- 以上任何一项都只在编辑态出现，导出 PNG 时不渲染。
+
+### Property Inspector (signature)
+
+这是整套界面的签名组件，位于右侧全高检查栏：固定两列网格（标签 72px / 控件 1fr），分组标题 11px 次级墨 + 0.03em 字距，组间用 1px 虚线分隔，组内行距 7px。它像印前检查表——标签左对齐、控件右对齐、数值等宽，用户可以在不移动视线的情况下纵向扫完一页的所有参数。标题固定在顶部，只有内容区滚动。
+
+## Do's and Don'ts
+
+### Do:
+
+- **Do** 用 1px 边框与底色差表达层级，再考虑阴影；静止面板保持无阴影。
+- **Do** 把工坊蓝限制在可操作 / 已选中 / 有焦点三种状态，并让它占屏不超过约 10%。
+- **Do** 使用 13px 正文、12px 控件、11px 标签的尺度；数字用 `tabular-nums` 并右对齐。
+- **Do** 保持控件 27px 高、同级间距 6–8px，让属性面板可以一屏放下更多参数。
+- **Do** 让编辑辅助（虚线框、手柄、参考线、红色溢出）严格留在编辑态，导出前检查它们没有进入画布内容。
+- **Do** 用页面标签表示"对象"、侧栏标签表示"视图"，两种形态各司其职。
+- **Do** 把导入放在左栏分类视图，把页签与插入动作放在画布工具条，把属性放在右栏；三区各司其职。
+- **Do** 保证功能文字对比度 ≥4.5:1。空状态提示当前的 `#7b8798` 在纸白上只有约 3.5:1，属于待修债务，不要复制到新界面。
+
+### Don't:
+
+- **Don't** 引入第二个强调色；导出等"重要操作"复用同一支工坊蓝。
+- **Don't** 给静止面板、列表行或卡片加阴影（选中用蓝描边或内描边）。
+- **Don't** 使用渐变（品牌标记 ♫ 是唯一例外，且它是可替换的装饰）；不要玻璃拟态、光晕或彩色阴影。
+- **Don't** 把控件圆角做到 8px 以上，或把操作按钮做成全圆角药丸形。
+- **Don't** 使用大标题、插画、营销页式动效或装饰性图标；界面动效只允许 0.12–0.16s 的淡入与位移。
+- **Don't** 把绿 / 红 / 琥珀用在非状态语境，也别用它们给普通按钮上色。
+- **Don't** 把页签、插入或导入摊回一整行；画布工具条是紧凑 chrome，不是新的全局命令条。
+- **Don't** 为窄屏重排布局；这是 900px 以上的桌面工作台。

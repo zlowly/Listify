@@ -14,50 +14,57 @@
         <span>歌单排版</span>
       </div>
       <div class="topbar-actions">
-        <button id="btn-import" class="btn btn-primary">导入歌单</button>
-        <span class="divider"></span>
-        <button id="btn-add-text" class="btn">添加文字</button>
-        <button id="btn-add-image" class="btn">添加图片</button>
-        <span class="divider"></span>
         <button id="btn-save" class="btn">保存项目</button>
         <button id="btn-load" class="btn">加载项目</button>
-        <button id="btn-export" class="btn btn-accent">导出 PNG</button>
+        <span class="divider"></span>
+        <button id="btn-export" class="btn btn-primary">导出 PNG</button>
       </div>
     </header>
 
-    <div class="page-strip">
-      <div id="page-tabs" class="page-tabs"></div>
-      <div class="page-actions">
-        <button id="btn-add-page" class="icon-btn" title="新增页面">＋</button>
-        <button id="btn-delete-page" class="icon-btn" title="删除当前页">🗑</button>
-      </div>
-    </div>
-
     <div class="main">
       <aside class="sidebar">
-        <div class="sidebar-tabs" role="tablist">
-          <button class="sidebar-tab active" data-panel="categories" role="tab">分类</button>
-          <button class="sidebar-tab" data-panel="layers" role="tab">图层</button>
+        <div class="sidebar-tabs" role="tablist" aria-label="左侧面板">
+          <button class="sidebar-tab active" data-panel="categories" role="tab"
+            aria-selected="true" aria-controls="category-panel">分类</button>
+          <button class="sidebar-tab" data-panel="layers" role="tab"
+            aria-selected="false" aria-controls="layer-panel">图层</button>
         </div>
-        <div id="category-panel" class="sidebar-panel"></div>
-        <div id="layer-panel" class="sidebar-panel" hidden></div>
-        <div class="property-section">
-          <div class="property-heading">
-            <span>属性</span>
-            <span id="selection-label" class="selection-label">页面</span>
-          </div>
-          <div id="property-panel" class="property-panel"></div>
+        <div id="category-toolbar" class="panel-toolbar">
+          <button id="btn-import" class="btn btn-primary btn-sm">导入歌单</button>
+          <span class="hint">或拖入 .txt</span>
         </div>
+        <div id="category-panel" class="sidebar-panel" role="tabpanel"></div>
+        <div id="layer-panel" class="sidebar-panel" role="tabpanel" hidden></div>
       </aside>
 
       <main id="canvas-pane" class="canvas-pane">
+        <div id="canvas-toolbar" class="canvas-toolbar" role="group" aria-label="页面与插入工具">
+          <div class="canvas-toolbar-group canvas-toolbar-pages" role="group" aria-label="页面">
+            <div id="page-tabs" class="page-tabs" role="tablist" aria-label="页面列表"></div>
+            <button id="btn-add-page" class="icon-btn" title="新增页面" aria-label="新增页面">＋</button>
+            <button id="btn-delete-page" class="icon-btn" title="删除当前页" aria-label="删除当前页">🗑</button>
+          </div>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <div class="canvas-toolbar-group" role="group" aria-label="插入内容">
+            <button id="btn-add-text" class="btn btn-sm">添加文字</button>
+            <button id="btn-add-image" class="btn btn-sm">添加图片</button>
+          </div>
+        </div>
         <div id="leafer-view" class="leafer-view"></div>
         <canvas id="overlay" class="overlay"></canvas>
         <div id="empty-hint" class="empty-hint">
           <div class="empty-icon">♫</div>
-          <div>导入歌单后，把左侧分类拖到页面上</div>
+          <div>从左侧导入歌单，再把分类拖到页面上</div>
         </div>
       </main>
+
+      <aside class="inspector" aria-label="属性检查栏">
+        <div class="property-heading">
+          <span>属性</span>
+          <span id="selection-label" class="selection-label">页面</span>
+        </div>
+        <div id="property-panel" class="property-panel"></div>
+      </aside>
     </div>
   </div>
 

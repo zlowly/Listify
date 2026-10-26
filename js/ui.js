@@ -89,6 +89,7 @@
     if (ui.initialized) return;
     ui.initialized = true;
     ui.els.pageTabs = document.getElementById('page-tabs');
+    ui.els.categoryToolbar = document.getElementById('category-toolbar');
     ui.els.categoryPanel = document.getElementById('category-panel');
     ui.els.layerPanel = document.getElementById('layer-panel');
     ui.els.propertyPanel = document.getElementById('property-panel');
@@ -185,8 +186,11 @@
   ui.setPanel = function (panel) {
     ui.activePanel = panel;
     document.querySelectorAll('.sidebar-tab').forEach(function (tab) {
-      tab.classList.toggle('active', tab.getAttribute('data-panel') === panel);
+      const active = tab.getAttribute('data-panel') === panel;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+    ui.els.categoryToolbar.hidden = panel !== 'categories';
     ui.els.categoryPanel.hidden = panel !== 'categories';
     ui.els.layerPanel.hidden = panel !== 'layers';
   };
@@ -207,8 +211,9 @@
     const project = L.app.state.project;
     const current = L.app.state.currentPageId;
     ui.els.pageTabs.innerHTML = project.pages.map(function (page, index) {
-      return '<button class="page-tab' + (page.id === current ? ' active' : '') +
-        '" data-page-id="' + esc(page.id) + '">第 ' + (index + 1) + ' 页</button>';
+      const active = page.id === current;
+      return '<button class="page-tab' + (active ? ' active' : '') + '" role="tab" aria-selected="' +
+        (active ? 'true' : 'false') + '" data-page-id="' + esc(page.id) + '">第 ' + (index + 1) + ' 页</button>';
     }).join('');
     ui.els.pageTabs.querySelectorAll('.page-tab').forEach(function (button) {
       button.addEventListener('click', function () {
@@ -221,7 +226,7 @@
     const project = L.app.state.project;
     const categories = project.playlist.categories;
     if (!categories.length) {
-      ui.els.categoryPanel.innerHTML = '<div class="panel-empty">还没有歌单。<br>点击顶部“导入歌单”，或把 .txt 文件拖到这里。</div>';
+      ui.els.categoryPanel.innerHTML = '<div class="panel-empty">还没有歌单。<br>点击上方“导入歌单”，或把 .txt 文件拖到这里。</div>';
       return;
     }
     ui.els.categoryPanel.innerHTML = categories.map(function (category) {

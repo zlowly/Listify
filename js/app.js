@@ -125,19 +125,22 @@
     const rect = pane.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
+    const toolbar = document.getElementById('canvas-toolbar');
+    const chromeTop = toolbar ? Math.round(toolbar.getBoundingClientRect().height) + 24 : 0;
+    const availableHeight = Math.max(1, height - chromeTop);
     const pageW = Math.max(1, state.project.pageSize.width);
     const pageH = Math.max(1, state.project.pageSize.height);
-    const padding = Math.min(72, Math.max(24, Math.min(width, height) * 0.08));
+    const padding = Math.min(72, Math.max(24, Math.min(width, availableHeight) * 0.08));
     const scale = Math.max(0.05, Math.min(1.6, Math.min(
       (width - padding * 2) / pageW,
-      (height - padding * 2) / pageH
+      (availableHeight - padding * 2) / pageH
     )));
     viewport.scale = scale;
     viewport.width = width;
     viewport.height = height;
     viewport.dpr = window.devicePixelRatio || 1;
     viewport.offsetX = Math.round((width - pageW * scale) / 2);
-    viewport.offsetY = Math.round((height - pageH * scale) / 2);
+    viewport.offsetY = Math.round(chromeTop + (availableHeight - pageH * scale) / 2);
   }
 
   function applyViewTransform() {
