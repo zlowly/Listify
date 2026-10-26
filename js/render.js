@@ -176,7 +176,7 @@
             ctx.fillRect(
               element.x + computed.tableX + cell.x,
               tableTop + cell.y,
-              cell.width,
+              cell.contentWidth,
               cell.height
             );
           }
@@ -193,12 +193,12 @@
         const cellX = element.x + computed.tableX + cell.x;
         const cellY = tableTop + cell.y;
         const innerX = cellX + computed.cellPadX;
-        const innerWidth = Math.max(0, cell.width - computed.cellPadX * 2);
+        const innerWidth = Math.max(0, cell.contentWidth - computed.cellPadX * 2);
         const baseline = cellY + cell.height / 2;
 
         ctx.save();
         ctx.beginPath();
-        ctx.rect(cellX, cellY, cell.width, cell.height);
+        ctx.rect(cellX, cellY, cell.contentWidth, cell.height);
         ctx.clip();
         if (table.align === 'justify') {
           drawJustifiedText(ctx, cell.text, innerX, baseline, innerWidth);

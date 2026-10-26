@@ -118,6 +118,37 @@
     return widths;
   }
 
+  function autoGapWidths(rawWidths, totalWidth) {
+    const count = rawWidths.length;
+    const total = Math.max(1, totalWidth);
+    if (!count) return { widths: [], contentWidths: [], gap: 0, fallback: false };
+    if (count === 1) {
+      return { widths: [total], contentWidths: [total], gap: 0, fallback: false };
+    }
+
+    const sum = rawWidths.reduce(function (a, b) { return a + b; }, 0);
+    const gap = (total - sum) / (count - 1);
+
+    if (gap < 0) {
+      const compressed = fitWidths(rawWidths, total);
+      return { widths: compressed, contentWidths: compressed.slice(), gap: 0, fallback: true };
+    }
+
+    const widths = [];
+    let used = 0;
+    for (let col = 0; col < count - 1; col += 1) {
+      widths.push(rawWidths[col] + gap);
+      used += widths[col];
+    }
+    widths.push(total - used);
+    return {
+      widths: widths,
+      contentWidths: rawWidths.slice(),
+      gap: gap,
+      fallback: false
+    };
+  }
+
   function assignTableSongs(sorted, table, cursor, tableWidth, songStyle) {
     const columns = table.columns;
     const isDynamic = table.rows === 0;
@@ -168,7 +199,20 @@
       table.widths.length === columns &&
       table.widths.every(function (w) { return Number(w) > 0; });
 
-    const colWidths = fitWidths(useManual ? table.widths.map(Number) : rawWidths, tableWidth);
+    const auto = useManual
+      ? null
+      : (take === 0
+        ? { widths: fitWidths(rawWidths, tableWidth), contentWidths: null, gap: 0, fallback: false }
+        : autoGapWidths(rawWidths, tableWidth));
+
+    const colWidths = useManual
+      ? fitWidths(table.widths.map(Number), tableWidth)
+      : auto.widths;
+    const contentWidths = useManual
+      ? colWidths
+      : (auto.contentWidths || auto.widths);
+    const gap = useManual ? 0 : auto.gap;
+    const fallback = useManual ? false : !!auto.fallback;
     const rowHeight = songStyle.fontSize * songStyle.lineHeight + CELL_PAD_Y * 2;
 
     cells.forEach(function (cell) {
@@ -177,7 +221,8 @@
       cell.x = colWidths.slice(0, cell.col).reduce(function (a, b) { return a + b; }, 0);
       cell.height = rowHeight;
       cell.y = cell.row * rowHeight;
-      cell.innerWidth = Math.max(0, cell.width - CELL_PAD_X * 2);
+      cell.contentWidth = contentWidths[cell.col];
+      cell.innerWidth = Math.max(0, cell.contentWidth - CELL_PAD_X * 2);
       cell.textWidth = measureText(cell.text, songStyle);
       cell.overflow = cell.textWidth + SAFETY > cell.innerWidth;
       const charCount = Array.from(cell.text).length;
@@ -194,7 +239,10 @@
       align: table.align,
       widthMode: useManual ? 'manual' : 'auto',
       widths: colWidths,
+      contentWidths: contentWidths,
       rawWidths: rawWidths,
+      gap: gap,
+      fallback: fallback,
       cells: cells,
       height: rowCount * rowHeight,
       rowHeight: rowHeight,
@@ -365,6 +413,64 @@
       JSON.stringify(['Hi', 'Hello', '真的爱你'])
     );
 
+    const pure = autoGapWidths([100, 150, 200], 600);
+    check('autoGapWidths gap = 75', pure.gap, 75);
+    check(
+      'autoGapWidths widths [175, 225, 200]',
+      JSON.stringify(pure.widths),
+      JSON.stringify([175, 225, 200])
+    );
+    check(
+      'autoGapWidths contentWidths = raw',
+      JSON.stringify(pure.contentWidths),
+      JSON.stringify([100, 150, 200])
+    );
+    check('autoGapWidths last column absorbs float', Math.abs(pure.widths[2] - 200) < 0.01, true);
+    check('autoGapWidths not fallback', pure.fallback, false);
+
+    const fallbackPure = autoGapWidths([100, 150, 200], 300);
+    check('autoGapWidths fallback flag', fallbackPure.fallback, true);
+    check('autoGapWidths fallback gap = 0', fallbackPure.gap, 0);
+    check(
+      'autoGapWidths fallback matches fitWidths',
+      JSON.stringify(fallbackPure.widths),
+      JSON.stringify(fitWidths([100, 150, 200], 300))
+    );
+    check(
+      'autoGapWidths fallback contentWidths = widths',
+      JSON.stringify(fallbackPure.contentWidths),
+      JSON.stringify(fallbackPure.widths)
+    );
+
+    const singlePure = autoGapWidths([100], 600);
+    check('autoGapWidths single width = total', Math.abs(singlePure.widths[0] - 600) < 0.01, true);
+    check(
+      'autoGapWidths single contentWidth = total',
+      Math.abs(singlePure.contentWidths[0] - 600) < 0.01,
+      true
+    );
+    check('autoGapWidths single gap = 0', singlePure.gap, 0);
+
+    const exactPure = autoGapWidths([100, 200], 300);
+    check('autoGapWidths exact gap = 0', exactPure.gap, 0);
+    check(
+      'autoGapWidths exact widths',
+      JSON.stringify(exactPure.widths),
+      JSON.stringify([100, 200])
+    );
+
+    function pageProject() {
+      return {
+        pageSize: { width: 800, height: 1200 },
+        margins: { top: 0, right: 0, bottom: 0, left: 0 }
+      };
+    }
+
+    function contentDelta(table, col) {
+      const cell = table.cells.find(function (item) { return item && item.col === col; });
+      return cell ? cell.width - cell.contentWidth : 0;
+    }
+
     const category = { name: '测试', songs: [] };
     for (let i = 1; i <= 21; i += 1) category.songs.push('歌曲' + i);
     const element = model.createCategoryElement('测试', 0, 0, {
@@ -395,6 +501,34 @@
 
     const widthsSum = layout.tables[0].widths.reduce(function (a, b) { return a + b; }, 0);
     check('auto column widths sum to table width', Math.abs(widthsSum - layout.tableWidth) < 0.01, true);
+
+    const gapTable = layout.tables[0];
+    if (!gapTable.fallback) {
+      const firstGaps = [];
+      for (let col = 0; col < gapTable.columns - 1; col += 1) {
+        firstGaps.push(contentDelta(gapTable, col));
+      }
+      check('auto gap is positive', gapTable.gap > 0, true);
+      check(
+        'first n-1 content gaps are equal',
+        firstGaps.every(function (delta) { return Math.abs(delta - gapTable.gap) < 0.01; }),
+        true
+      );
+      check(
+        'last column has no extra width',
+        Math.abs(contentDelta(gapTable, gapTable.columns - 1)) < 0.01,
+        true
+      );
+    }
+    const gapCell = gapTable.cells.find(function (cell) { return cell; });
+    check(
+      'cell innerWidth uses contentWidth',
+      gapCell
+        ? Math.abs(gapCell.innerWidth - Math.max(0, gapCell.contentWidth - CELL_PAD_X * 2)) < 0.01
+        : false,
+      true
+    );
+
     check('table width fills block width', layout.tableWidth, element.width);
     const lastTable = layout.tables[layout.tables.length - 1];
     check(
@@ -411,8 +545,38 @@
     const manualLayout = layoutCategory({ name: '手动', songs: ['短', '很长很长的歌名'] }, manual);
     const manualSum = manualLayout.tables[0].widths.reduce(function (a, b) { return a + b; }, 0);
     check('manual widths fill table width', Math.abs(manualSum - manualLayout.tableWidth) < 0.01, true);
+    check('manual gap = 0', manualLayout.tables[0].gap, 0);
+    check(
+      'manual contentWidths = widths',
+      JSON.stringify(manualLayout.tables[0].contentWidths),
+      JSON.stringify(manualLayout.tables[0].widths)
+    );
     scaleManualWidths(manual, 1.5);
     check('manual widths scale', manual.tables[0].widths[0] > 100, true);
+
+    const singleElement = model.createCategoryElement('单列', 0, 0, pageProject(), 600);
+    singleElement.tables = [model.createTable({ columns: 1, rows: 0 })];
+    const singleLayout = layoutCategory({ name: '单列', songs: ['短', '很长很长的歌名'] }, singleElement);
+    check(
+      'single column fills table width',
+      Math.abs(singleLayout.tables[0].widths[0] - singleLayout.tableWidth) < 0.01,
+      true
+    );
+    check('single column gap = 0', singleLayout.tables[0].gap, 0);
+    check(
+      'single column contentWidth = table width',
+      Math.abs(singleLayout.tables[0].cells[0].contentWidth - singleLayout.tableWidth) < 0.01,
+      true
+    );
+
+    const emptyElement = model.createCategoryElement('空表', 0, 0, pageProject(), 600);
+    emptyElement.tables = [model.createTable({ columns: 3, rows: 2 })];
+    const emptyLayout = layoutCategory({ name: '空表', songs: [] }, emptyElement);
+    const emptySum = emptyLayout.tables[0].widths.reduce(function (a, b) { return a + b; }, 0);
+    check('empty table gap = 0', emptyLayout.tables[0].gap, 0);
+    check('empty table widths sum to table width', Math.abs(emptySum - emptyLayout.tableWidth) < 0.01, true);
+    check('empty table has no cells', emptyLayout.tables[0].cells.every(function (cell) { return !cell; }), true);
+
 
     const justifyElement = model.createCategoryElement('对齐', 0, 0, {
       pageSize: { width: 800, height: 1200 },
@@ -424,6 +588,33 @@
       return cell && Array.from(cell.text).length === 1;
     });
     check('single char justify spacing = 0', oneChar ? oneChar.justifySpacing : -1, 0);
+
+    const alignSongs = ['1', '22', '333', '4444', '55555', '666666'];
+    function alignFixture(align) {
+      const element = model.createCategoryElement('对齐', 0, 0, pageProject(), 600);
+      element.tables = [model.createTable({ columns: 3, rows: 0, align: align })];
+      return layoutCategory({ name: '对齐', songs: alignSongs }, element).tables[0];
+    }
+    const leftAligned = alignFixture('left');
+    const centerAligned = alignFixture('center');
+    const rightAligned = alignFixture('right');
+    check(
+      'center alignment keeps rendered widths',
+      JSON.stringify(centerAligned.widths),
+      JSON.stringify(leftAligned.widths)
+    );
+    check(
+      'right alignment keeps content widths',
+      JSON.stringify(rightAligned.contentWidths),
+      JSON.stringify(leftAligned.contentWidths)
+    );
+    const alignGaps = [0, 1].map(function (col) { return contentDelta(centerAligned, col); });
+    check(
+      'center alignment keeps equal gaps',
+      alignGaps.every(function (delta) { return Math.abs(delta - centerAligned.gap) < 0.01; }) &&
+        Math.abs(contentDelta(centerAligned, 2)) < 0.01,
+      true
+    );
 
     const pass = checks.every(function (item) { return item.pass; });
     if (console && console.table) console.table(checks);
@@ -440,6 +631,7 @@
     wrapText: wrapText,
     virtualWidth: virtualWidth,
     sortSongs: sortSongs,
+    autoGapWidths: autoGapWidths,
     normalizeTables: normalizeTables,
     layoutCategory: layoutCategory,
     layoutText: layoutText,
