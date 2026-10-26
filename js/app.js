@@ -32,8 +32,28 @@
     offsetY: 0,
     width: 0,
     height: 0,
-    dpr: 1
+    dpr: 1,
+    mode: 'fit',
+    zoom: 1,
+    fitScale: 1,
+    padding: 48,
+    originX: 0,
+    originY: 0,
+    stageWidth: 0,
+    stageHeight: 0,
+    scrollX: 0,
+    scrollY: 0
   };
+  const ZOOM_MIN = 0.1;
+  const ZOOM_MAX = 4;
+  const ZOOM_STEP = 10;
+
+  let scrollEl = null;
+  let stageEl = null;
+  let zoomInput = null;
+  let zoomOutBtn = null;
+  let zoomInBtn = null;
+  let scrollRaf = 0;
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -91,6 +111,11 @@
     viewEl = document.getElementById('leafer-view');
     overlay = document.getElementById('overlay');
     overlayCtx = overlay.getContext('2d');
+    scrollEl = document.getElementById('canvas-scroll');
+    stageEl = document.getElementById('canvas-stage');
+    zoomInput = document.getElementById('zoom-input');
+    zoomOutBtn = document.getElementById('btn-zoom-out');
+    zoomInBtn = document.getElementById('btn-zoom-in');
 
     try {
       if (window.LeaferUI && window.LeaferUI.Leafer && window.LeaferUI.Canvas) {
@@ -120,37 +145,97 @@
     surfaceIsLeafer = false;
   }
 
-  function computeViewport() {
-    if (!pane) return;
-    const rect = pane.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    const height = Math.max(1, rect.height);
+  function toolbarChromeTop() {
     const toolbar = document.getElementById('canvas-toolbar');
-    const chromeTop = toolbar ? Math.round(toolbar.getBoundingClientRect().height) + 24 : 0;
-    const availableHeight = Math.max(1, height - chromeTop);
+    return toolbar ? Math.round(toolbar.getBoundingClientRect().height) + 24 : 0;
+  }
+
+  function measureCanvas() {
+    if (!scrollEl) return false;
+    viewport.width = Math.max(1, scrollEl.clientWidth || 1);
+    viewport.height = Math.max(1, scrollEl.clientHeight || 1);
+    viewport.dpr = window.devicePixelRatio || 1;
+    viewport.padding = Math.min(72, Math.max(24, Math.min(viewport.width, viewport.height) * 0.08));
+    const chromeTop = toolbarChromeTop();
+    const availableHeight = Math.max(1, viewport.height - chromeTop);
     const pageW = Math.max(1, state.project.pageSize.width);
     const pageH = Math.max(1, state.project.pageSize.height);
-    const padding = Math.min(72, Math.max(24, Math.min(width, availableHeight) * 0.08));
-    const scale = Math.max(0.05, Math.min(1.6, Math.min(
-      (width - padding * 2) / pageW,
-      (availableHeight - padding * 2) / pageH
+    viewport.fitScale = Math.max(0.05, Math.min(1.6, Math.min(
+      (viewport.width - viewport.padding * 2 - 1) / pageW,
+      (availableHeight - viewport.padding * 2 - 1) / pageH
     )));
-    viewport.scale = scale;
-    viewport.width = width;
-    viewport.height = height;
-    viewport.dpr = window.devicePixelRatio || 1;
-    viewport.offsetX = Math.round((width - pageW * scale) / 2);
-    viewport.offsetY = Math.round(chromeTop + (availableHeight - pageH * scale) / 2);
+    return true;
+  }
+
+  function effectiveScale() {
+    return viewport.mode === 'fit' ? viewport.fitScale : viewport.zoom;
+  }
+
+  function syncGeometry() {
+    if (!scrollEl || !stageEl) return;
+    const pageW = Math.max(1, state.project.pageSize.width);
+    const pageH = Math.max(1, state.project.pageSize.height);
+    let previousSize = '';
+    for (let pass = 0; pass < 2; pass++) {
+      measureCanvas();
+      const chromeTop = toolbarChromeTop();
+      const scale = effectiveScale();
+      const contentW = pageW * scale + viewport.padding * 2;
+      const contentH = pageH * scale + chromeTop + viewport.padding * 2;
+      const stageW = contentW <= viewport.width + 0.01 ? viewport.width : Math.ceil(contentW);
+      const stageH = contentH <= viewport.height + 0.01 ? viewport.height : Math.ceil(contentH);
+      stageEl.style.width = stageW + 'px';
+      stageEl.style.height = stageH + 'px';
+      viewport.scale = scale;
+      viewport.stageWidth = stageW;
+      viewport.stageHeight = stageH;
+      viewport.originX = stageW > viewport.width + 0.5
+        ? viewport.padding
+        : (viewport.width - pageW * scale) / 2;
+      viewport.originY = stageH > viewport.height + 0.5
+        ? chromeTop + viewport.padding
+        : chromeTop + (viewport.height - chromeTop - pageH * scale) / 2;
+      // Scrollbars may appear or disappear after the stage resize; measure once
+      // more so the origin and offsets use the real visible area.
+      const size = scrollEl.clientWidth + 'x' + scrollEl.clientHeight;
+      if (size === previousSize) break;
+      previousSize = size;
+    }
+    viewport.scrollX = clamp(scrollEl.scrollLeft, 0, Math.max(0, viewport.stageWidth - viewport.width));
+    viewport.scrollY = clamp(scrollEl.scrollTop, 0, Math.max(0, viewport.stageHeight - viewport.height));
+    if (scrollEl.scrollLeft !== viewport.scrollX) scrollEl.scrollLeft = viewport.scrollX;
+    if (scrollEl.scrollTop !== viewport.scrollY) scrollEl.scrollTop = viewport.scrollY;
+    viewport.offsetX = viewport.originX - viewport.scrollX;
+    viewport.offsetY = viewport.originY - viewport.scrollY;
+    updateZoomUI();
+  }
+
+  let reflowPending = false;
+  function scheduleGeometryReflow() {
+    if (reflowPending) return;
+    reflowPending = true;
+    requestAnimationFrame(function () {
+      reflowPending = false;
+      const before = viewport.width + 'x' + viewport.height + ':' + viewport.scale + ':' +
+        viewport.stageWidth + 'x' + viewport.stageHeight;
+      syncGeometry();
+      const after = viewport.width + 'x' + viewport.height + ':' + viewport.scale + ':' +
+        viewport.stageWidth + 'x' + viewport.stageHeight;
+      if (before !== after) {
+        applyViewTransform();
+        drawOverlay();
+      }
+    });
   }
 
   function applyViewTransform() {
     if (!viewEl) return;
-    const pageW = state.project.pageSize.width;
-    const pageH = state.project.pageSize.height;
+    const pageW = Math.max(1, state.project.pageSize.width);
+    const pageH = Math.max(1, state.project.pageSize.height);
     viewEl.style.width = pageW + 'px';
     viewEl.style.height = pageH + 'px';
     viewEl.style.transformOrigin = '0 0';
-    viewEl.style.transform = 'translate(' + viewport.offsetX + 'px,' + viewport.offsetY + 'px) scale(' + viewport.scale + ')';
+    viewEl.style.transform = 'translate(' + viewport.originX + 'px,' + viewport.originY + 'px) scale(' + viewport.scale + ')';
 
     if (overlay) {
       const pixelWidth = Math.max(1, Math.round(viewport.width * viewport.dpr));
@@ -189,7 +274,7 @@
 
   function redraw() {
     if (!surface) return;
-    computeViewport();
+    syncGeometry();
     applyViewTransform();
     syncSurface();
     const page = currentPage();
@@ -208,12 +293,141 @@
     });
     if (surfaceIsLeafer && typeof surface.paint === 'function') surface.paint();
     drawOverlay();
+    scheduleGeometryReflow();
   }
 
   function fit() {
-    computeViewport();
+    viewport.mode = 'fit';
+    if (scrollEl) {
+      scrollEl.scrollLeft = 0;
+      scrollEl.scrollTop = 0;
+    }
+    syncGeometry();
     applyViewTransform();
     drawOverlay();
+    scheduleGeometryReflow();
+  }
+
+  function updateZoomUI() {
+    if (!zoomInput) return;
+    const percent = Math.round(viewport.scale * 100);
+    if (document.activeElement !== zoomInput) {
+      zoomInput.value = percent + '%';
+    }
+    if (zoomOutBtn) {
+      const disabled = percent <= Math.round(ZOOM_MIN * 100);
+      zoomOutBtn.disabled = disabled;
+      zoomOutBtn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    }
+    if (zoomInBtn) {
+      const disabled = percent >= Math.round(ZOOM_MAX * 100);
+      zoomInBtn.disabled = disabled;
+      zoomInBtn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    }
+  }
+
+  function centerAnchor() {
+    return { x: viewport.width / 2, y: viewport.height / 2 };
+  }
+
+  function zoomAround(nextScale, anchor) {
+    if (!scrollEl || !stageEl) return;
+    const previousScale = viewport.scale;
+    const target = clamp(nextScale, ZOOM_MIN, ZOOM_MAX);
+    const point = anchor || centerAnchor();
+    const pageX = (point.x - viewport.offsetX) / previousScale;
+    const pageY = (point.y - viewport.offsetY) / previousScale;
+    viewport.mode = 'manual';
+    viewport.zoom = target;
+    syncGeometry();
+    const maxX = Math.max(0, viewport.stageWidth - viewport.width);
+    const maxY = Math.max(0, viewport.stageHeight - viewport.height);
+    scrollEl.scrollLeft = clamp(viewport.originX + pageX * viewport.scale - point.x, 0, maxX);
+    scrollEl.scrollTop = clamp(viewport.originY + pageY * viewport.scale - point.y, 0, maxY);
+    syncGeometry();
+    applyViewTransform();
+    drawOverlay();
+    scheduleGeometryReflow();
+  }
+
+  function setZoomPercent(percent) {
+    const value = Number(percent);
+    if (!Number.isFinite(value)) return;
+    zoomAround(clamp(value, ZOOM_MIN * 100, ZOOM_MAX * 100) / 100, centerAnchor());
+  }
+
+  function stepZoom(delta) {
+    const current = Math.round(viewport.scale * 100);
+    const base = viewport.mode === 'fit' ? current : Math.round(viewport.zoom * 100);
+    let next = base + delta;
+    if (base < ZOOM_MIN * 100 && delta > 0) next = ZOOM_MIN * 100;
+    setZoomPercent(clamp(next, ZOOM_MIN * 100, ZOOM_MAX * 100));
+  }
+
+  function zoomIn() {
+    stepZoom(ZOOM_STEP);
+  }
+
+  function zoomOut() {
+    stepZoom(-ZOOM_STEP);
+  }
+
+  function syncScrollOffsets() {
+    if (!scrollEl) return;
+    viewport.scrollX = scrollEl.scrollLeft;
+    viewport.scrollY = scrollEl.scrollTop;
+    viewport.offsetX = viewport.originX - viewport.scrollX;
+    viewport.offsetY = viewport.originY - viewport.scrollY;
+  }
+
+  function onCanvasScroll() {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(function () {
+      scrollRaf = 0;
+      syncScrollOffsets();
+      drawOverlay();
+    });
+  }
+
+  function onCanvasWheel(event) {
+    if (!scrollEl) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      const rect = overlay.getBoundingClientRect();
+      const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
+      zoomAround(viewport.scale * factor, anchor);
+      return;
+    }
+    let dx = event.deltaX;
+    let dy = event.deltaY;
+    if (event.deltaMode === 1) {
+      dx *= 16;
+      dy *= 16;
+    } else if (event.deltaMode === 2) {
+      dx *= viewport.width;
+      dy *= viewport.height;
+    }
+    if (event.shiftKey && !dx) {
+      dx = dy;
+      dy = 0;
+    }
+    if (!dx && !dy) return;
+    if (viewport.stageWidth <= viewport.width && viewport.stageHeight <= viewport.height) return;
+    event.preventDefault();
+    scrollEl.scrollLeft += dx;
+    scrollEl.scrollTop += dy;
+  }
+
+  function handleResize() {
+    if (viewport.mode === 'fit') {
+      fit();
+      return;
+    }
+    syncGeometry();
+    applyViewTransform();
+    drawOverlay();
+    scheduleGeometryReflow();
   }
 
   function drawOverlay() {
@@ -1311,6 +1525,8 @@
     overlay.addEventListener('dblclick', onDoubleClick);
     overlay.addEventListener('dragover', onDragOver);
     overlay.addEventListener('drop', onDrop);
+    pane.addEventListener('wheel', onCanvasWheel, { passive: false });
+    if (scrollEl) scrollEl.addEventListener('scroll', onCanvasScroll);
 
     fit();
     ui.renderAll();
@@ -1331,6 +1547,17 @@
     changed: changed,
     fit: fit,
     redraw: redraw,
+    handleResize: handleResize,
+    zoomIn: zoomIn,
+    zoomOut: zoomOut,
+    zoomFit: fit,
+    setZoomPercent: setZoomPercent,
+    getZoomPercent: function () {
+      return Math.round(viewport.scale * 100);
+    },
+    isFitMode: function () {
+      return viewport.mode === 'fit';
+    },
     setPageSize: setPageSize,
     setMargins: setMargins,
     resizeElementWidth: resizeElementWidth,

@@ -49,8 +49,20 @@
             <button id="btn-add-text" class="btn btn-sm">添加文字</button>
             <button id="btn-add-image" class="btn btn-sm">添加图片</button>
           </div>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <div id="canvas-zoom-controls" class="canvas-toolbar-group canvas-zoom" role="group" aria-label="视图缩放">
+            <button id="btn-zoom-out" class="icon-btn" title="缩小（10% 为下限）" aria-label="缩小">−</button>
+            <input id="zoom-input" class="zoom-input" type="text" inputmode="numeric" value="100%"
+              aria-label="缩放比例，10% 至 400%" title="输入 10%–400% 后按回车">
+            <button id="btn-zoom-in" class="icon-btn" title="放大（400% 为上限）" aria-label="放大">＋</button>
+            <button id="btn-zoom-fit" class="btn btn-sm" title="适应窗口" aria-label="适应窗口">适应窗口</button>
+          </div>
         </div>
-        <div id="leafer-view" class="leafer-view"></div>
+        <div id="canvas-scroll" class="canvas-scroll">
+          <div id="canvas-stage" class="canvas-stage">
+            <div id="leafer-view" class="leafer-view"></div>
+          </div>
+        </div>
         <canvas id="overlay" class="overlay"></canvas>
         <div id="empty-hint" class="empty-hint">
           <div class="empty-icon">♫</div>
@@ -85,6 +97,7 @@
   <script src="js/io.js"></script>
   <script src="js/export.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/fontpicker.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

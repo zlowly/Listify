@@ -123,6 +123,50 @@
       L.app.deleteCurrentPage();
     });
 
+    const zoomInput = document.getElementById('zoom-input');
+    let zoomCancelled = false;
+    function commitZoomInput() {
+      const raw = String(zoomInput.value).replace(/[%\s]/g, '');
+      const value = Number(raw);
+      if (raw === '' || !Number.isFinite(value)) {
+        zoomInput.value = L.app.getZoomPercent() + '%';
+        return;
+      }
+      L.app.setZoomPercent(value);
+      zoomInput.value = L.app.getZoomPercent() + '%';
+    }
+    zoomInput.addEventListener('focus', function () {
+      zoomInput.select();
+    });
+    zoomInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commitZoomInput();
+        zoomInput.blur();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        zoomCancelled = true;
+        zoomInput.value = L.app.getZoomPercent() + '%';
+        zoomInput.blur();
+      }
+    });
+    zoomInput.addEventListener('blur', function () {
+      if (zoomCancelled) {
+        zoomCancelled = false;
+        return;
+      }
+      commitZoomInput();
+    });
+    document.getElementById('btn-zoom-out').addEventListener('click', function () {
+      L.app.zoomOut();
+    });
+    document.getElementById('btn-zoom-in').addEventListener('click', function () {
+      L.app.zoomIn();
+    });
+    document.getElementById('btn-zoom-fit').addEventListener('click', function () {
+      L.app.zoomFit();
+    });
+
     document.querySelectorAll('.sidebar-tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         ui.setPanel(tab.getAttribute('data-panel'));
@@ -163,8 +207,7 @@
     });
 
     window.addEventListener('resize', function () {
-      L.app.fit();
-      L.app.redraw();
+      L.app.handleResize();
     });
 
     document.addEventListener('keydown', function (event) {
@@ -480,8 +523,38 @@
     });
   }
 
+  function fontField(prefix, style) {
+    const supported = !!(L.fontPicker && L.fontPicker.isSupported && L.fontPicker.isSupported());
+    return field('字体',
+      '<div class="font-control">' +
+        textInput(prefix + '-family', style.fontFamily, '字体族') +
+        '<button id="' + prefix + '-family-pick" class="btn btn-sm font-pick-btn" type="button"' +
+          (supported ? '' : ' disabled title="当前浏览器不支持本机字体选择，请直接输入字体族"') +
+        '>选择</button>' +
+      '</div>');
+  }
+
+  function bindFontField(prefix, style) {
+    bind(prefix + '-family', 'input', function () {
+      style.fontFamily = valueOf(prefix + '-family');
+      L.app.changed({ property: false });
+    });
+    bind(prefix + '-family-pick', 'click', function () {
+      if (!L.fontPicker || !L.fontPicker.isSupported()) return;
+      L.fontPicker.open({
+        currentValue: style.fontFamily,
+        onPick: function (value) {
+          style.fontFamily = value;
+          const input = document.getElementById(prefix + '-family');
+          if (input) input.value = value;
+          L.app.changed({ property: false });
+        }
+      });
+    });
+  }
+
   function categoryStyleFields(prefix, style) {
-    return field('字体', textInput(prefix + '-family', style.fontFamily, '字体族')) +
+    return fontField(prefix, style) +
       field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
       field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
@@ -489,10 +562,7 @@
   }
 
   function bindCategoryStyle(prefix, style) {
-    bind(prefix + '-family', 'input', function () {
-      style.fontFamily = valueOf(prefix + '-family');
-      L.app.changed({ property: false });
-    });
+    bindFontField(prefix, style);
     bind(prefix + '-size', 'input', function () {
       style.fontSize = Math.max(6, Number(valueOf(prefix + '-size')) || 6);
       L.app.changed({ property: false });
@@ -634,7 +704,7 @@
   }
 
   function textStyleFields(prefix, style) {
-    return field('字体', textInput(prefix + '-family', style.fontFamily, '字体族')) +
+    return fontField(prefix, style) +
       field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
       field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
@@ -679,10 +749,7 @@
       element.width = Math.max(40, Number(valueOf('prop-text-w')) || 40);
       L.app.changed({ property: false });
     });
-    bind('prop-text-family', 'input', function () {
-      element.style.fontFamily = valueOf('prop-text-family');
-      L.app.changed({ property: false });
-    });
+    bindFontField('prop-text', element.style);
     bind('prop-text-size', 'input', function () {
       element.style.fontSize = Math.max(6, Number(valueOf('prop-text-size')) || 6);
       L.app.changed({ property: false });
