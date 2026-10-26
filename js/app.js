@@ -1028,6 +1028,25 @@
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
   }
 
+  function categoryDropPosition(page, project, cursorY) {
+    const margins = project.margins;
+    let lowestBottom = null;
+
+    page.elements.forEach(function (element) {
+      if (!(element.y <= cursorY)) return;
+      const category = element.type === 'category'
+        ? model.getCategory(project, element.category)
+        : null;
+      const bottom = element.y + layout.elementHeight(element, category);
+      if (lowestBottom === null || bottom > lowestBottom) lowestBottom = bottom;
+    });
+
+    return {
+      x: margins.left,
+      y: Math.max(0, Math.round(lowestBottom === null ? margins.top : lowestBottom))
+    };
+  }
+
   function onDrop(event) {
     event.preventDefault();
     const page = currentPage();
@@ -1061,9 +1080,8 @@
       120,
       state.project.pageSize.width - state.project.margins.left - state.project.margins.right
     );
-    const x = clamp(pt.x - width / 2, 0, Math.max(0, state.project.pageSize.width - width));
-    const y = Math.max(0, pt.y);
-    const element = model.createCategoryElement(name, x, y, state.project, width);
+    const position = categoryDropPosition(page, state.project, pt.y);
+    const element = model.createCategoryElement(name, position.x, position.y, state.project, width);
     page.elements.push(element);
     state.selection = { type: 'element', id: element.id };
     ui.renderAll();
