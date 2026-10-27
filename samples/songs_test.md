@@ -98,7 +98,63 @@ You are beautiful
 天亮以前说再见
 阿拉斯加海湾
 土坡上的狗尾巴草
+9420
+熄灭
+罗生门
+全球变冷
+盛夏的果实
+放空
+白月光和朱砂痣
+失眠
+蚍蜉
+琴师
+尽头
+离人愁
+纸短情长
+童话镇
+浮生未歇
+绿色
+如愿
+梦返
+坠落星空
+句号
+笼
+勇气
+一个人想着一个人
+无人知晓的我
+这世界那么多人
+浸春芜
+浪人琵琶
+惊鸿一面
+麻醉师
+救命
+红绳
+侧脸
+海芋恋
+讨厌
+黑桃A
+绝世舞姬
+离开我的依赖
+下潜
+刚好遇见你
+漠河舞厅
+我的梦
+没关系
+一介书生
+慕夏
+左手右手
+茶汤
+晚夜微雨问海棠
+梦与叶樱
+喜帖街
+大小姐和大少爷的反派
+雪绒花
+爱人
+勋章
+雀跃
+虚拟
 # 流行轻快
+桃子
 素颜
 心墙
 蠢货
@@ -141,6 +197,15 @@ for ya
 致爱yoursong
 Always online
 写给我第一个喜欢的女孩的歌
+不潮不花钱
+隆里电丝
+夏夜晴朗的晚上
+干物女
+青春修炼手册
+啥啊
+彩色复活券
+小情歌
+美美sunday
 # 古风抒情
 大鱼
 画心
@@ -171,6 +236,7 @@ Always online
 红拂夜奔
 秋殇别恋
 生生世世爱
+天龙八部之宿敌
 # 古风轻快
 艳
 小雨
@@ -213,6 +279,14 @@ cry for me
 恋人以上，无法满足的梦
 真夜中のドア~Stay With Me
 # 英文小曲
+snow man
+shape of you
+Right Now
+I Just Wanna Run
+You Belong to Me
+FRIENDS
+From The Start
+Dehors
 Wake
 Salt
 STAY
@@ -268,37 +342,9 @@ The Other Side Of Paradise
 I Wish My Mind Would Shut Up
 The way that i'm still love you
 avid
-桃子
-全球变冷
 free loop
 call you tonight
-盛夏的果实
-9420
-熄灭
-罗生门
-隆里电丝
-放空
-白月光和朱砂痣
-夏夜晴朗的晚上
-失眠
-蚍蜉
-琴师
-尽头
 dancing monkey
 let me love you
-离人愁
-纸短情长
-童话镇
-浮生未歇
-Love me like you do
-绿色
-不潮不花钱
-如愿
-梦返
-坠落星空
-句号
-笼
-勇气
-一个人想着一个人
 Maps
-天龙八部之宿敌
+Love me like you do

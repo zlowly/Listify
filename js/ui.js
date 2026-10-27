@@ -21,6 +21,12 @@
     return '<div class="field"><label>' + esc(label) + '</label><div class="control">' + control + '</div></div>';
   }
 
+  function fieldPair(labelA, controlA, labelB, controlB) {
+    return '<div class="field-row">' +
+      field(labelA, controlA) + field(labelB, controlB) +
+      '</div>';
+  }
+
   function numberInput(id, value, min, max, step) {
     return '<input id="' + id + '" class="input" type="number" value="' + esc(value) + '"' +
       (min != null ? ' min="' + min + '"' : '') +
@@ -428,17 +434,23 @@
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">页面尺寸</div>' +
-        field('宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1) + '<span class="unit">px</span>') +
-        field('高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1) + '<span class="unit">px</span>') +
+        fieldPair(
+          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1) + '<span class="unit">px</span>',
+          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1) + '<span class="unit">px</span>'
+        ) +
         '<div class="inline-actions"><button id="prop-orient-portrait" class="btn btn-sm">纵向 1080×1920</button>' +
         '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>' +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">页面边距 <span class="hint">仅参考线</span></div>' +
-        field('上', numberInput('prop-margin-top', project.margins.top, 0, 1000, 1) + '<span class="unit">px</span>') +
-        field('右', numberInput('prop-margin-right', project.margins.right, 0, 1000, 1) + '<span class="unit">px</span>') +
-        field('下', numberInput('prop-margin-bottom', project.margins.bottom, 0, 1000, 1) + '<span class="unit">px</span>') +
-        field('左', numberInput('prop-margin-left', project.margins.left, 0, 1000, 1) + '<span class="unit">px</span>') +
+        fieldPair(
+          '上', numberInput('prop-margin-top', project.margins.top, 0, 1000, 1) + '<span class="unit">px</span>',
+          '下', numberInput('prop-margin-bottom', project.margins.bottom, 0, 1000, 1) + '<span class="unit">px</span>'
+        ) +
+        fieldPair(
+          '左', numberInput('prop-margin-left', project.margins.left, 0, 1000, 1) + '<span class="unit">px</span>',
+          '右', numberInput('prop-margin-right', project.margins.right, 0, 1000, 1) + '<span class="unit">px</span>'
+        ) +
       '</div>' +
       '<div class="prop-group">' +
         '<button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
@@ -596,9 +608,11 @@
       '<button class="btn btn-sm" data-table-action="auto">恢复自动</button>' +
       '<button class="icon-btn" data-table-action="remove" title="删除表格">×</button>' +
       '</span></div>' +
-      field('列数', '<input class="input" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">') +
-      field('行数', '<input class="input" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
-        '" max="500" step="1" value="' + table.rows + '">') +
+      fieldPair(
+        '列数', '<input class="input" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">',
+        '行数', '<input class="input" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
+        '" max="500" step="1" value="' + table.rows + '">'
+      ) +
       field('填充', '<select class="select" data-table-field="fill">' +
         '<option value="column"' + (table.fill === 'column' ? ' selected' : '') + '>列优先（从上往下逐列）</option>' +
         '<option value="row"' + (table.fill === 'row' ? ' selected' : '') + '>行优先（从左往右逐行）</option>' +
@@ -610,9 +624,9 @@
         }).join('') + '</select>') +
       field('边距', '<div class="table-margin-grid">' +
         marginInput('top', '上') +
-        marginInput('right', '右') +
         marginInput('bottom', '下') +
         marginInput('left', '左') +
+        marginInput('right', '右') +
       '</div><p class="hint">边距相对分类块边缘，单位为 px；上下边距相加。</p>') +
       field('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
         widthLabel + '</span><span class="hint">' + (isLast && table.rows === 0 ? '0 行 = 动态行' : '') + '</span>') +
@@ -630,8 +644,10 @@
     ui.els.propertyPanel.innerHTML =
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类块 <span class="pill pill-green">' + (category ? category.songs.length : 0) + ' 首</span></div>' +
-        field('位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>') +
-        field('位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>') +
+        fieldPair(
+          '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>',
+          '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
+        ) +
         field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1) + '<span class="unit">px</span>') +
         '<p class="hint">高度由内容自动计算；可在画布上拖动左右边缘调整宽度。</p>' +
       '</div>' +
@@ -740,8 +756,10 @@
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">位置与尺寸</div>' +
-        field('位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>') +
-        field('位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>') +
+        fieldPair(
+          '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>',
+          '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
+        ) +
         field('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>') +
         '<p class="hint">高度随文字自动增长。</p>' +
       '</div>' +
@@ -803,10 +821,14 @@
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">位置与尺寸</div>' +
-        field('位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>') +
-        field('位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>') +
-        field('宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>') +
-        field('高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1) + '<span class="unit">px</span>') +
+        fieldPair(
+          '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>',
+          '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
+        ) +
+        fieldPair(
+          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>',
+          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1) + '<span class="unit">px</span>'
+        ) +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">填充</div>' +

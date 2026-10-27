@@ -579,7 +579,23 @@ button { cursor: pointer; }
   padding-left: 5px;
   padding-right: 4px;
 }
-.table-card .table-margin-grid + .hint { margin-top: 2px; }
+.table-card .table-margin-grid + .hint { margin-top: 2px; flex: 1 1 100%; }
+.table-card .field .control { flex-wrap: wrap; }
+.table-card .table-margin-grid { flex: 1 1 100%; }
+
+/* 同行双数值字段的紧凑排布 */
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.field-row .field {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px;
+  margin-bottom: 0;
+}
+.field-row .field > label { white-space: nowrap; }
 
 .hint {
   color: var(--faint);
