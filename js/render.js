@@ -254,14 +254,19 @@
     const opts = options || {};
     const editMode = opts.editMode !== false;
     const selectedId = opts.selectedId || null;
+    const includeBackground = opts.includeBackground !== false;
+    const includeElementTypes = Array.isArray(opts.includeElementTypes)
+      ? opts.includeElementTypes
+      : null;
     const pageW = project.pageSize.width;
     const pageH = project.pageSize.height;
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, pageW, pageH);
     ctx.clip();
-    drawBackground(ctx, project, page, editMode);
+    if (includeBackground) drawBackground(ctx, project, page, editMode);
     page.elements.forEach(function (element) {
+      if (includeElementTypes && includeElementTypes.indexOf(element.type) === -1) return;
       if (element.type === 'category') {
         drawCategory(ctx, project, page, element, editMode, element.id === selectedId);
       } else if (element.type === 'text') {
