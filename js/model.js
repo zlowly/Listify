@@ -408,7 +408,7 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
   }
 
   L.model = {

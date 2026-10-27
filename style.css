@@ -519,6 +519,9 @@ button { cursor: pointer; }
 
 .check-row { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .check-row input[type="checkbox"] { accent-color: var(--blue); }
+.export-options { flex-wrap: wrap; gap: 4px 16px; }
+.export-options .check-row { white-space: nowrap; }
+.export-options input[type="radio"] { accent-color: var(--blue); }
 
 .seg {
   display: inline-flex;
