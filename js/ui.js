@@ -583,6 +583,12 @@
 
   function tableCard(table, index, isLast) {
     const widthLabel = table.widthMode === 'manual' ? '固定' : '自动';
+    const margins = model.normalizeMargins(table.margins);
+    function marginInput(side, label) {
+      return '<label class="table-margin-item">' + label +
+        '<input class="input" data-table-field="margin-' + side + '" type="number" min="0" step="1" value="' +
+        esc(margins[side]) + '"></label>';
+    }
     return '<div class="table-card" data-table-index="' + index + '">' +
       '<div class="table-card-head"><span class="table-card-title">表格 ' + (index + 1) +
       (isLast ? ' · 末表' : '') + '</span>' +
@@ -602,6 +608,12 @@
           return '<option value="' + option.value + '"' + (table.align === option.value ? ' selected' : '') + '>' +
             option.label + '</option>';
         }).join('') + '</select>') +
+      field('边距', '<div class="table-margin-grid">' +
+        marginInput('top', '上') +
+        marginInput('right', '右') +
+        marginInput('bottom', '下') +
+        marginInput('left', '左') +
+      '</div><p class="hint">边距相对分类块边缘，单位为 px；上下边距相加。</p>') +
       field('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
         widthLabel + '</span><span class="hint">' + (isLast && table.rows === 0 ? '0 行 = 动态行' : '') + '</span>') +
       '</div>';
@@ -636,7 +648,7 @@
         '<div class="prop-group-title">表格 <span class="hint">' + tables.length + ' 个</span></div>' +
         tableCards +
         '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>' +
-        '<p class="hint">只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。</p>' +
+        '<p class="hint">只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。</p>' +
       '</div>' +
       '<div class="prop-group">' +
         '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除分类块</button>' +
@@ -672,9 +684,15 @@
       const table = element.tables[index];
       if (!table) return;
       card.querySelectorAll('[data-table-field]').forEach(function (input) {
-        input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'change', function () {
-          const fieldName = input.getAttribute('data-table-field');
-          if (fieldName === 'columns') {
+        const fieldName = input.getAttribute('data-table-field');
+        const eventName = fieldName.indexOf('margin-') === 0 ? 'input' : 'change';
+        input.addEventListener(eventName, function () {
+          if (fieldName.indexOf('margin-') === 0) {
+            const side = fieldName.slice('margin-'.length);
+            table.margins = model.normalizeMargins(table.margins);
+            table.margins[side] = Math.max(0, Number(input.value) || 0);
+            L.app.changed({ property: false });
+          } else if (fieldName === 'columns') {
             layout.setColumns(element, index, Number(input.value));
             L.app.changed();
             ui.renderPropertyPanel();

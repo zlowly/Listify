@@ -32,6 +32,7 @@
     blur: 0,
     color: '#ffffff'
   };
+  const DEFAULT_TABLE_MARGINS = { top: 0, right: 0, bottom: 0, left: 0 };
 
   let seq = 0;
   function uid(prefix) {
@@ -83,8 +84,23 @@
       fill: 'column',
       align: 'left',
       widthMode: 'auto',
-      widths: []
+      widths: [],
+      margins: { top: 0, right: 0, bottom: 0, left: 0 }
     }, overrides || {});
+  }
+
+  function normalizeMargins(margins) {
+    const source = margins && typeof margins === 'object' ? margins : {};
+    function value(key) {
+      const number = Number(source[key]);
+      return Number.isFinite(number) ? Math.max(0, number) : 0;
+    }
+    return {
+      top: value('top'),
+      right: value('right'),
+      bottom: value('bottom'),
+      left: value('left')
+    };
   }
 
   function createCategoryElement(categoryName, x, y, project, width) {
@@ -417,6 +433,7 @@
     DEFAULT_SONG_STYLE: DEFAULT_SONG_STYLE,
     DEFAULT_TEXT_STYLE: DEFAULT_TEXT_STYLE,
     DEFAULT_BACKGROUND: DEFAULT_BACKGROUND,
+    DEFAULT_TABLE_MARGINS: DEFAULT_TABLE_MARGINS,
     uid: uid,
     clamp: clamp,
     clone: clone,
@@ -425,6 +442,7 @@
     createPage: createPage,
     createDefaultProject: createDefaultProject,
     createTable: createTable,
+    normalizeMargins: normalizeMargins,
     createCategoryElement: createCategoryElement,
     createTextElement: createTextElement,
     createImageElement: createImageElement,

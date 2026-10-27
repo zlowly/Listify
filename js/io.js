@@ -37,7 +37,8 @@
       fill: table.fill,
       align: table.align,
       widthMode: table.widthMode,
-      widths: Array.isArray(table.widths) ? table.widths.slice() : []
+      widths: Array.isArray(table.widths) ? table.widths.slice() : [],
+      margins: model.normalizeMargins(table.margins)
     };
   }
 
@@ -300,6 +301,18 @@
                     fail(label + '第 ' + (tableIndex + 1) + ' 个表格手动列宽无效。');
                   }
                 }
+                if (table.margins !== undefined) {
+                  if (!table.margins || typeof table.margins !== 'object' || Array.isArray(table.margins)) {
+                    fail(label + '第 ' + (tableIndex + 1) + ' 个表格边距无效。');
+                  } else {
+                    ['top', 'right', 'bottom', 'left'].forEach(function (side) {
+                      if (table.margins[side] !== undefined &&
+                          (!isFiniteNumber(table.margins[side]) || table.margins[side] < 0)) {
+                        fail(label + '第 ' + (tableIndex + 1) + ' 个表格' + side + '边距无效。');
+                      }
+                    });
+                  }
+                }
               });
             }
           } else if (element.type === 'text') {
@@ -415,7 +428,8 @@
                     fill: table.fill,
                     align: table.align,
                     widthMode: table.widthMode,
-                    widths: Array.isArray(table.widths) ? table.widths.slice() : []
+                    widths: Array.isArray(table.widths) ? table.widths.slice() : [],
+                    margins: model.normalizeMargins(table.margins)
                   };
                 })
               };

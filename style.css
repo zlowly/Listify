@@ -557,6 +557,26 @@ button { cursor: pointer; }
 .table-card-title { font-size: 11px; font-weight: 700; color: var(--muted); }
 .table-card .field { grid-template-columns: 58px minmax(0, 1fr); margin-bottom: 6px; }
 .table-card .field > label { font-size: 10px; }
+.table-margin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.table-margin-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+.table-margin-item .input {
+  min-width: 0;
+  width: 100%;
+  padding-left: 5px;
+  padding-right: 4px;
+}
+.table-card .table-margin-grid + .hint { margin-top: 2px; }
 
 .hint {
   color: var(--faint);
