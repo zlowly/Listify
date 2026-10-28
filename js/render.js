@@ -69,27 +69,38 @@
     ctx.restore();
   }
 
-  function drawImageFit(ctx, img, element) {
-    const iw = img.naturalWidth || img.width;
-    const ih = img.naturalHeight || img.height;
-    if (!iw || !ih) return;
-    const w = element.width;
-    const h = element.height;
-    if (element.fit === 'stretch') {
-      ctx.drawImage(img, element.x, element.y, w, h);
-      return;
-    }
-    if (element.fit === 'contain') {
-      const scale = Math.min(w / iw, h / ih);
-      const dw = iw * scale;
-      const dh = ih * scale;
-      ctx.drawImage(img, element.x + (w - dw) / 2, element.y + (h - dh) / 2, dw, dh);
-      return;
-    }
-    const scale = Math.max(w / iw, h / ih);
-    const dw = iw * scale;
-    const dh = ih * scale;
-    ctx.drawImage(img, element.x + (w - dw) / 2, element.y + (h - dh) / 2, dw, dh);
+  function elementCorners(element) {
+    const width = element.width;
+    const height = element.height;
+    const centerX = element.x + width / 2;
+    const centerY = element.y + height / 2;
+    const radians = model.rotationRadians(element);
+    return [
+      [-width / 2, -height / 2],
+      [width / 2, -height / 2],
+      [width / 2, height / 2],
+      [-width / 2, height / 2]
+    ].map(function (point) {
+      const rotated = model.rotateVector(point[0], point[1], radians);
+      return { x: centerX + rotated.x, y: centerY + rotated.y };
+    });
+  }
+
+  function elementAabb(element) {
+    const corners = elementCorners(element);
+    const xs = corners.map(function (point) { return point.x; });
+    const ys = corners.map(function (point) { return point.y; });
+    const minX = Math.min.apply(null, xs);
+    const maxX = Math.max.apply(null, xs);
+    const minY = Math.min.apply(null, ys);
+    const maxY = Math.max.apply(null, ys);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  function imageLocalPoint(element, x, y) {
+    const centerX = element.x + element.width / 2;
+    const centerY = element.y + element.height / 2;
+    return model.rotateVector(x - centerX, y - centerY, -model.rotationRadians(element));
   }
 
   function drawFreeText(ctx, element, editMode) {
@@ -118,12 +129,18 @@
     if (!element.assetId) return;
     const img = L.assets.getCachedImage(element.assetId);
     if (!img) return;
+    const width = element.width;
+    const height = element.height;
     ctx.save();
+    ctx.translate(element.x + width / 2, element.y + height / 2);
+    ctx.rotate(model.rotationRadians(element));
     ctx.beginPath();
-    ctx.rect(element.x, element.y, element.width, element.height);
+    ctx.rect(-width / 2, -height / 2, width, height);
     ctx.clip();
     ctx.globalAlpha = model.clamp(Number(element.opacity), 0, 1);
-    drawImageFit(ctx, img, element);
+    const blur = Number(element.blur);
+    if (blur > 0) ctx.filter = 'blur(' + blur + 'px)';
+    ctx.drawImage(img, -width / 2, -height / 2, width, height);
     ctx.restore();
   }
 
@@ -300,6 +317,13 @@
     for (let i = page.elements.length - 1; i >= 0; i -= 1) {
       const element = page.elements[i];
       const bounds = elementBounds(project, page, element);
+      if (element.type === 'image') {
+        const local = imageLocalPoint(element, x, y);
+        if (Math.abs(local.x) <= bounds.width / 2 && Math.abs(local.y) <= bounds.height / 2) {
+          return { element: element, index: i, bounds: bounds };
+        }
+        continue;
+      }
       if (
         x >= bounds.x &&
         y >= bounds.y &&
@@ -338,6 +362,16 @@
     const pageW = project.pageSize.width;
     const pageH = project.pageSize.height;
     return page.elements.filter(function (element) {
+      if (element.type === 'image') {
+        return elementCorners(element).some(function (corner) {
+          return (
+            corner.x < -0.5 ||
+            corner.y < -0.5 ||
+            corner.x > pageW + 0.5 ||
+            corner.y > pageH + 0.5
+          );
+        });
+      }
       const bounds = elementBounds(project, page, element);
       return (
         bounds.x < 0 ||
@@ -366,6 +400,9 @@
     drawCategory: drawCategory,
     drawPage: drawPage,
     elementBounds: elementBounds,
+    elementCorners: elementCorners,
+    elementAabb: elementAabb,
+    imageLocalPoint: imageLocalPoint,
     hitTest: hitTest,
     tableDividers: tableDividers,
     pageOverflow: pageOverflow,

@@ -91,6 +91,14 @@
     return el ? el.value : '';
   }
 
+  function normalizeAngle(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 0;
+    let angle = ((number % 360) + 360) % 360;
+    if (angle > 180) angle -= 360;
+    return Math.round(angle * 10) / 10;
+  }
+
   ui.init = function () {
     if (ui.initialized) return;
     ui.initialized = true;
@@ -337,7 +345,7 @@
       } else if (element.type === 'image') {
         icon = '▧';
         name = '图片';
-        sub = element.fit || 'cover';
+        sub = element.rotation ? '旋转 ' + normalizeAngle(element.rotation) + '°' : '自由图片';
       }
       rows.push('<div class="layer-row' + (selected ? ' selected' : '') + '" data-layer-id="' + esc(element.id) + '">' +
         '<span class="layer-icon">' + icon + '</span>' +
@@ -349,11 +357,15 @@
         (realIndex === page.elements.length - 1 ? ' disabled' : '') + '>↑</button>' +
         '</span></div>');
     });
-    const bg = page.background;
+    const bg = page.background || model.DEFAULT_BACKGROUND;
     const bgSelected = selection.type === 'background';
+    const bgOwner = model.resolveBackgroundOwner(project, page);
+    const bgSub = page.backgroundRef && bgOwner
+      ? '引用 · 第 ' + (project.pages.indexOf(bgOwner) + 1) + ' 页'
+      : (bg.fit || 'cover');
     rows.push('<div class="layer-row' + (bgSelected ? ' selected' : '') + '" data-layer-bg="1">' +
       '<span class="layer-icon">▦</span>' +
-      '<span class="layer-name">背景<span class="layer-sub"> ' + esc(bg.fit || 'cover') + '</span></span>' +
+      '<span class="layer-name">背景<span class="layer-sub"> ' + esc(bgSub) + '</span></span>' +
       '<span class="pill pill-blue">底层</span></div>');
     ui.els.layerPanel.innerHTML = rows.join('');
     ui.els.layerPanel.querySelectorAll('.layer-row').forEach(function (row) {
@@ -480,8 +492,20 @@
 
   function renderBackgroundProperties(page) {
     const project = L.app.state.project;
-    const bg = page.background;
+    const bg = page.background || model.DEFAULT_BACKGROUND;
     const pageIndex = project.pages.indexOf(page);
+    const owner = model.resolveBackgroundOwner(project, page) || page;
+    const ownerIndex = project.pages.indexOf(owner);
+    const isReference = !!page.backgroundRef;
+    const referenceCount = isReference ? 0 : model.referencingPages(project, owner).length;
+    const relationHint = isReference
+      ? '<div class="prop-group">' +
+          '<p class="hint">引用第 ' + (ownerIndex + 1) + ' 页背景；修改会同步到同一组的所有页面。</p>' +
+          '<div class="inline-actions"><button id="prop-bg-detach" class="btn btn-sm">断开引用</button></div>' +
+        '</div>'
+      : (referenceCount > 0
+        ? '<div class="prop-group"><p class="hint">被 ' + referenceCount + ' 页引用；修改会同步到这些页面。</p></div>'
+        : '');
     const meta = bg.assetId ? (L.assets.getMeta(bg.assetId) || project.assets.find(function (asset) {
       return asset.id === bg.assetId;
     })) : null;
@@ -490,6 +514,7 @@
         '<div class="prop-group-title">第 ' + (pageIndex + 1) + ' 页背景</div>' +
         '<p class="hint">背景始终位于内容层下方，只能从这里或图层面板选中。</p>' +
       '</div>' +
+      relationHint +
       '<div class="prop-group">' +
         '<div class="prop-group-title">背景图片</div>' +
         (bg.assetId
@@ -515,6 +540,7 @@
 
     bind('prop-bg-choose', 'click', function () { L.app.pickBackgroundImage(); });
     bind('prop-bg-clear', 'click', function () { L.app.clearBackgroundImage(); });
+    bind('prop-bg-detach', 'click', function () { L.app.detachBackground(); });
     bind('prop-bg-color', 'input', function () {
       page.background.color = valueOf('prop-bg-color');
       L.app.changed({ property: false });
@@ -627,7 +653,7 @@
         marginInput('bottom', '下') +
         marginInput('left', '左') +
         marginInput('right', '右') +
-      '</div><p class="hint">边距相对分类块边缘，单位为 px；上下边距相加。</p>') +
+      '</div>') +
       field('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
         widthLabel + '</span><span class="hint">' + (isLast && table.rows === 0 ? '0 行 = 动态行' : '') + '</span>') +
       '</div>';
@@ -649,7 +675,6 @@
           '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
         ) +
         field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1) + '<span class="unit">px</span>') +
-        '<p class="hint">高度由内容自动计算；可在画布上拖动左右边缘调整宽度。</p>' +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类名子分区</div>' +
@@ -658,7 +683,6 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">歌名子分区</div>' +
         categoryStyleFields('prop-song', element.songStyle) +
-        '<p class="hint">歌名样式会应用到该分类块内所有表格。</p>' +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">表格 <span class="hint">' + tables.length + ' 个</span></div>' +
@@ -831,13 +855,15 @@
         ) +
       '</div>' +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">填充</div>' +
-        field('模式', selectInput('prop-img-fit', [
-          { value: 'cover', label: 'cover · 填满并居中裁剪' },
-          { value: 'contain', label: 'contain · 完整显示' },
-          { value: 'stretch', label: 'stretch · 拉伸' }
-        ], element.fit || 'cover')) +
+        '<div class="prop-group-title">外观</div>' +
+        '<div class="field field-compact"><label>比例</label><div class="control">' +
+          '<label class="check-row"><input id="prop-img-ratio" type="checkbox"' +
+          (element.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>' +
+        '</div></div>' +
+        field('旋转', numberInput('prop-img-rotation', Math.round(element.rotation || 0), -180, 180, 1) +
+          '<span class="unit">°</span>') +
         field('透明度', rangeInput('prop-img-opacity', element.opacity == null ? 1 : element.opacity, 0, 1, 0.01)) +
+        field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
       '</div>' +
       '<div class="prop-group"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除图片</button></div>';
 
@@ -858,13 +884,25 @@
       element.height = Math.max(40, Number(valueOf('prop-img-h')) || 40);
       L.app.changed({ property: false });
     });
-    bind('prop-img-fit', 'change', function () {
-      element.fit = valueOf('prop-img-fit');
+    bind('prop-img-ratio', 'change', function () {
+      const input = document.getElementById('prop-img-ratio');
+      L.app.setImageKeepRatio(element, input ? input.checked : true);
+    });
+    bind('prop-img-rotation', 'change', function () {
+      const angle = normalizeAngle(valueOf('prop-img-rotation'));
+      element.rotation = angle;
+      const input = document.getElementById('prop-img-rotation');
+      if (input) input.value = angle;
       L.app.changed({ property: false });
     });
     bind('prop-img-opacity', 'input', function () {
       element.opacity = Number(valueOf('prop-img-opacity'));
       document.getElementById('prop-img-opacity-value').textContent = element.opacity.toFixed(2);
+      L.app.changed({ property: false });
+    });
+    bind('prop-img-blur', 'input', function () {
+      element.blur = Number(valueOf('prop-img-blur'));
+      document.getElementById('prop-img-blur-value').textContent = element.blur;
       L.app.changed({ property: false });
     });
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });

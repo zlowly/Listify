@@ -56,17 +56,40 @@
     return Object.assign({}, DEFAULT_BACKGROUND, overrides || {});
   }
 
-  function createPage(background) {
+  function cloneBackground(background) {
+    return createBackground(background);
+  }
+
+  function createPage(background, backgroundRef) {
     return {
       id: uid('page'),
       background: createBackground(background),
+      backgroundRef: backgroundRef || null,
       elements: []
     };
   }
 
+  function resolveBackgroundOwner(project, page) {
+    if (!project || !page) return null;
+    let cursor = page;
+    const seen = new Set();
+    while (cursor) {
+      if (!cursor.backgroundRef) return cursor;
+      if (seen.has(cursor.id) || seen.has(cursor.backgroundRef)) return null;
+      seen.add(cursor.id);
+      cursor = project.pages.find(function (item) { return item.id === cursor.backgroundRef; }) || null;
+    }
+    return null;
+  }
+
+  function referencingPages(project, page) {
+    if (!project || !page) return [];
+    return project.pages.filter(function (item) { return item.backgroundRef === page.id; });
+  }
+
   function createDefaultProject() {
     const project = {
-      version: 1,
+      version: 2,
       pageSize: { width: 1080, height: 1920 },
       margins: { top: 60, right: 60, bottom: 60, left: 60 },
       playlist: { categories: [] },
@@ -141,8 +164,101 @@
       width: w,
       height: h,
       assetId: assetId || null,
-      fit: 'cover',
-      opacity: 1
+      keepRatio: true,
+      rotation: 0,
+      opacity: 1,
+      blur: 0
+    };
+  }
+
+  function rotationRadians(element) {
+    const degrees = Number(element && element.rotation);
+    return (Number.isFinite(degrees) ? degrees : 0) * Math.PI / 180;
+  }
+
+  function rotateVector(x, y, radians) {
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return { x: x * cos - y * sin, y: x * sin + y * cos };
+  }
+
+  function computeImageResize(start, handle, delta, keepRatio) {
+    const width0 = start.width;
+    const height0 = start.height;
+    const radians = (Number(start.rotation) || 0) * Math.PI / 180;
+    const local = rotateVector(delta.x, delta.y, -radians);
+    const directionX = handle.indexOf('e') >= 0 ? 1 : (handle.indexOf('w') >= 0 ? -1 : 0);
+    const directionY = handle.indexOf('s') >= 0 ? 1 : (handle.indexOf('n') >= 0 ? -1 : 0);
+    let width = width0;
+    let height = height0;
+
+    if (keepRatio) {
+      if (directionX && directionY) {
+        const diagonal = width0 * width0 + height0 * height0;
+        const projected = (width0 * directionX + local.x) * width0 * directionX +
+          (height0 * directionY + local.y) * height0 * directionY;
+        let scale = diagonal > 0 ? projected / diagonal : 1;
+        scale = Math.max(scale, 40 / width0, 40 / height0);
+        width = width0 * scale;
+        height = height0 * scale;
+      } else if (directionX) {
+        width = Math.max(40, width0 + directionX * local.x);
+        height = width0 > 0 ? width * (height0 / width0) : height0;
+        if (height < 40) {
+          height = 40;
+          width = height0 > 0 ? height * (width0 / height0) : width;
+        }
+      } else if (directionY) {
+        height = Math.max(40, height0 + directionY * local.y);
+        width = height0 > 0 ? height * (width0 / height0) : width0;
+        if (width < 40) {
+          width = 40;
+          height = width0 > 0 ? width * (height0 / width0) : height;
+        }
+      }
+    } else {
+      if (directionX) width = Math.max(40, width0 + directionX * local.x);
+      if (directionY) height = Math.max(40, height0 + directionY * local.y);
+    }
+
+    const anchorX = -directionX;
+    const anchorY = -directionY;
+    const centerX = start.x + width0 / 2;
+    const centerY = start.y + height0 / 2;
+    const anchorOffset = rotateVector(anchorX * width0 / 2, anchorY * height0 / 2, radians);
+    const anchorPageX = centerX + anchorOffset.x;
+    const anchorPageY = centerY + anchorOffset.y;
+    const nextAnchorOffset = rotateVector(anchorX * width / 2, anchorY * height / 2, radians);
+
+    return {
+      x: anchorPageX - nextAnchorOffset.x - width / 2,
+      y: anchorPageY - nextAnchorOffset.y - height / 2,
+      width: width,
+      height: height
+    };
+  }
+
+  function migrateImageRect(fit, rect, natural) {
+    if (fit === 'stretch' || !natural || !natural.width || !natural.height) {
+      return {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        keepRatio: fit !== 'stretch'
+      };
+    }
+    const scale = fit === 'contain'
+      ? Math.min(rect.width / natural.width, rect.height / natural.height)
+      : Math.max(rect.width / natural.width, rect.height / natural.height);
+    const width = Math.max(1, natural.width * scale);
+    const height = Math.max(1, natural.height * scale);
+    return {
+      x: rect.x + (rect.width - width) / 2,
+      y: rect.y + (rect.height - height) / 2,
+      width: width,
+      height: height,
+      keepRatio: true
     };
   }
 
@@ -439,13 +555,20 @@
     clone: clone,
     copyStyle: copyStyle,
     createBackground: createBackground,
+    cloneBackground: cloneBackground,
     createPage: createPage,
+    resolveBackgroundOwner: resolveBackgroundOwner,
+    referencingPages: referencingPages,
     createDefaultProject: createDefaultProject,
     createTable: createTable,
     normalizeMargins: normalizeMargins,
     createCategoryElement: createCategoryElement,
     createTextElement: createTextElement,
     createImageElement: createImageElement,
+    rotationRadians: rotationRadians,
+    rotateVector: rotateVector,
+    computeImageResize: computeImageResize,
+    migrateImageRect: migrateImageRect,
     getPage: getPage,
     getCategory: getCategory,
     getPlacedBlock: getPlacedBlock,

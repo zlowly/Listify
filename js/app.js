@@ -546,25 +546,43 @@
     ctx.stroke();
   }
 
+  function screenFromPage(x, y) {
+    return {
+      x: viewport.offsetX + x * viewport.scale,
+      y: viewport.offsetY + y * viewport.scale
+    };
+  }
+
+  function imageHandlePoints(element) {
+    const width = element.width;
+    const height = element.height;
+    const centerX = element.x + width / 2;
+    const centerY = element.y + height / 2;
+    const radians = model.rotationRadians(element);
+    const defs = [
+      { name: 'nw', sx: -1, sy: -1, cursor: 'nwse-resize' },
+      { name: 'n', sx: 0, sy: -1, cursor: 'ns-resize' },
+      { name: 'ne', sx: 1, sy: -1, cursor: 'nesw-resize' },
+      { name: 'e', sx: 1, sy: 0, cursor: 'ew-resize' },
+      { name: 'se', sx: 1, sy: 1, cursor: 'nwse-resize' },
+      { name: 's', sx: 0, sy: 1, cursor: 'ns-resize' },
+      { name: 'sw', sx: -1, sy: 1, cursor: 'nesw-resize' },
+      { name: 'w', sx: -1, sy: 0, cursor: 'ew-resize' }
+    ];
+    return defs.map(function (def) {
+      const offset = model.rotateVector(def.sx * width / 2, def.sy * height / 2, radians);
+      const screen = screenFromPage(centerX + offset.x, centerY + offset.y);
+      return { name: def.name, x: screen.x, y: screen.y, cursor: def.cursor };
+    });
+  }
+
   function handlePoints(bounds, element) {
+    if (element.type === 'image') return imageHandlePoints(element);
     const x = viewport.offsetX + bounds.x * viewport.scale;
     const y = viewport.offsetY + bounds.y * viewport.scale;
     const w = bounds.width * viewport.scale;
     const h = bounds.height * viewport.scale;
-    const midX = x + w / 2;
     const midY = y + h / 2;
-    if (element.type === 'image') {
-      return [
-        { name: 'nw', x: x, y: y, cursor: 'nwse-resize' },
-        { name: 'n', x: midX, y: y, cursor: 'ns-resize' },
-        { name: 'ne', x: x + w, y: y, cursor: 'nesw-resize' },
-        { name: 'e', x: x + w, y: midY, cursor: 'ew-resize' },
-        { name: 'se', x: x + w, y: y + h, cursor: 'nwse-resize' },
-        { name: 's', x: midX, y: y + h, cursor: 'ns-resize' },
-        { name: 'sw', x: x, y: y + h, cursor: 'nesw-resize' },
-        { name: 'w', x: x, y: midY, cursor: 'ew-resize' }
-      ];
-    }
     return [
       { name: 'w', x: x, y: midY, cursor: 'ew-resize' },
       { name: 'e', x: x + w, y: midY, cursor: 'ew-resize' }
@@ -575,16 +593,26 @@
     const element = selectedElement();
     if (!element) return;
     const bounds = renderer.elementBounds(state.project, page, element);
-    const x = viewport.offsetX + bounds.x * viewport.scale;
-    const y = viewport.offsetY + bounds.y * viewport.scale;
-    const w = bounds.width * viewport.scale;
-    const h = bounds.height * viewport.scale;
 
     ctx.save();
     ctx.strokeStyle = '#2563eb';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([]);
-    ctx.strokeRect(x, y, w, h);
+    if (element.type === 'image') {
+      const corners = renderer.elementCorners(element);
+      ctx.beginPath();
+      corners.forEach(function (corner, index) {
+        const point = screenFromPage(corner.x, corner.y);
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      const x = viewport.offsetX + bounds.x * viewport.scale;
+      const y = viewport.offsetY + bounds.y * viewport.scale;
+      ctx.strokeRect(x, y, bounds.width * viewport.scale, bounds.height * viewport.scale);
+    }
     handlePoints(bounds, element).forEach(function (handle) {
       drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
     });
@@ -857,32 +885,16 @@
     const start = drag.startBounds;
     const minWidth = element.type === 'text' ? 80 : 80;
     if (element.type === 'image') {
-      let x = start.x;
-      let y = start.y;
-      let width = start.width;
-      let height = start.height;
-      if (drag.handle.indexOf('e') >= 0) width += dx;
-      if (drag.handle.indexOf('w') >= 0) {
-        width -= dx;
-        x += dx;
-      }
-      if (drag.handle.indexOf('s') >= 0) height += dy;
-      if (drag.handle.indexOf('n') >= 0) {
-        height -= dy;
-        y += dy;
-      }
-      if (width < 40) {
-        if (drag.handle.indexOf('w') >= 0) x -= 40 - width;
-        width = 40;
-      }
-      if (height < 40) {
-        if (drag.handle.indexOf('n') >= 0) y -= 40 - height;
-        height = 40;
-      }
-      element.x = Math.round(x);
-      element.y = Math.round(y);
-      element.width = Math.round(width);
-      element.height = Math.round(height);
+      const next = model.computeImageResize(
+        { x: start.x, y: start.y, width: start.width, height: start.height, rotation: element.rotation },
+        drag.handle,
+        { x: dx, y: dy },
+        element.keepRatio !== false
+      );
+      element.x = Math.round(next.x);
+      element.y = Math.round(next.y);
+      element.width = Math.round(next.width);
+      element.height = Math.round(next.height);
       return;
     }
 
@@ -1130,10 +1142,10 @@
         '</label>' +
         '<label class="field" style="display:block;cursor:pointer;opacity:' + (canInherit ? '1' : '0.45') + ';">' +
           '<span class="control" style="display:flex;gap:8px;align-items:center;">' +
-            '<input type="radio" name="new-page-bg" value="inherit"' + (canInherit ? '' : ' disabled') + '> 沿用上页背景' +
+            '<input type="radio" name="new-page-bg" value="inherit"' + (canInherit ? '' : ' disabled') + '> 引用上页背景' +
           '</span>' +
         '</label>' +
-        '<p class="hint">沿用会共享同一张图片资产；之后两页的尺寸模式、透明度、模糊和填充色相互独立。</p>' +
+        '<p class="hint">引用后两页共享同一份背景，图片、尺寸模式、透明度、模糊和填充色始终同步；可在背景属性中断开引用。</p>' +
       '</div>';
 
     const modal = ui.modal.open({
@@ -1148,9 +1160,14 @@
           onClick: function (close) {
             const checked = modal.body.querySelector('input[name="new-page-bg"]:checked');
             const mode = checked ? checked.value : 'blank';
-            let background = null;
-            if (mode === 'inherit' && current) background = model.createBackground(current.background);
-            const page = model.createPage(background);
+            let page;
+            if (mode === 'inherit' && current) {
+              const owner = model.resolveBackgroundOwner(state.project, current) || current;
+              page = model.createPage(null, owner.id);
+              page.background = owner.background;
+            } else {
+              page = model.createPage();
+            }
             state.project.pages.push(page);
             state.currentPageId = page.id;
             state.selection = { type: 'page' };
@@ -1176,6 +1193,12 @@
       { confirmLabel: '删除', danger: true }
     ).then(function (ok) {
       if (!ok) return;
+      state.project.pages.forEach(function (item) {
+        if (item.backgroundRef === page.id) {
+          item.background = model.cloneBackground(item.background);
+          item.backgroundRef = null;
+        }
+      });
       state.project.pages.splice(index, 1);
       const next = state.project.pages[Math.min(index, state.project.pages.length - 1)];
       state.currentPageId = next.id;
@@ -1306,6 +1329,7 @@
         const found = findElementAnywhere(targetId);
         if (found && found.element.type === 'image') {
           found.element.assetId = assetId;
+          if (found.element.keepRatio !== false) normalizeImageRatio(found.element, image);
           state.selection = { type: 'element', id: found.element.id };
           if (found.page.id !== state.currentPageId) state.currentPageId = found.page.id;
           ui.renderAll();
@@ -1331,6 +1355,46 @@
       if (assetId) L.assets.remove(assetId);
       ui.toast('图片读取失败：' + err.message, 'error');
     }
+  }
+
+  function normalizeImageRatio(element, image) {
+    const cached = image || (element.assetId ? L.assets.getCachedImage(element.assetId) : null);
+    if (!cached) {
+      if (element.assetId) {
+        L.assets.loadImage(element.assetId).then(function (loaded) {
+          normalizeImageRatio(element, loaded);
+          ui.renderAll();
+        }).catch(function () { /* 图片无法解码时保持当前矩形 */ });
+      }
+      return;
+    }
+    const naturalWidth = cached.naturalWidth || cached.width;
+    const naturalHeight = cached.naturalHeight || cached.height;
+    if (!naturalWidth || !naturalHeight) return;
+    const centerX = element.x + element.width / 2;
+    const centerY = element.y + element.height / 2;
+    const width = Math.max(40, element.width);
+    const height = Math.max(40, width * naturalHeight / naturalWidth);
+    element.width = Math.round(width);
+    element.height = Math.round(height);
+    element.x = Math.round(centerX - element.width / 2);
+    element.y = Math.round(centerY - element.height / 2);
+  }
+
+  function setImageKeepRatio(element, value) {
+    if (!element || element.type !== 'image') return;
+    element.keepRatio = !!value;
+    if (element.keepRatio) normalizeImageRatio(element);
+    ui.renderAll();
+  }
+
+  function detachBackground() {
+    const page = currentPage();
+    if (!page || !page.backgroundRef) return;
+    page.background = model.cloneBackground(page.background);
+    page.backgroundRef = null;
+    ui.renderAll();
+    ui.toast('已断开背景引用。');
   }
 
   function pickBackgroundImage() {
@@ -1582,6 +1646,8 @@
     addText: addText,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
+    setImageKeepRatio: setImageKeepRatio,
+    detachBackground: detachBackground,
     pickBackgroundImage: pickBackgroundImage,
     handleBackgroundFile: handleBackgroundFile,
     clearBackgroundImage: clearBackgroundImage,
