@@ -9,6 +9,7 @@
   const CELL_PAD_X = 8;
   const CELL_PAD_Y = 4;
   const MIN_COL_WIDTH = 24;
+  const MIN_TABLE_WIDTH = 40;
   const SAFETY = 2;
 
   const measureCanvas = document.createElement('canvas');
@@ -73,6 +74,7 @@
       if (table.widthMode !== 'manual') table.widthMode = 'auto';
       if (table.fill !== 'row') table.fill = 'column';
       if (['left', 'center', 'right', 'justify'].indexOf(table.align) < 0) table.align = 'left';
+      table.margins = model.normalizeMargins(table.margins);
     });
 
     const last = tables[tables.length - 1];
@@ -86,7 +88,8 @@
           fill: last.fill,
           align: last.align,
           widthMode: last.widthMode,
-          widths: last.widths.slice()
+          widths: last.widths.slice(),
+          margins: model.normalizeMargins(last.margins)
         });
       }
     }
@@ -255,7 +258,6 @@
     const songs = category ? category.songs : [];
     normalizeTables(element, songs.length);
     const sorted = sortSongs(songs);
-    const tableWidth = Math.max(40, element.width);
     const titleWidth = Math.max(1, element.width - BLOCK_PADDING * 2);
     const titleLines = wrapText(
       category ? category.name : '',
@@ -268,6 +270,12 @@
     let cursor = 0;
     let tableY = BLOCK_PADDING + titleHeight + TITLE_GAP;
     const tables = element.tables.map(function (table) {
+      const margins = model.normalizeMargins(table.margins);
+      const left = model.clamp(margins.left, 0, element.width);
+      const right = model.clamp(margins.right, 0, element.width);
+      const tableWidth = Math.max(MIN_TABLE_WIDTH, element.width - left - right);
+      const tableX = Math.min(left, Math.max(0, element.width - tableWidth));
+      tableY += margins.top;
       const assigned = assignTableSongs(
         sorted,
         table,
@@ -277,8 +285,11 @@
       );
       cursor += assigned.take;
       assigned.y = tableY;
+      assigned.x = tableX;
       assigned.tableWidth = tableWidth;
+      assigned.margins = margins;
       tableY += assigned.height;
+      tableY += margins.bottom;
       return assigned;
     });
 
@@ -290,8 +301,6 @@
       titleY: BLOCK_PADDING,
       titleWidth: titleWidth,
       tables: tables,
-      tableWidth: tableWidth,
-      tableX: 0,
       blockHeight: tableY + (hasTableRows ? 0 : BLOCK_PADDING),
       padding: BLOCK_PADDING,
       titleGap: TITLE_GAP,
@@ -355,7 +364,8 @@
       fill: previous.fill,
       align: previous.align,
       widthMode: previous.widthMode,
-      widths: previous.widths.slice()
+      widths: previous.widths.slice(),
+      margins: model.normalizeMargins(previous.margins)
     });
     return element.tables.length - 1;
   }
@@ -412,6 +422,31 @@
       JSON.stringify(sortSongs(['Hello', '真的爱你', 'Hi'])),
       JSON.stringify(['Hi', 'Hello', '真的爱你'])
     );
+
+    const defaultTable = model.createTable();
+    check(
+      'default table margins are zero',
+      JSON.stringify(defaultTable.margins),
+      JSON.stringify({ top: 0, right: 0, bottom: 0, left: 0 })
+    );
+    check(
+      'default table margins are fresh objects',
+      defaultTable.margins !== model.createTable().margins,
+      true
+    );
+    check(
+      'normalizeMargins(undefined) is zero',
+      JSON.stringify(model.normalizeMargins(undefined)),
+      JSON.stringify({ top: 0, right: 0, bottom: 0, left: 0 })
+    );
+    check(
+      'normalizeMargins clamps invalid values',
+      JSON.stringify(model.normalizeMargins({ top: -5, right: NaN, bottom: '8', left: Infinity })),
+      JSON.stringify({ top: 0, right: 0, bottom: 8, left: 0 })
+    );
+    const normalizedMargins = model.normalizeMargins();
+    normalizedMargins.top = 12;
+    check('normalizeMargins returns fresh objects', model.normalizeMargins().top, 0);
 
     const pure = autoGapWidths([100, 150, 200], 600);
     check('autoGapWidths gap = 75', pure.gap, 75);
@@ -500,7 +535,7 @@
     check('appended table persisted', fixed.tables.length, 2);
 
     const widthsSum = layout.tables[0].widths.reduce(function (a, b) { return a + b; }, 0);
-    check('auto column widths sum to table width', Math.abs(widthsSum - layout.tableWidth) < 0.01, true);
+    check('auto column widths sum to table width', Math.abs(widthsSum - layout.tables[0].tableWidth) < 0.01, true);
 
     const gapTable = layout.tables[0];
     if (!gapTable.fallback) {
@@ -529,13 +564,91 @@
       true
     );
 
-    check('table width fills block width', layout.tableWidth, element.width);
+    check('table width fills block width', layout.tables[0].tableWidth, element.width);
+    check('zero-margin table starts at block left', layout.tables[0].x, 0);
+    check(
+      'zero-margin first table y unchanged',
+      Math.abs(layout.tables[0].y - (BLOCK_PADDING + layout.titleHeight + TITLE_GAP)) < 0.01,
+      true
+    );
     const lastTable = layout.tables[layout.tables.length - 1];
     check(
       'block bottom meets last table bottom',
       Math.abs(layout.blockHeight - (lastTable.y + lastTable.height)) < 0.01,
       true
     );
+
+    const marginElement = model.createCategoryElement('边距', 0, 0, pageProject(), 600);
+    marginElement.tables = [
+      model.createTable({ columns: 2, rows: 1, margins: { top: 10, right: 60, bottom: 20, left: 40 } }),
+      model.createTable({ columns: 2, rows: 1, margins: { top: 30, right: 0, bottom: 32, left: 0 } })
+    ];
+    const marginLayout = layoutCategory({ name: '边距', songs: ['a', 'b', 'c', 'd'] }, marginElement);
+    const firstMarginTable = marginLayout.tables[0];
+    const secondMarginTable = marginLayout.tables[1];
+    check('left margin sets table x', firstMarginTable.x, 40);
+    check('right/left margins shrink table width', firstMarginTable.tableWidth, 500);
+    const marginTableRight = firstMarginTable.x + firstMarginTable.widths.reduce(function (a, b) {
+      return a + b;
+    }, 0);
+    check('last column ends at right inset', Math.abs(marginTableRight - 540) < 0.01, true);
+    check(
+      'first table top adds top margin',
+      Math.abs(firstMarginTable.y - (BLOCK_PADDING + marginLayout.titleHeight + TITLE_GAP + 10)) < 0.01,
+      true
+    );
+    check(
+      'adjacent table margins add up',
+      Math.abs(secondMarginTable.y - (firstMarginTable.y + firstMarginTable.height) - 50) < 0.01,
+      true
+    );
+    check(
+      'last bottom margin extends block height',
+      Math.abs(marginLayout.blockHeight - (secondMarginTable.y + secondMarginTable.height) - 32) < 0.01,
+      true
+    );
+
+    const oversizedElement = model.createCategoryElement('超宽边距', 0, 0, pageProject(), 600);
+    oversizedElement.tables = [
+      model.createTable({ columns: 2, rows: 1, margins: { left: 1000, right: 1000 } })
+    ];
+    const oversizedLayout = layoutCategory({ name: '超宽边距', songs: ['a'] }, oversizedElement);
+    const oversizedTable = oversizedLayout.tables[0];
+    check('oversized margins keep 40px minimum width', oversizedTable.tableWidth, 40);
+    check(
+      'oversized margins keep table inside block',
+      oversizedTable.x >= 0 && oversizedTable.x + oversizedTable.tableWidth <= oversizedElement.width,
+      true
+    );
+
+    const copyElement = model.createCategoryElement('复制边距', 0, 0, pageProject(), 600);
+    copyElement.tables = [
+      model.createTable({ columns: 2, rows: 1, margins: { top: 5, right: 6, bottom: 7, left: 8 } })
+    ];
+    const addedIndex = addTable(copyElement, { name: '复制边距', songs: ['a', 'b'] });
+    const copiedTable = copyElement.tables[addedIndex];
+    check(
+      'addTable copies margins',
+      JSON.stringify(copiedTable.margins),
+      JSON.stringify({ top: 5, right: 6, bottom: 7, left: 8 })
+    );
+    check('addTable margins are not shared', copiedTable.margins !== copyElement.tables[0].margins, true);
+    copiedTable.margins.top = 99;
+    check('changing copied margins leaves source intact', copyElement.tables[0].margins.top, 5);
+
+    const autoCopyElement = model.createCategoryElement('自动复制', 0, 0, pageProject(), 600);
+    autoCopyElement.tables = [
+      model.createTable({ columns: 2, rows: 1, margins: { top: 3, right: 4, bottom: 5, left: 6 } })
+    ];
+    layoutCategory({ name: '自动复制', songs: ['a', 'b', 'c'] }, autoCopyElement);
+    check('auto-continued table copies margins', autoCopyElement.tables.length, 2);
+    check(
+      'auto-continued margins are not shared',
+      autoCopyElement.tables[1].margins !== autoCopyElement.tables[0].margins,
+      true
+    );
+    autoCopyElement.tables[1].margins.left = 77;
+    check('changing auto-continued margins leaves source intact', autoCopyElement.tables[0].margins.left, 6);
 
     const manual = model.createCategoryElement('手动', 0, 0, {
       pageSize: { width: 800, height: 1200 },
@@ -544,7 +657,7 @@
     manual.tables = [model.createTable({ columns: 2, rows: 0, widthMode: 'manual', widths: [100, 200] })];
     const manualLayout = layoutCategory({ name: '手动', songs: ['短', '很长很长的歌名'] }, manual);
     const manualSum = manualLayout.tables[0].widths.reduce(function (a, b) { return a + b; }, 0);
-    check('manual widths fill table width', Math.abs(manualSum - manualLayout.tableWidth) < 0.01, true);
+    check('manual widths fill table width', Math.abs(manualSum - manualLayout.tables[0].tableWidth) < 0.01, true);
     check('manual gap = 0', manualLayout.tables[0].gap, 0);
     check(
       'manual contentWidths = widths',
@@ -559,13 +672,13 @@
     const singleLayout = layoutCategory({ name: '单列', songs: ['短', '很长很长的歌名'] }, singleElement);
     check(
       'single column fills table width',
-      Math.abs(singleLayout.tables[0].widths[0] - singleLayout.tableWidth) < 0.01,
+      Math.abs(singleLayout.tables[0].widths[0] - singleLayout.tables[0].tableWidth) < 0.01,
       true
     );
     check('single column gap = 0', singleLayout.tables[0].gap, 0);
     check(
       'single column contentWidth = table width',
-      Math.abs(singleLayout.tables[0].cells[0].contentWidth - singleLayout.tableWidth) < 0.01,
+      Math.abs(singleLayout.tables[0].cells[0].contentWidth - singleLayout.tables[0].tableWidth) < 0.01,
       true
     );
 
@@ -574,7 +687,7 @@
     const emptyLayout = layoutCategory({ name: '空表', songs: [] }, emptyElement);
     const emptySum = emptyLayout.tables[0].widths.reduce(function (a, b) { return a + b; }, 0);
     check('empty table gap = 0', emptyLayout.tables[0].gap, 0);
-    check('empty table widths sum to table width', Math.abs(emptySum - emptyLayout.tableWidth) < 0.01, true);
+    check('empty table widths sum to table width', Math.abs(emptySum - emptyLayout.tables[0].tableWidth) < 0.01, true);
     check('empty table has no cells', emptyLayout.tables[0].cells.every(function (cell) { return !cell; }), true);
 
 

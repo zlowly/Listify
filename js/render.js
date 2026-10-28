@@ -174,7 +174,7 @@
           if (cell && cell.overflow) {
             ctx.fillStyle = '#fee2e2';
             ctx.fillRect(
-              element.x + computed.tableX + cell.x,
+              element.x + table.x + cell.x,
               tableTop + cell.y,
               cell.contentWidth,
               cell.height
@@ -190,7 +190,7 @@
 
       table.cells.forEach(function (cell) {
         if (!cell) return;
-        const cellX = element.x + computed.tableX + cell.x;
+        const cellX = element.x + table.x + cell.x;
         const cellY = tableTop + cell.y;
         const innerX = cellX + computed.cellPadX;
         const innerWidth = Math.max(0, cell.contentWidth - computed.cellPadX * 2);
@@ -216,19 +216,19 @@
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
         ctx.strokeRect(
-          element.x + computed.tableX,
+          element.x + table.x,
           tableTop,
-          computed.tableWidth,
+          table.tableWidth,
           table.height
         );
         for (let row = 1; row < table.rows; row += 1) {
           const y = tableTop + row * table.rowHeight;
           ctx.beginPath();
-          ctx.moveTo(element.x + computed.tableX, y);
-          ctx.lineTo(element.x + computed.tableX + computed.tableWidth, y);
+          ctx.moveTo(element.x + table.x, y);
+          ctx.lineTo(element.x + table.x + table.tableWidth, y);
           ctx.stroke();
         }
-        let dividerX = element.x + computed.tableX;
+        let dividerX = element.x + table.x;
         for (let col = 0; col < table.widths.length - 1; col += 1) {
           dividerX += table.widths[col];
           ctx.beginPath();
@@ -318,7 +318,7 @@
     const result = [];
     computed.tables.forEach(function (table, tableIndex) {
       if (table.height <= 0) return;
-      let dividerX = element.x + computed.tableX;
+      let dividerX = element.x + table.x;
       for (let col = 0; col < table.widths.length - 1; col += 1) {
         dividerX += table.widths[col];
         result.push({
