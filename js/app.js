@@ -1314,16 +1314,63 @@
     input.click();
   }
 
+  function assetIsReferenced(assetId) {
+    if (!assetId) return false;
+    return state.project.pages.some(function (page) {
+      if (page.background && page.background.assetId === assetId) return true;
+      return page.elements.some(function (element) {
+        return element.type === 'image' && element.assetId === assetId;
+      });
+    });
+  }
+
+  function releaseUnusedAsset(assetId) {
+    if (assetId && !assetIsReferenced(assetId)) L.assets.remove(assetId);
+  }
+
+  async function loadFreeImageAsset(file, name) {
+    const mime = file.type || 'image/png';
+    const source = file.name
+      ? file
+      : new File([file], name || '剪贴板图片.png', { type: mime });
+    let assetId;
+    try {
+      assetId = await L.assets.addFile(source);
+      const image = await L.assets.loadImage(assetId);
+      const meta = L.assets.getMeta(assetId);
+      model.ensureAssetMeta(state.project, assetId, source.name, meta ? meta.mime : source.type);
+      return { assetId: assetId, image: image };
+    } catch (err) {
+      releaseUnusedAsset(assetId);
+      throw err;
+    }
+  }
+
+  function buildFreeImageElement(assetId, image, offset) {
+    const naturalWidth = image.naturalWidth || image.width || 400;
+    const naturalHeight = image.naturalHeight || image.height || 300;
+    const maxSize = 480;
+    const ratio = Math.min(1, maxSize / Math.max(naturalWidth, naturalHeight));
+    const width = Math.max(40, Math.round(naturalWidth * ratio));
+    const height = Math.max(40, Math.round(naturalHeight * ratio));
+    const element = model.createImageElement(state.project, assetId, width, height);
+    const shift = Number(offset) || 0;
+    if (shift) {
+      element.x += shift;
+      element.y += shift;
+    }
+    return element;
+  }
+
   async function handleFreeImageFile(file) {
     if (!file) return;
     const targetId = pendingImageElementId;
     pendingImageElementId = null;
     let assetId;
     try {
-      assetId = await L.assets.addFile(file);
-      const image = await L.assets.loadImage(assetId);
-      const meta = L.assets.getMeta(assetId);
-      model.ensureAssetMeta(state.project, assetId, file.name, meta ? meta.mime : file.type);
+      const loaded = await loadFreeImageAsset(file);
+      assetId = loaded.assetId;
+      const image = loaded.image;
 
       if (targetId) {
         const found = findElementAnywhere(targetId);
@@ -1338,23 +1385,118 @@
         }
       }
 
-      const naturalWidth = image.naturalWidth || image.width || 400;
-      const naturalHeight = image.naturalHeight || image.height || 300;
-      const maxSize = 480;
-      const ratio = Math.min(1, maxSize / Math.max(naturalWidth, naturalHeight));
-      const width = Math.max(40, Math.round(naturalWidth * ratio));
-      const height = Math.max(40, Math.round(naturalHeight * ratio));
       const page = currentPage();
-      if (!page) return;
-      const element = model.createImageElement(state.project, assetId, width, height);
+      if (!page) throw new Error('当前页面不存在。');
+      const element = buildFreeImageElement(assetId, image);
       page.elements.push(element);
       state.selection = { type: 'element', id: element.id };
       ui.renderAll();
       ui.toast('已添加图片。');
     } catch (err) {
-      if (assetId) L.assets.remove(assetId);
-      ui.toast('图片读取失败：' + err.message, 'error');
+      releaseUnusedAsset(assetId);
+      ui.toast('图片读取失败：' + (err && err.message ? err.message : '未知错误'), 'error');
     }
+  }
+
+  const CLIPBOARD_EXTENSIONS = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/svg+xml': 'svg',
+    'image/bmp': 'bmp',
+    'image/avif': 'avif',
+    'image/x-icon': 'ico'
+  };
+
+  function clipboardFile(image, index, stamp) {
+    const blob = image && image.blob;
+    if (!blob) throw new Error('剪贴板图片为空。');
+    const mime = image.mime || blob.type || 'image/png';
+    const provided = String(image.name || blob.name || '').trim();
+    const extension = CLIPBOARD_EXTENSIONS[String(mime).toLowerCase()] || 'png';
+    const name = provided || ('剪贴板图片-' + stamp + '-' + (index + 1) + '.' + extension);
+    return new File([blob], name, { type: mime });
+  }
+
+  async function handlePastedImages(images) {
+    if (!images || !images.length) return;
+    const targetPageId = state.currentPageId;
+    if (!model.getPage(state.project, targetPageId)) {
+      ui.toast('粘贴图片失败：当前页面不存在。', 'error');
+      return;
+    }
+
+    const stamp = Date.now();
+    let successCount = 0;
+    let failedCount = 0;
+    let firstError = '';
+    let lastElementId = null;
+
+    for (let index = 0; index < images.length; index += 1) {
+      let loaded;
+      try {
+        const file = clipboardFile(images[index], index, stamp);
+        loaded = await loadFreeImageAsset(file, file.name);
+      } catch (err) {
+        failedCount += 1;
+        if (!firstError) firstError = err && err.message ? err.message : '图片无法解码。';
+        continue;
+      }
+
+      const page = model.getPage(state.project, targetPageId);
+      if (!page) {
+        releaseUnusedAsset(loaded.assetId);
+        ui.toast('粘贴图片失败：目标页面已不存在。', 'error');
+        return;
+      }
+
+      const element = buildFreeImageElement(loaded.assetId, loaded.image, successCount * 24);
+      page.elements.push(element);
+      successCount += 1;
+      lastElementId = element.id;
+    }
+
+    if (!successCount) {
+      ui.toast('粘贴图片失败：' + (firstError || '图片无法解码。'), 'error');
+      return;
+    }
+    if (!model.getPage(state.project, targetPageId)) {
+      ui.toast('粘贴图片失败：目标页面已不存在。', 'error');
+      return;
+    }
+
+    state.currentPageId = targetPageId;
+    state.selection = { type: 'element', id: lastElementId };
+    ui.renderAll();
+    if (failedCount) {
+      ui.toast('已粘贴 ' + successCount + ' 张图片，' + failedCount + ' 张失败。', 'error');
+    } else if (successCount === 1) {
+      ui.toast('已粘贴图片。');
+    } else {
+      ui.toast('已粘贴 ' + successCount + ' 张图片。');
+    }
+  }
+
+  function isTextEditingNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const tag = node.tagName ? node.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    if (node.isContentEditable) return true;
+    if (typeof node.closest === 'function') {
+      const editable = node.closest('[contenteditable]');
+      if (editable && editable.getAttribute('contenteditable') !== 'false') return true;
+    }
+    return false;
+  }
+
+  function shouldHandleClipboardPaste(event) {
+    if (isTextEditingNode((event && event.target) || document.activeElement)) return false;
+    if (isTextEditingNode(document.activeElement)) return false;
+    const modal = document.getElementById('modal-root');
+    if (modal && !modal.hidden) return false;
+    return !!currentPage();
   }
 
   function normalizeImageRatio(element, image) {
@@ -1610,6 +1752,17 @@
     pane.addEventListener('wheel', onCanvasWheel, { passive: false });
     if (scrollEl) scrollEl.addEventListener('scroll', onCanvasScroll);
 
+    if (L.clipboardImage) {
+      L.clipboardImage.install({
+        shouldHandle: shouldHandleClipboardPaste,
+        onImages: function (images) {
+          handlePastedImages(images).catch(function (err) {
+            ui.toast('粘贴图片失败：' + (err && err.message ? err.message : '未知错误'), 'error');
+          });
+        }
+      });
+    }
+
     fit();
     ui.renderAll();
   }
@@ -1646,6 +1799,7 @@
     addText: addText,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
+    handlePastedImages: handlePastedImages,
     setImageKeepRatio: setImageKeepRatio,
     detachBackground: detachBackground,
     pickBackgroundImage: pickBackgroundImage,
