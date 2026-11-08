@@ -25,12 +25,19 @@
     lineHeight: 1.3,
     align: 'left'
   };
-  const DEFAULT_BACKGROUND = {
+  const BACKGROUND_FITS = ['original', 'fill-width', 'fill-height', 'cover', 'none'];
+  const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+  const DEFAULT_BACKGROUND_IMAGE = {
     assetId: null,
     fit: 'cover',
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    rotation: 0,
+    keepRatio: true,
     opacity: 1,
-    blur: 0,
-    color: '#ffffff'
+    blur: 0
   };
   const DEFAULT_TABLE_MARGINS = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -52,21 +59,78 @@
     return Object.assign({}, style, overrides || {});
   }
 
-  function createBackground(overrides) {
-    return Object.assign({}, DEFAULT_BACKGROUND, overrides || {});
+  function createBackgroundImage(assetId, fit) {
+    const mode = BACKGROUND_FITS.indexOf(fit) >= 0 ? fit : 'cover';
+    return Object.assign({}, DEFAULT_BACKGROUND_IMAGE, {
+      id: uid('bgimg'),
+      assetId: assetId || null,
+      fit: mode
+    });
   }
 
-  function cloneBackground(background) {
-    return createBackground(background);
+  function createBackgroundSet(name, color) {
+    return {
+      id: uid('bg'),
+      name: name || '背景',
+      color: color || DEFAULT_BACKGROUND_COLOR,
+      images: []
+    };
   }
 
-  function createPage(background, backgroundRef) {
+  function cloneBackgroundImage(image) {
+    return Object.assign({}, DEFAULT_BACKGROUND_IMAGE, image, { id: uid('bgimg') });
+  }
+
+  function cloneBackgroundSet(set) {
+    return {
+      id: uid('bg'),
+      name: set && set.name ? set.name : '背景',
+      color: set && set.color ? set.color : DEFAULT_BACKGROUND_COLOR,
+      images: (set && Array.isArray(set.images) ? set.images : []).map(cloneBackgroundImage)
+    };
+  }
+
+  function createPage(backgroundId) {
     return {
       id: uid('page'),
-      background: createBackground(background),
-      backgroundRef: backgroundRef || null,
+      backgroundId: backgroundId || null,
       elements: []
     };
+  }
+
+  function findBackground(project, id) {
+    if (!project || !id) return null;
+    return project.backgrounds.find(function (item) { return item.id === id; }) || null;
+  }
+
+  function effectiveBackground(project, page) {
+    if (!project) return null;
+    if (project.unifiedBackground) {
+      const unified = findBackground(project, project.unifiedBackgroundId);
+      if (unified) return unified;
+    }
+    if (!page) return null;
+    return findBackground(project, page.backgroundId);
+  }
+
+  function backgroundReferenceCount(project, setId) {
+    if (!project) return 0;
+    return project.pages.filter(function (page) { return page.backgroundId === setId; }).length;
+  }
+
+  function canDeleteBackground(project, setId) {
+    if (!project) return { ok: false, reason: '项目不存在。' };
+    if (project.backgrounds.length <= 1) {
+      return { ok: false, reason: '项目至少需要保留一个背景。' };
+    }
+    const references = backgroundReferenceCount(project, setId);
+    if (references > 0) {
+      return { ok: false, reason: '有 ' + references + ' 个页面正在使用该背景，请先改派。' };
+    }
+    if (project.unifiedBackground && project.unifiedBackgroundId === setId) {
+      return { ok: false, reason: '该背景正在作为全局背景使用，请先更换或关闭全局背景。' };
+    }
+    return { ok: true, reason: '' };
   }
 
   function resolveBackgroundOwner(project, page) {
@@ -88,15 +152,19 @@
   }
 
   function createDefaultProject() {
+    const background = createBackgroundSet('背景 1', DEFAULT_BACKGROUND_COLOR);
     const project = {
-      version: 2,
+      version: 3,
       pageSize: { width: 1080, height: 1920 },
       margins: { top: 60, right: 60, bottom: 60, left: 60 },
       playlist: { categories: [] },
       assets: [],
+      backgrounds: [background],
+      unifiedBackground: false,
+      unifiedBackgroundId: null,
       pages: []
     };
-    project.pages.push(createPage());
+    project.pages.push(createPage(background.id));
     return project;
   }
 
@@ -548,15 +616,23 @@
     DEFAULT_TITLE_STYLE: DEFAULT_TITLE_STYLE,
     DEFAULT_SONG_STYLE: DEFAULT_SONG_STYLE,
     DEFAULT_TEXT_STYLE: DEFAULT_TEXT_STYLE,
-    DEFAULT_BACKGROUND: DEFAULT_BACKGROUND,
+    BACKGROUND_FITS: BACKGROUND_FITS,
+    DEFAULT_BACKGROUND_COLOR: DEFAULT_BACKGROUND_COLOR,
+    DEFAULT_BACKGROUND_IMAGE: DEFAULT_BACKGROUND_IMAGE,
     DEFAULT_TABLE_MARGINS: DEFAULT_TABLE_MARGINS,
     uid: uid,
     clamp: clamp,
     clone: clone,
     copyStyle: copyStyle,
-    createBackground: createBackground,
-    cloneBackground: cloneBackground,
+    createBackgroundImage: createBackgroundImage,
+    createBackgroundSet: createBackgroundSet,
+    cloneBackgroundImage: cloneBackgroundImage,
+    cloneBackgroundSet: cloneBackgroundSet,
     createPage: createPage,
+    findBackground: findBackground,
+    effectiveBackground: effectiveBackground,
+    backgroundReferenceCount: backgroundReferenceCount,
+    canDeleteBackground: canDeleteBackground,
     resolveBackgroundOwner: resolveBackgroundOwner,
     referencingPages: referencingPages,
     createDefaultProject: createDefaultProject,

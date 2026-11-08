@@ -45,26 +45,41 @@
     return { x: (pw - width) / 2, y: (ph - height) / 2, width: width, height: height };
   }
 
-  function drawBackground(ctx, project, page, editMode) {
-    const background = page.background || model.DEFAULT_BACKGROUND;
-    const pw = project.pageSize.width;
-    const ph = project.pageSize.height;
+  function backgroundImageRect(pageSize, image, img) {
+    if (image.fit === 'none') {
+      return { x: image.x || 0, y: image.y || 0, width: image.width || 0, height: image.height || 0 };
+    }
+    if (!img) return { x: 0, y: 0, width: pageSize.width, height: pageSize.height };
+    return backgroundGeometry(pageSize, img, image.fit || 'cover');
+  }
+
+  function drawBackground(ctx, project, page) {
+    const background = model.effectiveBackground(project, page);
+    const pageSize = project.pageSize;
+    const pw = pageSize.width;
+    const ph = pageSize.height;
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, pw, ph);
     ctx.clip();
-    ctx.fillStyle = background.color || '#ffffff';
+    ctx.fillStyle = (background && background.color) || model.DEFAULT_BACKGROUND_COLOR;
     ctx.fillRect(0, 0, pw, ph);
-    if (background.assetId) {
-      const img = L.assets.getCachedImage(background.assetId);
-      if (img) {
-        const geometry = backgroundGeometry(project.pageSize, img, background.fit || 'cover');
-        ctx.globalAlpha = model.clamp(Number(background.opacity), 0, 1);
-        if (Number(background.blur) > 0) {
-          ctx.filter = 'blur(' + Number(background.blur) + 'px)';
-        }
-        ctx.drawImage(img, geometry.x, geometry.y, geometry.width, geometry.height);
-      }
+    if (background && Array.isArray(background.images)) {
+      background.images.forEach(function (image) {
+        if (!image || !image.assetId) return;
+        const img = L.assets.getCachedImage(image.assetId);
+        if (!img) return;
+        const rect = backgroundImageRect(pageSize, image, img);
+        if (!(rect.width > 0) || !(rect.height > 0)) return;
+        ctx.save();
+        ctx.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        ctx.rotate(model.rotationRadians(image));
+        ctx.globalAlpha = model.clamp(Number(image.opacity), 0, 1);
+        const blur = Number(image.blur);
+        if (blur > 0) ctx.filter = 'blur(' + blur + 'px)';
+        ctx.drawImage(img, -rect.width / 2, -rect.height / 2, rect.width, rect.height);
+        ctx.restore();
+      });
     }
     ctx.restore();
   }
@@ -382,11 +397,47 @@
     });
   }
 
-  function pageAssets(page) {
+  function hitTestBackground(project, page, x, y) {
+    const background = model.effectiveBackground(project, page);
+    if (!background || !Array.isArray(background.images)) return null;
+    const pageSize = project.pageSize;
+    for (let i = background.images.length - 1; i >= 0; i -= 1) {
+      const image = background.images[i];
+      if (!image || !image.assetId) continue;
+      const img = L.assets.getCachedImage(image.assetId);
+      if (!img) continue;
+      const rect = backgroundImageRect(pageSize, image, img);
+      if (!(rect.width > 0) || !(rect.height > 0)) continue;
+      const centerX = rect.x + rect.width / 2;
+      const centerY = rect.y + rect.height / 2;
+      const local = model.rotateVector(x - centerX, y - centerY, -model.rotationRadians(image));
+      if (Math.abs(local.x) <= rect.width / 2 && Math.abs(local.y) <= rect.height / 2) {
+        return { background: background, image: image, index: i, rect: rect };
+      }
+    }
+    return null;
+  }
+
+  function pageAssets(project, page) {
     const ids = new Set();
-    if (page.background && page.background.assetId) ids.add(page.background.assetId);
+    const background = model.effectiveBackground(project, page);
+    if (background && Array.isArray(background.images)) {
+      background.images.forEach(function (image) {
+        if (image && image.assetId) ids.add(image.assetId);
+      });
+    }
     page.elements.forEach(function (element) {
       if (element.type === 'image' && element.assetId) ids.add(element.assetId);
+    });
+    return Array.from(ids);
+  }
+
+  function allBackgroundAssets(project) {
+    const ids = new Set();
+    (project.backgrounds || []).forEach(function (background) {
+      (background.images || []).forEach(function (image) {
+        if (image && image.assetId) ids.add(image.assetId);
+      });
     });
     return Array.from(ids);
   }
@@ -394,6 +445,7 @@
   L.render = {
     roundRect: roundRect,
     backgroundGeometry: backgroundGeometry,
+    backgroundImageRect: backgroundImageRect,
     drawBackground: drawBackground,
     drawFreeText: drawFreeText,
     drawFreeImage: drawFreeImage,
@@ -404,8 +456,10 @@
     elementAabb: elementAabb,
     imageLocalPoint: imageLocalPoint,
     hitTest: hitTest,
+    hitTestBackground: hitTestBackground,
     tableDividers: tableDividers,
     pageOverflow: pageOverflow,
-    pageAssets: pageAssets
+    pageAssets: pageAssets,
+    allBackgroundAssets: allBackgroundAssets
   };
 })();

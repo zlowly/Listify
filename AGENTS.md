@@ -17,7 +17,11 @@ Playlist ("歌单") layout generator — a static web app. **Greenfield**: the r
 - Table `行数` of `0` means dynamic rows: rows = ceil(songCount / columns).
 - Fill orders: column-major by width ("从左往右逐列铺") vs row-major by width ("从上往下逐行铺").
 - A page holds optionally many category blocks; each block has two sub-regions (category name, songs) with independent font/size. The songs sub-region may be subdivided into a grid with its own column/row settings.
-- Background sizing is one of 原大小 / 横向占满 / 竖向占满 / 最适合 (cover, centered), plus opacity and blur.
+- Background is a project-level library (`project.backgrounds[]`), not per-page data: each set has a fill color and an ordered image list; pages only store `backgroundId`. Any page can reference any set; deleting a page never copies or dissolves a background.
+- Each background image positions independently with `original | fill-width | fill-height | cover | none`. The first four are page-relative and reflow on page resize; `none` uses a fixed page-coordinate rect plus rotation/keepRatio. Direct canvas manipulation of a fit image auto-converts it to `none`.
+- `project.unifiedBackground` + `unifiedBackgroundId` are a non-destructive render override: while on, every page renders the global set but each page keeps its own `backgroundId`. Do not implement it by bulk-assigning page IDs. "固化到所有页" and "本页独立副本" are explicit actions that do change IDs.
+- Backgrounds stay out of `page.elements`: content always renders above, normal hit-testing never selects a background, background images are drawn clipped to the page (not per image), and playlist-only export skips the whole layer. Background editing is enabled only after selecting a set/image in the layer panel.
+- New pages inherit the current effective background; there is no blank/reference dialog.
 - Page settings: multi-page with tab add/remove/switch; default portrait orientation; page size and top/right/bottom/left margins editable both numerically and by dragging on the canvas.
 
 ## Working notes

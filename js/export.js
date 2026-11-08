@@ -21,7 +21,7 @@
 
   function waitForAssets(project, page, mode) {
     if (mode === MODE_PLAYLIST) return waitForFonts();
-    return loadImages(L.render.pageAssets(page)).then(waitForFonts);
+    return loadImages(L.render.pageAssets(project, page)).then(waitForFonts);
   }
 
   async function preloadPages(project, pages, mode) {
@@ -31,7 +31,7 @@
     }
     const assetPages = new Map();
     pages.forEach(function (page, index) {
-      L.render.pageAssets(page).forEach(function (id) {
+      L.render.pageAssets(project, page).forEach(function (id) {
         if (!assetPages.has(id)) assetPages.set(id, index + 1);
       });
     });

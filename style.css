@@ -338,6 +338,38 @@ button { cursor: pointer; }
   font-size: 12px;
 }
 .layer-sub { color: var(--faint); font-size: 10px; }
+.layer-bg-row { background: #fbfcfd; }
+.layer-bg-image-row {
+  margin-left: 18px;
+  border-left: 2px solid #e2e8f0;
+  background: #fff;
+}
+.layer-bg-image-row.selected { border-left-color: var(--blue); }
+.layer-bg-add {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 5px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+}
+.layer-bg-add:hover { border-color: #b7c3d4; color: var(--text); }
+
+/* background library modal */
+.bg-library-list { display: flex; flex-direction: column; gap: 8px; }
+.bg-library-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+.bg-library-row .input { flex: 1; min-width: 0; }
+.bg-library-meta { color: var(--faint); font-size: 11px; white-space: nowrap; }
 
 /* property inspector */
 .inspector {

@@ -24,6 +24,8 @@
   let drag = null;
   let inlineEditor = null;
   let pendingImageElementId = null;
+  let pendingBackgroundSetId = null;
+  let pendingBackgroundImageId = null;
   let uiRenderDepth = 0;
 
   const viewport = {
@@ -74,6 +76,29 @@
     return page.elements.find(function (element) {
       return element.id === state.selection.id;
     }) || null;
+  }
+
+  function editingBackground() {
+    return state.selection.type === 'backgroundSet' || state.selection.type === 'backgroundImage';
+  }
+
+  function selectedBackgroundSet() {
+    if (!editingBackground()) return null;
+    return model.findBackground(state.project, state.selection.setId);
+  }
+
+  function selectedBackgroundImage() {
+    if (state.selection.type !== 'backgroundImage') return null;
+    const set = model.findBackground(state.project, state.selection.setId);
+    if (!set) return null;
+    return (set.images || []).find(function (image) {
+      return image.id === state.selection.imageId;
+    }) || null;
+  }
+
+  function backgroundImageBounds(image) {
+    const loaded = image.assetId ? L.assets.getCachedImage(image.assetId) : null;
+    return renderer.backgroundImageRect(state.project.pageSize, image, loaded);
   }
 
   function findElementAnywhere(id) {
@@ -454,7 +479,7 @@
     drawMarginGuides(ctx, rect);
     drawOverflow(ctx, page, rect);
     drawSelection(ctx, page);
-    drawPageSizeHandle(ctx, rect);
+    if (!editingBackground()) drawPageSizeHandle(ctx, rect);
   }
 
   function drawMarginGuides(ctx, rect) {
@@ -590,6 +615,11 @@
   }
 
   function drawSelection(ctx, page) {
+    const backgroundImage = selectedBackgroundImage();
+    if (backgroundImage) {
+      drawBackgroundSelection(ctx, backgroundImage);
+      return;
+    }
     const element = selectedElement();
     if (!element) return;
     const bounds = renderer.elementBounds(state.project, page, element);
@@ -619,6 +649,35 @@
     ctx.restore();
 
     if (element.type === 'category') drawTableDividers(ctx, page, element);
+  }
+
+  function drawBackgroundSelection(ctx, image) {
+    const bounds = backgroundImageBounds(image);
+    if (!(bounds.width > 0) || !(bounds.height > 0)) return;
+    const shape = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      rotation: image.rotation
+    };
+    const corners = renderer.elementCorners(shape);
+    ctx.save();
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    corners.forEach(function (corner, index) {
+      const point = screenFromPage(corner.x, corner.y);
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+    ctx.stroke();
+    imageHandlePoints(shape).forEach(function (handle) {
+      drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
+    });
+    ctx.restore();
   }
 
   function drawTableDividers(ctx, page, element) {
@@ -660,6 +719,29 @@
   /* ---------- hit testing ---------- */
 
   function handleAt(screenX, screenY) {
+    const backgroundImage = selectedBackgroundImage();
+    if (backgroundImage) {
+      const bounds = backgroundImageBounds(backgroundImage);
+      const shape = {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        rotation: backgroundImage.rotation
+      };
+      for (const point of imageHandlePoints(shape)) {
+        if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
+          return {
+            type: 'resize-background',
+            image: backgroundImage,
+            handle: point.name,
+            cursor: point.cursor,
+            bounds: bounds
+          };
+        }
+      }
+      return null;
+    }
     const page = currentPage();
     const element = selectedElement();
     if (!page || !element) return null;
@@ -727,6 +809,9 @@
       if (page) {
         const pt = toPage(screenX, screenY);
         if (renderer.hitTest(state.project, page, pt.x, pt.y)) cursor = 'move';
+        else if (editingBackground() && renderer.hitTestBackground(state.project, page, pt.x, pt.y)) {
+          cursor = 'move';
+        }
       }
     }
     if (cursor === 'default') {
@@ -749,7 +834,7 @@
     const page = currentPage();
     if (!page) return;
 
-    const pageHandle = pageSizeHandleAt(point.x, point.y);
+    const pageHandle = editingBackground() ? null : pageSizeHandleAt(point.x, point.y);
     if (pageHandle) {
       drag = {
         type: 'page-size',
@@ -764,14 +849,33 @@
 
     const handle = handleAt(point.x, point.y);
     if (handle) {
-      drag = {
-        type: 'resize',
-        element: handle.element,
-        handle: handle.handle,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startBounds: handle.bounds
-      };
+      if (handle.type === 'resize-background') {
+        ensureCustomBackgroundImage(handle.image);
+        const bounds = backgroundImageBounds(handle.image);
+        drag = {
+          type: 'resize',
+          background: true,
+          image: handle.image,
+          handle: handle.handle,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startBounds: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height
+          }
+        };
+      } else {
+        drag = {
+          type: 'resize',
+          element: handle.element,
+          handle: handle.handle,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startBounds: handle.bounds
+        };
+      }
       beginPointer(event);
       return;
     }
@@ -810,6 +914,29 @@
       return;
     }
 
+    if (editingBackground()) {
+      const backgroundHit = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
+      if (backgroundHit) {
+        ensureCustomBackgroundImage(backgroundHit.image);
+        state.selection = {
+          type: 'backgroundImage',
+          setId: backgroundHit.background.id,
+          imageId: backgroundHit.image.id
+        };
+        ui.renderAll();
+        drag = {
+          type: 'move-background',
+          image: backgroundHit.image,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startX: backgroundHit.image.x,
+          startY: backgroundHit.image.y
+        };
+        beginPointer(event);
+        return;
+      }
+    }
+
     const margin = marginAt(point.x, point.y);
     if (margin) {
       drag = {
@@ -841,6 +968,13 @@
     event.preventDefault();
     const dx = (event.clientX - drag.startClientX) / viewport.scale;
     const dy = (event.clientY - drag.startClientY) / viewport.scale;
+
+    if (drag.type === 'move-background') {
+      drag.image.x = Math.round(drag.startX + dx);
+      drag.image.y = Math.round(drag.startY + dy);
+      redraw();
+      return;
+    }
 
     if (drag.type === 'move') {
       drag.element.x = Math.round(drag.startX + dx);
@@ -881,6 +1015,21 @@
   }
 
   function resizeDrag(dx, dy) {
+    if (drag.background) {
+      const image = drag.image;
+      const start = drag.startBounds;
+      const next = model.computeImageResize(
+        { x: start.x, y: start.y, width: start.width, height: start.height, rotation: image.rotation },
+        drag.handle,
+        { x: dx, y: dy },
+        image.keepRatio !== false
+      );
+      image.x = Math.round(next.x);
+      image.y = Math.round(next.y);
+      image.width = Math.round(next.width);
+      image.height = Math.round(next.height);
+      return;
+    }
     const element = drag.element;
     const start = drag.startBounds;
     const minWidth = element.type === 'text' ? 80 : 80;
@@ -940,6 +1089,16 @@
     }
     if (finished.type === 'margin') {
       state.project.margins[finished.side] = Math.round(state.project.margins[finished.side]);
+    }
+    if (finished.type === 'move-background' && finished.image) {
+      finished.image.x = Math.round(finished.image.x);
+      finished.image.y = Math.round(finished.image.y);
+    }
+    if (finished.type === 'resize' && finished.background && finished.image) {
+      finished.image.x = Math.round(finished.image.x);
+      finished.image.y = Math.round(finished.image.y);
+      finished.image.width = Math.round(finished.image.width);
+      finished.image.height = Math.round(finished.image.height);
     }
     if (finished.type === 'move' && finished.element) {
       finished.element.x = Math.round(finished.element.x);
@@ -1107,9 +1266,25 @@
     else ui.renderAll();
   }
 
-  function selectBackground() {
-    state.selection = { type: 'background' };
+  function selectBackgroundSet(setId) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    state.selection = { type: 'backgroundSet', setId: setId };
     ui.renderAll();
+  }
+
+  function selectBackgroundImage(setId, imageId) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const image = (set.images || []).find(function (item) { return item.id === imageId; });
+    if (!image) return;
+    state.selection = { type: 'backgroundImage', setId: setId, imageId: imageId };
+    ui.renderAll();
+  }
+
+  function selectBackground() {
+    const set = model.effectiveBackground(state.project, currentPage());
+    if (set) selectBackgroundSet(set.id);
   }
 
   function selectElement(id) {
@@ -1131,52 +1306,14 @@
 
   function addPageDialog() {
     const current = currentPage();
-    const canInherit = !!current;
-    const body =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">新页面背景</div>' +
-        '<label class="field" style="display:block;margin-bottom:10px;cursor:pointer;">' +
-          '<span class="control" style="display:flex;gap:8px;align-items:center;">' +
-            '<input type="radio" name="new-page-bg" value="blank" checked> 空白背景（白色）' +
-          '</span>' +
-        '</label>' +
-        '<label class="field" style="display:block;cursor:pointer;opacity:' + (canInherit ? '1' : '0.45') + ';">' +
-          '<span class="control" style="display:flex;gap:8px;align-items:center;">' +
-            '<input type="radio" name="new-page-bg" value="inherit"' + (canInherit ? '' : ' disabled') + '> 引用上页背景' +
-          '</span>' +
-        '</label>' +
-        '<p class="hint">引用后两页共享同一份背景，图片、尺寸模式、透明度、模糊和填充色始终同步；可在背景属性中断开引用。</p>' +
-      '</div>';
-
-    const modal = ui.modal.open({
-      title: '新增页面',
-      body: body,
-      width: '420px',
-      actions: [
-        { label: '取消', onClick: function (close) { close(); } },
-        {
-          label: '创建页面',
-          className: 'btn-primary',
-          onClick: function (close) {
-            const checked = modal.body.querySelector('input[name="new-page-bg"]:checked');
-            const mode = checked ? checked.value : 'blank';
-            let page;
-            if (mode === 'inherit' && current) {
-              const owner = model.resolveBackgroundOwner(state.project, current) || current;
-              page = model.createPage(null, owner.id);
-              page.background = owner.background;
-            } else {
-              page = model.createPage();
-            }
-            state.project.pages.push(page);
-            state.currentPageId = page.id;
-            state.selection = { type: 'page' };
-            close();
-            ui.renderAll();
-          }
-        }
-      ]
-    });
+    const backgroundId = state.project.unifiedBackground && state.project.unifiedBackgroundId
+      ? state.project.unifiedBackgroundId
+      : (current && current.backgroundId) || (state.project.backgrounds[0] || {}).id || null;
+    const page = model.createPage(backgroundId);
+    state.project.pages.push(page);
+    state.currentPageId = page.id;
+    state.selection = { type: 'page' };
+    ui.renderAll();
   }
 
   function deleteCurrentPage() {
@@ -1193,12 +1330,6 @@
       { confirmLabel: '删除', danger: true }
     ).then(function (ok) {
       if (!ok) return;
-      state.project.pages.forEach(function (item) {
-        if (item.backgroundRef === page.id) {
-          item.background = model.cloneBackground(item.background);
-          item.backgroundRef = null;
-        }
-      });
       state.project.pages.splice(index, 1);
       const next = state.project.pages[Math.min(index, state.project.pages.length - 1)];
       state.currentPageId = next.id;
@@ -1316,8 +1447,11 @@
 
   function assetIsReferenced(assetId) {
     if (!assetId) return false;
-    return state.project.pages.some(function (page) {
-      if (page.background && page.background.assetId === assetId) return true;
+    return (state.project.backgrounds || []).some(function (background) {
+      return (background.images || []).some(function (image) {
+        return image.assetId === assetId;
+      });
+    }) || state.project.pages.some(function (page) {
       return page.elements.some(function (element) {
         return element.type === 'image' && element.assetId === assetId;
       });
@@ -1530,16 +1664,75 @@
     ui.renderAll();
   }
 
-  function detachBackground() {
-    const page = currentPage();
-    if (!page || !page.backgroundRef) return;
-    page.background = model.cloneBackground(page.background);
-    page.backgroundRef = null;
-    ui.renderAll();
-    ui.toast('已断开背景引用。');
+  function ensureCustomBackgroundImage(image) {
+    if (!image || image.fit === 'none') return;
+    const bounds = backgroundImageBounds(image);
+    const pageSize = state.project.pageSize;
+    image.fit = 'none';
+    image.x = Math.round(bounds.width > 0 ? bounds.x : 0);
+    image.y = Math.round(bounds.height > 0 ? bounds.y : 0);
+    image.width = Math.round(bounds.width > 0 ? bounds.width : pageSize.width);
+    image.height = Math.round(bounds.height > 0 ? bounds.height : pageSize.height);
   }
 
-  function pickBackgroundImage() {
+  function addBackgroundSet() {
+    const set = model.createBackgroundSet('背景 ' + (state.project.backgrounds.length + 1));
+    state.project.backgrounds.push(set);
+    state.selection = { type: 'backgroundSet', setId: set.id };
+    ui.renderAll();
+    return set;
+  }
+
+  function duplicateBackgroundSet(setId) {
+    const source = model.findBackground(state.project, setId);
+    if (!source) return null;
+    const copy = model.cloneBackgroundSet(source);
+    copy.name = source.name + ' 副本';
+    state.project.backgrounds.push(copy);
+    state.selection = { type: 'backgroundSet', setId: copy.id };
+    ui.renderAll();
+    return copy;
+  }
+
+  function renameBackgroundSet(setId, name) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const trimmed = String(name == null ? '' : name).trim();
+    if (!trimmed) return;
+    set.name = trimmed;
+    ui.renderAll();
+  }
+
+  function deleteBackgroundSet(setId) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const check = model.canDeleteBackground(state.project, setId);
+    if (!check.ok) {
+      ui.modal.alert('无法删除背景', check.reason);
+      return;
+    }
+    const index = state.project.backgrounds.indexOf(set);
+    state.project.backgrounds.splice(index, 1);
+    (set.images || []).forEach(function (image) { releaseUnusedAsset(image.assetId); });
+    state.selection = { type: 'page' };
+    ui.renderAll();
+    ui.toast('已删除背景“' + set.name + '”。');
+  }
+
+  function setPageBackground(setId) {
+    const page = currentPage();
+    if (!page) return;
+    if (!model.findBackground(state.project, setId)) return;
+    page.backgroundId = setId;
+    state.selection = { type: 'page' };
+    ui.renderAll();
+  }
+
+  function pickBackgroundImage(setId, imageId) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    pendingBackgroundSetId = setId;
+    pendingBackgroundImageId = imageId || null;
     const input = document.getElementById('bg-file');
     input.value = '';
     input.click();
@@ -1547,15 +1740,37 @@
 
   async function handleBackgroundFile(file) {
     if (!file) return;
-    const page = currentPage();
-    if (!page) return;
+    const setId = pendingBackgroundSetId;
+    const imageId = pendingBackgroundImageId;
+    pendingBackgroundSetId = null;
+    pendingBackgroundImageId = null;
+    const set = model.findBackground(state.project, setId) ||
+      model.effectiveBackground(state.project, currentPage());
+    if (!set) return;
     let assetId;
     try {
       assetId = await L.assets.addFile(file);
-      await L.assets.loadImage(assetId);
+      const loaded = await L.assets.loadImage(assetId);
       const meta = L.assets.getMeta(assetId);
       model.ensureAssetMeta(state.project, assetId, file.name, meta ? meta.mime : file.type);
-      page.background.assetId = assetId;
+      const target = imageId
+        ? (set.images || []).find(function (image) { return image.id === imageId; })
+        : null;
+      if (target) {
+        const oldAssetId = target.assetId;
+        target.assetId = assetId;
+        if (target.fit === 'none') {
+          const rect = renderer.backgroundImageRect(state.project.pageSize, target, loaded);
+          target.width = target.width > 0 ? target.width : rect.width;
+          target.height = target.height > 0 ? target.height : rect.height;
+        }
+        releaseUnusedAsset(oldAssetId);
+        state.selection = { type: 'backgroundImage', setId: set.id, imageId: target.id };
+      } else {
+        const image = model.createBackgroundImage(assetId, set.images.length ? 'original' : 'cover');
+        set.images.push(image);
+        state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
+      }
       ui.renderAll();
       ui.toast('背景图片已更新。');
     } catch (err) {
@@ -1564,12 +1779,104 @@
     }
   }
 
-  function clearBackgroundImage() {
-    const page = currentPage();
-    if (!page || !page.background.assetId) return;
-    page.background.assetId = null;
+  function deleteBackgroundImage(setId, imageId) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const index = (set.images || []).findIndex(function (image) { return image.id === imageId; });
+    if (index < 0) return;
+    const image = set.images[index];
+    set.images.splice(index, 1);
+    releaseUnusedAsset(image.assetId);
+    state.selection = { type: 'backgroundSet', setId: setId };
     ui.renderAll();
-    ui.toast('已清除背景图片。');
+  }
+
+  function moveBackgroundImage(setId, imageId, delta) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const index = set.images.findIndex(function (image) { return image.id === imageId; });
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= set.images.length) return;
+    const image = set.images[index];
+    set.images.splice(index, 1);
+    set.images.splice(target, 0, image);
+    ui.renderAll();
+  }
+
+  function setBackgroundImageFit(setId, imageId, fit) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const image = (set.images || []).find(function (item) { return item.id === imageId; });
+    if (!image) return;
+    if (fit === 'none') {
+      ensureCustomBackgroundImage(image);
+    } else {
+      image.fit = fit;
+      image.rotation = 0;
+    }
+    ui.renderAll();
+  }
+
+  function restoreBackgroundImageFit(setId, imageId) {
+    setBackgroundImageFit(setId, imageId, 'cover');
+  }
+
+  function setBackgroundImageValue(setId, imageId, key, value) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    const image = (set.images || []).find(function (item) { return item.id === imageId; });
+    if (!image) return;
+    image[key] = value;
+    ui.renderAll();
+  }
+
+  function toggleUnifiedBackground(value) {
+    const next = !!value;
+    if (next) {
+      let id = state.project.unifiedBackgroundId;
+      if (!model.findBackground(state.project, id)) {
+        const effective = model.effectiveBackground(state.project, currentPage());
+        id = effective ? effective.id : (state.project.backgrounds[0] || {}).id || null;
+      }
+      state.project.unifiedBackgroundId = id;
+    }
+    state.project.unifiedBackground = next;
+    state.selection = { type: 'page' };
+    ui.renderAll();
+  }
+
+  function setUnifiedBackground(setId) {
+    if (!model.findBackground(state.project, setId)) return;
+    state.project.unifiedBackgroundId = setId;
+    state.project.unifiedBackground = true;
+    ui.renderAll();
+  }
+
+  function bakeUnifiedBackground() {
+    const id = state.project.unifiedBackgroundId;
+    if (!id) return;
+    state.project.pages.forEach(function (page) { page.backgroundId = id; });
+    state.project.unifiedBackground = false;
+    state.selection = { type: 'page' };
+    ui.renderAll();
+    ui.toast('已将全局背景固化到所有页。');
+  }
+
+  function copyUnifiedBackgroundToPage() {
+    const id = state.project.unifiedBackgroundId;
+    const globalSet = model.findBackground(state.project, id);
+    const page = currentPage();
+    if (!globalSet || !page) return;
+    const copy = model.cloneBackgroundSet(globalSet);
+    copy.name = globalSet.name + ' 副本';
+    state.project.backgrounds.push(copy);
+    state.project.pages.forEach(function (item) {
+      item.backgroundId = item.id === page.id ? copy.id : id;
+    });
+    state.project.unifiedBackground = false;
+    state.selection = { type: 'backgroundSet', setId: copy.id };
+    ui.renderAll();
+    ui.toast('已为当前页创建独立背景副本。');
   }
 
   /* ---------- import ---------- */
@@ -1774,9 +2081,12 @@
     selectedElement: selectedElement,
     selectPage: selectPage,
     selectBackground: selectBackground,
+    selectBackgroundSet: selectBackgroundSet,
+    selectBackgroundImage: selectBackgroundImage,
     selectElement: selectElement,
     switchPage: switchPage,
     addPageDialog: addPageDialog,
+    addPage: addPageDialog,
     deleteCurrentPage: deleteCurrentPage,
     jumpToCategory: jumpToCategory,
     changed: changed,
@@ -1801,10 +2111,22 @@
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
     setImageKeepRatio: setImageKeepRatio,
-    detachBackground: detachBackground,
+    addBackgroundSet: addBackgroundSet,
+    duplicateBackgroundSet: duplicateBackgroundSet,
+    renameBackgroundSet: renameBackgroundSet,
+    deleteBackgroundSet: deleteBackgroundSet,
+    setPageBackground: setPageBackground,
     pickBackgroundImage: pickBackgroundImage,
     handleBackgroundFile: handleBackgroundFile,
-    clearBackgroundImage: clearBackgroundImage,
+    deleteBackgroundImage: deleteBackgroundImage,
+    moveBackgroundImage: moveBackgroundImage,
+    setBackgroundImageFit: setBackgroundImageFit,
+    restoreBackgroundImageFit: restoreBackgroundImageFit,
+    setBackgroundImageValue: setBackgroundImageValue,
+    toggleUnifiedBackground: toggleUnifiedBackground,
+    setUnifiedBackground: setUnifiedBackground,
+    bakeUnifiedBackground: bakeUnifiedBackground,
+    copyUnifiedBackgroundToPage: copyUnifiedBackgroundToPage,
     openImport: openImport,
     handleImportFile: handleImportFile,
     saveProject: saveProject,

@@ -10,8 +10,12 @@
 
   function collectReferencedAssetIds(project) {
     const ids = new Set();
+    (project.backgrounds || []).forEach(function (background) {
+      (background.images || []).forEach(function (image) {
+        if (image && image.assetId) ids.add(image.assetId);
+      });
+    });
     project.pages.forEach(function (page) {
-      if (page.background && page.background.assetId) ids.add(page.background.assetId);
       page.elements.forEach(function (element) {
         if (element.type === 'image' && element.assetId) ids.add(element.assetId);
       });
@@ -82,13 +86,28 @@
     };
   }
 
-  function serializeBackground(background) {
+  function serializeBackgroundImage(image) {
     return {
-      assetId: background.assetId || null,
-      fit: background.fit || 'cover',
-      opacity: background.opacity == null ? 1 : background.opacity,
-      blur: background.blur == null ? 0 : background.blur,
-      color: background.color || '#ffffff'
+      id: image.id,
+      assetId: image.assetId || null,
+      fit: image.fit || 'cover',
+      x: Number(image.x) || 0,
+      y: Number(image.y) || 0,
+      width: Number(image.width) || 0,
+      height: Number(image.height) || 0,
+      rotation: Number(image.rotation) || 0,
+      keepRatio: image.keepRatio !== false,
+      opacity: image.opacity == null ? 1 : image.opacity,
+      blur: image.blur == null ? 0 : image.blur
+    };
+  }
+
+  function serializeBackgroundSet(background) {
+    return {
+      id: background.id,
+      name: background.name || '背景',
+      color: background.color || model.DEFAULT_BACKGROUND_COLOR,
+      images: (background.images || []).map(serializeBackgroundImage)
     };
   }
 
@@ -111,7 +130,7 @@
     }
 
     return {
-      version: 2,
+      version: 3,
       pageSize: {
         width: project.pageSize.width,
         height: project.pageSize.height
@@ -128,12 +147,13 @@
         })
       },
       assets: assets,
+      backgrounds: (project.backgrounds || []).map(serializeBackgroundSet),
+      unifiedBackground: !!project.unifiedBackground,
+      unifiedBackgroundId: project.unifiedBackgroundId || null,
       pages: project.pages.map(function (page) {
-        const backgroundRef = page.backgroundRef || null;
         return {
           id: page.id,
-          background: backgroundRef ? null : serializeBackground(page.background || model.DEFAULT_BACKGROUND),
-          backgroundRef: backgroundRef,
+          backgroundId: page.backgroundId || null,
           elements: page.elements.map(serializeElement)
         };
       })
@@ -155,15 +175,16 @@
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       return { ok: false, errors: ['项目文件不是有效的 JSON 对象。'] };
     }
-    if (raw.version !== 1 && raw.version !== 2) {
-      if (typeof raw.version === 'number' && raw.version > 2) {
-        fail('项目版本 ' + raw.version + ' 高于当前支持的版本 2，无法加载。');
+    if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3) {
+      if (typeof raw.version === 'number' && raw.version > 3) {
+        fail('项目版本 ' + raw.version + ' 高于当前支持的版本 3，无法加载。');
       } else {
         fail('项目版本无效或缺失，无法加载。');
       }
       return { ok: false, errors: errors };
     }
     const isV1 = raw.version === 1;
+    const isV3 = raw.version === 3;
     if (!raw.pageSize || !isFiniteNumber(raw.pageSize.width) || !isFiniteNumber(raw.pageSize.height) ||
         raw.pageSize.width <= 0 || raw.pageSize.height <= 0) {
       fail('页面尺寸无效。');
@@ -222,6 +243,71 @@
       });
     }
 
+    const backgroundIds = new Set();
+    if (isV3) {
+      if (!Array.isArray(raw.backgrounds) || raw.backgrounds.length === 0) {
+        fail('背景库缺失或为空。');
+      } else {
+        raw.backgrounds.forEach(function (background, index) {
+          const label = '第 ' + (index + 1) + ' 个背景';
+          if (!background || typeof background.id !== 'string' || !background.id) {
+            fail(label + '缺少 ID。');
+            return;
+          }
+          if (backgroundIds.has(background.id)) fail('背景 ID 重复：' + background.id);
+          backgroundIds.add(background.id);
+          if (typeof background.name !== 'string') fail(label + '名称无效。');
+          if (typeof background.color !== 'string') fail(label + '颜色无效。');
+          if (!Array.isArray(background.images)) {
+            fail(label + '图片列表无效。');
+            return;
+          }
+          const imageIds = new Set();
+          background.images.forEach(function (image, imageIndex) {
+            const imageLabel = label + '第 ' + (imageIndex + 1) + ' 张图片';
+            if (!image || typeof image.id !== 'string' || !image.id) {
+              fail(imageLabel + '缺少 ID。');
+              return;
+            }
+            if (imageIds.has(image.id)) fail(imageLabel + ' ID 重复。');
+            imageIds.add(image.id);
+            if (image.assetId != null) {
+              if (typeof image.assetId !== 'string' || !assetIds.has(image.assetId)) {
+                fail(imageLabel + '引用了不存在的图片资产。');
+              }
+            }
+            if (model.BACKGROUND_FITS.indexOf(image.fit) < 0) fail(imageLabel + '定位模式无效。');
+            if (image.fit === 'none') {
+              if (!isFiniteNumber(image.x) || !isFiniteNumber(image.y) ||
+                  !isFiniteNumber(image.width) || image.width <= 0 ||
+                  !isFiniteNumber(image.height) || image.height <= 0) {
+                fail(imageLabel + '的自定义位置或尺寸无效。');
+              }
+            }
+            if (!isFiniteNumber(image.opacity) || image.opacity < 0 || image.opacity > 1) {
+              fail(imageLabel + '透明度无效。');
+            }
+            if (!isFiniteNumber(image.blur) || image.blur < 0) fail(imageLabel + '模糊值无效。');
+            if (image.rotation !== undefined && !isFiniteNumber(image.rotation)) {
+              fail(imageLabel + '旋转角度无效。');
+            }
+            if (image.keepRatio !== undefined && typeof image.keepRatio !== 'boolean') {
+              fail(imageLabel + '等比设置无效。');
+            }
+          });
+        });
+      }
+      if (typeof raw.unifiedBackground !== 'boolean') fail('全局背景开关无效。');
+      if (raw.unifiedBackground) {
+        if (typeof raw.unifiedBackgroundId !== 'string' || !backgroundIds.has(raw.unifiedBackgroundId)) {
+          fail('全局背景引用了不存在的背景。');
+        }
+      } else if (raw.unifiedBackgroundId != null &&
+          (typeof raw.unifiedBackgroundId !== 'string' || !backgroundIds.has(raw.unifiedBackgroundId))) {
+        fail('全局背景 ID 无效。');
+      }
+    }
+
     const categoryNames = new Set(
       raw.playlist && Array.isArray(raw.playlist.categories)
         ? raw.playlist.categories.map(function (category) { return category.name; })
@@ -242,33 +328,41 @@
 
       raw.pages.forEach(function (page, pageIndex) {
         if (!page || typeof page.id !== 'string' || !page.id) return;
-        const backgroundRef = page.backgroundRef == null ? null : page.backgroundRef;
-        if (backgroundRef != null) {
-          if (typeof backgroundRef !== 'string' || !backgroundRef) {
-            fail('第 ' + (pageIndex + 1) + ' 页背景引用无效。');
+        if (isV3) {
+          if (typeof page.backgroundId !== 'string' || !page.backgroundId) {
+            fail('第 ' + (pageIndex + 1) + ' 页缺少背景 ID。');
+          } else if (!backgroundIds.has(page.backgroundId)) {
+            fail('第 ' + (pageIndex + 1) + ' 页引用了不存在的背景。');
           }
-          if (!isV1 && page.background != null) {
-            fail('第 ' + (pageIndex + 1) + ' 页引用背景时不应同时保存背景属性。');
+        } else {
+          const backgroundRef = page.backgroundRef == null ? null : page.backgroundRef;
+          if (backgroundRef != null) {
+            if (typeof backgroundRef !== 'string' || !backgroundRef) {
+              fail('第 ' + (pageIndex + 1) + ' 页背景引用无效。');
+            }
+            if (!isV1 && page.background != null) {
+              fail('第 ' + (pageIndex + 1) + ' 页引用背景时不应同时保存背景属性。');
+            }
+          } else if (!page.background || typeof page.background !== 'object') {
+            fail('第 ' + (pageIndex + 1) + ' 页缺少背景属性。');
           }
-        } else if (!page.background || typeof page.background !== 'object') {
-          fail('第 ' + (pageIndex + 1) + ' 页缺少背景属性。');
-        }
-        if (page.background && typeof page.background === 'object') {
-          const bg = page.background;
-          if (bg.assetId && !assetIds.has(bg.assetId)) {
-            fail('第 ' + (pageIndex + 1) + ' 页背景引用了不存在的图片资产。');
-          }
-          if (['original', 'fill-width', 'fill-height', 'cover'].indexOf(bg.fit) < 0) {
-            fail('第 ' + (pageIndex + 1) + ' 页背景尺寸模式无效。');
-          }
-          if (!isFiniteNumber(bg.opacity) || bg.opacity < 0 || bg.opacity > 1) {
-            fail('第 ' + (pageIndex + 1) + ' 页背景透明度无效。');
-          }
-          if (!isFiniteNumber(bg.blur) || bg.blur < 0) {
-            fail('第 ' + (pageIndex + 1) + ' 页背景模糊值无效。');
-          }
-          if (typeof bg.color !== 'string') {
-            fail('第 ' + (pageIndex + 1) + ' 页背景颜色无效。');
+          if (page.background && typeof page.background === 'object') {
+            const bg = page.background;
+            if (bg.assetId && !assetIds.has(bg.assetId)) {
+              fail('第 ' + (pageIndex + 1) + ' 页背景引用了不存在的图片资产。');
+            }
+            if (['original', 'fill-width', 'fill-height', 'cover'].indexOf(bg.fit) < 0) {
+              fail('第 ' + (pageIndex + 1) + ' 页背景尺寸模式无效。');
+            }
+            if (!isFiniteNumber(bg.opacity) || bg.opacity < 0 || bg.opacity > 1) {
+              fail('第 ' + (pageIndex + 1) + ' 页背景透明度无效。');
+            }
+            if (!isFiniteNumber(bg.blur) || bg.blur < 0) {
+              fail('第 ' + (pageIndex + 1) + ' 页背景模糊值无效。');
+            }
+            if (typeof bg.color !== 'string') {
+              fail('第 ' + (pageIndex + 1) + ' 页背景颜色无效。');
+            }
           }
         }
         if (!Array.isArray(page.elements)) {
@@ -372,7 +466,7 @@
       raw.pages.forEach(function (page) {
         if (page && typeof page.id === 'string' && page.id) pageById.set(page.id, page);
       });
-      raw.pages.forEach(function (page, pageIndex) {
+      if (!isV3) raw.pages.forEach(function (page, pageIndex) {
         if (!page || page.backgroundRef == null) return;
         if (typeof page.backgroundRef !== 'string' || !page.backgroundRef) return;
         const label = '第 ' + (pageIndex + 1) + ' 页';
@@ -397,6 +491,72 @@
     }
 
     return { ok: errors.length === 0, errors: errors };
+  }
+
+  function buildBackgroundSet(raw) {
+    const set = model.createBackgroundSet(raw.name, raw.color);
+    set.id = raw.id;
+    set.images = (raw.images || []).map(function (rawImage) {
+      const image = model.createBackgroundImage(rawImage.assetId, rawImage.fit);
+      image.id = rawImage.id;
+      image.x = Number(rawImage.x) || 0;
+      image.y = Number(rawImage.y) || 0;
+      image.width = Number(rawImage.width) || 0;
+      image.height = Number(rawImage.height) || 0;
+      image.rotation = Number(rawImage.rotation) || 0;
+      image.keepRatio = rawImage.keepRatio !== false;
+      image.opacity = rawImage.opacity == null ? 1 : rawImage.opacity;
+      image.blur = Number(rawImage.blur) || 0;
+      return image;
+    });
+    return set;
+  }
+
+  function ownerPage(rawPage, rawById) {
+    const seen = new Set([rawPage.id]);
+    let cursor = rawPage;
+    while (cursor && cursor.backgroundRef) {
+      if (seen.has(cursor.backgroundRef)) throw new Error('背景引用形成循环');
+      seen.add(cursor.backgroundRef);
+      cursor = rawById.get(cursor.backgroundRef);
+    }
+    if (!cursor || !cursor.background) throw new Error('背景引用缺少有效的所有者');
+    return cursor;
+  }
+
+  function migrateLegacyBackgrounds(project, raw, isV1) {
+    const rawById = new Map();
+    raw.pages.forEach(function (page) { rawById.set(page.id, page); });
+    const groups = new Map();
+    project.pages.forEach(function (page, index) {
+      const rawPage = raw.pages[index];
+      const owner = isV1 ? rawPage : ownerPage(rawPage, rawById);
+      let set = groups.get(owner.id);
+      if (!set) {
+        set = model.createBackgroundSet('背景 ' + (groups.size + 1));
+        const source = owner.background || {};
+        set.color = source.color || model.DEFAULT_BACKGROUND_COLOR;
+        if (source.assetId) {
+          const image = model.createBackgroundImage(source.assetId, source.fit || 'cover');
+          image.opacity = source.opacity == null ? 1 : source.opacity;
+          image.blur = source.blur == null ? 0 : source.blur;
+          set.images.push(image);
+        }
+        groups.set(owner.id, set);
+        project.backgrounds.push(set);
+      }
+      page.backgroundId = set.id;
+    });
+    if (project.backgrounds.length === 0) {
+      project.backgrounds.push(model.createBackgroundSet('背景 1'));
+    }
+    if (!isV1 && groups.size === 1) {
+      project.unifiedBackground = true;
+      project.unifiedBackgroundId = project.backgrounds[0].id;
+    }
+    if (!project.pages.some(function (page) { return page.backgroundId; })) {
+      project.pages.forEach(function (page) { page.backgroundId = project.backgrounds[0].id; });
+    }
   }
 
   function loadImageFromBlob(blob) {
@@ -447,8 +607,9 @@
     }
 
     const isV1 = raw.version === 1;
+    const isV3 = raw.version === 3;
     const project = {
-      version: 2,
+      version: 3,
       pageSize: { width: raw.pageSize.width, height: raw.pageSize.height },
       margins: {
         top: raw.margins.top,
@@ -464,11 +625,13 @@
       assets: raw.assets.map(function (asset) {
         return { id: asset.id, name: asset.name || 'image', mime: asset.mime || 'image/png' };
       }),
+      backgrounds: [],
+      unifiedBackground: false,
+      unifiedBackgroundId: null,
       pages: raw.pages.map(function (page) {
         return {
           id: page.id,
-          background: page.background ? model.createBackground(page.background) : null,
-          backgroundRef: page.backgroundRef || null,
+          backgroundId: null,
           elements: page.elements.map(function (element) {
             if (element.type === 'category') {
               return {
@@ -547,30 +710,15 @@
       })
     };
 
-    if (!isV1) {
-      const pageById = new Map();
-      project.pages.forEach(function (page) { pageById.set(page.id, page); });
-      project.pages.forEach(function (page) {
-        if (!page.backgroundRef) {
-          if (!page.background) page.background = model.createBackground();
-          return;
-        }
-        let cursor = pageById.get(page.backgroundRef);
-        const seen = new Set([page.id]);
-        while (cursor && cursor.backgroundRef) {
-          if (seen.has(cursor.id)) throw new Error('背景引用形成循环');
-          seen.add(cursor.id);
-          cursor = pageById.get(cursor.backgroundRef);
-        }
-        if (!cursor || !cursor.background) throw new Error('背景引用缺少有效的所有者');
-        page.background = cursor.background;
-        page.backgroundRef = cursor.id;
+    if (isV3) {
+      project.backgrounds = raw.backgrounds.map(buildBackgroundSet);
+      project.unifiedBackground = !!raw.unifiedBackground;
+      project.unifiedBackgroundId = raw.unifiedBackgroundId || null;
+      project.pages.forEach(function (page, index) {
+        page.backgroundId = raw.pages[index].backgroundId;
       });
     } else {
-      project.pages.forEach(function (page) {
-        if (!page.background) page.background = model.createBackground();
-        page.backgroundRef = null;
-      });
+      migrateLegacyBackgrounds(project, raw, isV1);
     }
 
     return {

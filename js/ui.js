@@ -43,8 +43,8 @@
     return '<input id="' + id + '" class="color-input" type="color" value="' + esc(value) + '">';
   }
 
-  function selectInput(id, options, value) {
-    return '<select id="' + id + '" class="select">' + options.map(function (option) {
+  function selectInput(id, options, value, disabled) {
+    return '<select id="' + id + '" class="select"' + (disabled ? ' disabled' : '') + '>' + options.map(function (option) {
       const val = typeof option === 'string' ? option : option.value;
       const label = typeof option === 'string' ? option : option.label;
       return '<option value="' + esc(val) + '"' + (String(val) === String(value) ? ' selected' : '') + '>' +
@@ -357,22 +357,51 @@
         (realIndex === page.elements.length - 1 ? ' disabled' : '') + '>↑</button>' +
         '</span></div>');
     });
-    const bg = page.background || model.DEFAULT_BACKGROUND;
-    const bgSelected = selection.type === 'background';
-    const bgOwner = model.resolveBackgroundOwner(project, page);
-    const bgSub = page.backgroundRef && bgOwner
-      ? '引用 · 第 ' + (project.pages.indexOf(bgOwner) + 1) + ' 页'
-      : (bg.fit || 'cover');
-    rows.push('<div class="layer-row' + (bgSelected ? ' selected' : '') + '" data-layer-bg="1">' +
-      '<span class="layer-icon">▦</span>' +
-      '<span class="layer-name">背景<span class="layer-sub"> ' + esc(bgSub) + '</span></span>' +
-      '<span class="pill pill-blue">底层</span></div>');
+    const set = model.effectiveBackground(project, page);
+    if (set) {
+      const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+      const bgSelected = selection.type === 'backgroundSet' && selection.setId === set.id;
+      const referenceCount = model.backgroundReferenceCount(project, set.id);
+      const subParts = [referenceCount + ' 页使用'];
+      if (isGlobal) subParts.push('全局背景');
+      rows.push('<div class="layer-row layer-bg-row' + (bgSelected ? ' selected' : '') +
+        '" data-bg-set="' + esc(set.id) + '">' +
+        '<span class="layer-icon">▦</span>' +
+        '<span class="layer-name">' + esc(set.name) +
+          '<span class="layer-sub"> ' + esc(subParts.join(' · ')) + '</span></span>' +
+        (isGlobal ? '<span class="pill pill-blue">全局</span>' : '') +
+        '<span class="pill pill-blue">底层</span>' +
+        '<button class="icon-btn" data-bg-add="' + esc(set.id) + '" title="添加背景图片">＋</button>' +
+        '</div>');
+      const images = (set.images || []).slice().reverse();
+      images.forEach(function (image, reverseIndex) {
+        const realIndex = set.images.length - 1 - reverseIndex;
+        const imageSelected = selection.type === 'backgroundImage' &&
+          selection.setId === set.id && selection.imageId === image.id;
+        const fitText = image.fit === 'none' ? '自定义' : fitLabel(image.fit);
+        rows.push('<div class="layer-row layer-bg-image-row' + (imageSelected ? ' selected' : '') +
+          '" data-bg-image="' + esc(set.id) + ':' + esc(image.id) + '">' +
+          '<span class="layer-icon">▧</span>' +
+          '<span class="layer-name">图片 ' + (realIndex + 1) +
+            '<span class="layer-sub"> ' + esc(fitText) + '</span></span>' +
+          '</div>');
+      });
+    }
     ui.els.layerPanel.innerHTML = rows.join('');
     ui.els.layerPanel.querySelectorAll('.layer-row').forEach(function (row) {
       row.addEventListener('click', function (event) {
         if (event.target.closest('[data-layer-move]')) return;
-        if (row.hasAttribute('data-layer-bg')) {
-          L.app.selectBackground();
+        if (event.target.closest('[data-bg-add]')) {
+          L.app.pickBackgroundImage(row.getAttribute('data-bg-set'), null);
+          return;
+        }
+        if (row.hasAttribute('data-bg-set')) {
+          L.app.selectBackgroundSet(row.getAttribute('data-bg-set'));
+          return;
+        }
+        if (row.hasAttribute('data-bg-image')) {
+          const parts = row.getAttribute('data-bg-image').split(':');
+          L.app.selectBackgroundImage(parts[0], parts[1]);
           return;
         }
         L.app.selectElement(row.getAttribute('data-layer-id'));
@@ -392,7 +421,11 @@
     const project = L.app.state.project;
     const page = L.app.currentPage();
     let label = '页面';
-    if (selection.type === 'background') label = '背景';
+    if (selection.type === 'backgroundSet') {
+      const set = model.findBackground(project, selection.setId);
+      label = set ? '背景 · ' + set.name : '背景';
+    }
+    if (selection.type === 'backgroundImage') label = '背景图片';
     if (selection.type === 'element') {
       const found = page ? page.elements.find(function (element) { return element.id === selection.id; }) : null;
       if (found) {
@@ -429,8 +462,23 @@
       else renderImageProperties(element);
       return;
     }
-    if (selection.type === 'background') {
-      renderBackgroundProperties(page);
+    if (selection.type === 'backgroundSet') {
+      const set = model.findBackground(project, selection.setId);
+      if (!set) {
+        L.app.selectPage();
+        return;
+      }
+      renderBackgroundSetProperties(set);
+      return;
+    }
+    if (selection.type === 'backgroundImage') {
+      const set = model.findBackground(project, selection.setId);
+      const image = set ? (set.images || []).find(function (item) { return item.id === selection.imageId; }) : null;
+      if (!set || !image) {
+        L.app.selectPage();
+        return;
+      }
+      renderBackgroundImageProperties(set, image);
       return;
     }
     renderPageProperties(page);
@@ -465,6 +513,17 @@
         ) +
       '</div>' +
       '<div class="prop-group">' +
+        '<div class="prop-group-title">页面背景</div>' +
+        (project.unifiedBackground
+          ? '<p class="hint">全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。</p>'
+          : '<p class="hint">背景位于内容下方，可在图层中选中后编辑。</p>') +
+        field('当前页背景', selectInput('prop-page-bg', backgroundOptions(project), page.backgroundId, project.unifiedBackground)) +
+        field('', '<label class="check-row"><input id="prop-unified" type="checkbox"' +
+          (project.unifiedBackground ? ' checked' : '') + '> 所有页面使用同一背景</label>') +
+        field('全局背景组', selectInput('prop-unified-id', backgroundOptions(project), project.unifiedBackgroundId, !project.unifiedBackground)) +
+        '<div class="inline-actions"><button id="prop-bg-library" class="btn btn-sm">管理背景库</button></div>' +
+      '</div>' +
+      '<div class="prop-group">' +
         '<button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
         '<p class="hint">在画布或图层面板中选择内容后可删除。</p>' +
       '</div>';
@@ -488,77 +547,167 @@
         L.app.setMargins(margins);
       });
     });
+    bind('prop-page-bg', 'change', function () {
+      L.app.setPageBackground(valueOf('prop-page-bg'));
+    });
+    bind('prop-unified', 'change', function () {
+      const input = document.getElementById('prop-unified');
+      L.app.toggleUnifiedBackground(input ? input.checked : false);
+    });
+    bind('prop-unified-id', 'change', function () {
+      L.app.setUnifiedBackground(valueOf('prop-unified-id'));
+    });
+    bind('prop-bg-library', 'click', openBackgroundLibrary);
   }
 
-  function renderBackgroundProperties(page) {
+  function backgroundOptions(project) {
+    return (project.backgrounds || []).map(function (set) {
+      return { value: set.id, label: set.name };
+    });
+  }
+
+  function fitLabel(fit) {
+    if (fit === 'original') return '原大小';
+    if (fit === 'fill-width') return '横向占满';
+    if (fit === 'fill-height') return '竖向占满';
+    if (fit === 'none') return '自定义';
+    return '最适合';
+  }
+
+  function renderBackgroundSetProperties(set) {
     const project = L.app.state.project;
-    const bg = page.background || model.DEFAULT_BACKGROUND;
+    const page = L.app.currentPage();
+    const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+    const referenceCount = model.backgroundReferenceCount(project, set.id);
+    const check = model.canDeleteBackground(project, set.id);
     const pageIndex = project.pages.indexOf(page);
-    const owner = model.resolveBackgroundOwner(project, page) || page;
-    const ownerIndex = project.pages.indexOf(owner);
-    const isReference = !!page.backgroundRef;
-    const referenceCount = isReference ? 0 : model.referencingPages(project, owner).length;
-    const relationHint = isReference
-      ? '<div class="prop-group">' +
-          '<p class="hint">引用第 ' + (ownerIndex + 1) + ' 页背景；修改会同步到同一组的所有页面。</p>' +
-          '<div class="inline-actions"><button id="prop-bg-detach" class="btn btn-sm">断开引用</button></div>' +
-        '</div>'
+    const usage = project.unifiedBackground
+      ? '全局背景生效中；修改会立即影响所有页面。'
       : (referenceCount > 0
-        ? '<div class="prop-group"><p class="hint">被 ' + referenceCount + ' 页引用；修改会同步到这些页面。</p></div>'
-        : '');
-    const meta = bg.assetId ? (L.assets.getMeta(bg.assetId) || project.assets.find(function (asset) {
-      return asset.id === bg.assetId;
-    })) : null;
+        ? '第 ' + (pageIndex + 1) + ' 页正在使用；另有 ' + Math.max(0, referenceCount - 1) + ' 页使用同一背景。'
+        : '当前没有页面使用该背景。');
     ui.els.propertyPanel.innerHTML =
       '<div class="prop-group">' +
-        '<div class="prop-group-title">第 ' + (pageIndex + 1) + ' 页背景</div>' +
-        '<p class="hint">背景始终位于内容层下方，只能从这里或图层面板选中。</p>' +
+        '<div class="prop-group-title">背景组' + (isGlobal ? ' <span class="pill pill-blue">全局</span>' : '') + '</div>' +
+        '<p class="hint">' + esc(usage) + '</p>' +
+        field('名称', textInput('prop-bg-name', set.name, '背景名称')) +
+        field('填充色', colorInput('prop-bg-set-color', set.color || '#ffffff')) +
       '</div>' +
-      relationHint +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">背景图片</div>' +
-        (bg.assetId
-          ? '<p class="hint">当前图片：' + esc(meta ? meta.name : bg.assetId) + '</p>'
-          : '<p class="hint">当前页没有背景图片。</p>') +
-        '<div class="inline-actions"><button id="prop-bg-choose" class="btn btn-sm">' +
-        (bg.assetId ? '替换图片' : '选择图片') + '</button>' +
-        (bg.assetId ? '<button id="prop-bg-clear" class="btn btn-sm btn-danger">清除图片</button>' : '') +
+        '<div class="prop-group-title">图片 <span class="hint">' + (set.images || []).length + ' 张</span></div>' +
+        '<p class="hint">图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。</p>' +
+        '<div class="inline-actions">' +
+          '<button id="prop-bg-add-image" class="btn btn-sm">添加图片</button>' +
+          '<button id="prop-bg-duplicate" class="btn btn-sm">复制背景</button>' +
+          '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
+          '<button id="prop-bg-delete" class="btn btn-sm btn-danger"' + (check.ok ? '' : ' disabled title="' + esc(check.reason) + '"') + '>删除背景</button>' +
         '</div>' +
-        field('填充色', colorInput('prop-bg-color', bg.color || '#ffffff')) +
+        (check.ok ? '' : '<p class="hint">' + esc(check.reason) + '</p>') +
+      '</div>' +
+      (project.unifiedBackground
+        ? '<div class="prop-group">' +
+            '<div class="prop-group-title">全局背景</div>' +
+            '<p class="hint">取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。</p>' +
+            '<div class="inline-actions">' +
+              '<button id="prop-bg-bake" class="btn btn-sm">固化到所有页</button>' +
+              '<button id="prop-bg-copy" class="btn btn-sm">本页独立副本</button>' +
+            '</div>' +
+          '</div>'
+        : '');
+
+    bind('prop-bg-name', 'change', function () { L.app.renameBackgroundSet(set.id, valueOf('prop-bg-name')); });
+    bind('prop-bg-set-color', 'input', function () {
+      set.color = valueOf('prop-bg-set-color');
+      L.app.changed({ property: false });
+    });
+    bind('prop-bg-add-image', 'click', function () { L.app.pickBackgroundImage(set.id, null); });
+    bind('prop-bg-duplicate', 'click', function () { L.app.duplicateBackgroundSet(set.id); });
+    bind('prop-bg-library', 'click', openBackgroundLibrary);
+    bind('prop-bg-delete', 'click', function () { L.app.deleteBackgroundSet(set.id); });
+    bind('prop-bg-bake', 'click', function () { L.app.bakeUnifiedBackground(); });
+    bind('prop-bg-copy', 'click', function () { L.app.copyUnifiedBackgroundToPage(); });
+  }
+
+  function renderBackgroundImageProperties(set, image) {
+    const project = L.app.state.project;
+    const index = (set.images || []).indexOf(image);
+    const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+    const meta = image.assetId ? (L.assets.getMeta(image.assetId) || project.assets.find(function (asset) {
+      return asset.id === image.assetId;
+    })) : null;
+    const custom = image.fit === 'none';
+    ui.els.propertyPanel.innerHTML =
+      '<div class="prop-group">' +
+        '<div class="prop-group-title">背景图片 ' + (index + 1) + ' / ' + set.images.length + '</div>' +
+        '<p class="hint">所属背景：' + esc(set.name) + (isGlobal ? '（全局，修改会影响所有页面）' : '') + '</p>' +
+        '<p class="hint">' + (meta ? '当前图片：' + esc(meta.name) : '图片缺失或未选择。') + '</p>' +
       '</div>' +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">图片布局</div>' +
+        '<div class="prop-group-title">定位</div>' +
         field('尺寸', selectInput('prop-bg-fit', [
           { value: 'original', label: '原大小' },
           { value: 'fill-width', label: '横向占满' },
           { value: 'fill-height', label: '竖向占满' },
-          { value: 'cover', label: '最适合（居中裁剪）' }
-        ], bg.fit || 'cover')) +
-        field('透明度', rangeInput('prop-bg-opacity', bg.opacity == null ? 1 : bg.opacity, 0, 1, 0.01)) +
-        field('边缘模糊', rangeInput('prop-bg-blur', bg.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
+          { value: 'cover', label: '最适合（居中裁剪）' },
+          { value: 'none', label: '自定义' }
+        ], image.fit || 'cover')) +
+        (custom
+          ? fieldPair(
+              'X', numberInput('prop-bg-x', Math.round(image.x), -20000, 20000, 1) + '<span class="unit">px</span>',
+              'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1) + '<span class="unit">px</span>'
+            ) +
+            fieldPair(
+              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1) + '<span class="unit">px</span>',
+              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1) + '<span class="unit">px</span>'
+            ) +
+            field('旋转', numberInput('prop-bg-rotation', Math.round(Number(image.rotation) || 0), -360, 360, 1) + '<span class="unit">°</span>') +
+            field('', '<label class="check-row"><input id="prop-bg-ratio" type="checkbox"' +
+              (image.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>') +
+            '<div class="inline-actions"><button id="prop-bg-restore" class="btn btn-sm">恢复为最适合</button></div>'
+          : '<p class="hint">该模式随页面尺寸自动重排。直接在画布拖动或缩放会转为自定义。</p>') +
+      '</div>' +
+      '<div class="prop-group">' +
+        '<div class="prop-group-title">显示</div>' +
+        field('透明度', rangeInput('prop-bg-opacity', image.opacity == null ? 1 : image.opacity, 0, 1, 0.01)) +
+        field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
+      '</div>' +
+      '<div class="prop-group">' +
+        '<div class="inline-actions">' +
+          '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= set.images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
+          '<button id="prop-bg-move-down" class="btn btn-sm"' + (index <= 0 ? ' disabled' : '') + '>下移一层</button>' +
+          '<button id="prop-bg-replace" class="btn btn-sm">替换图片</button>' +
+          '<button id="prop-bg-image-delete" class="btn btn-sm btn-danger">删除图片</button>' +
+        '</div>' +
       '</div>';
 
-    bind('prop-bg-choose', 'click', function () { L.app.pickBackgroundImage(); });
-    bind('prop-bg-clear', 'click', function () { L.app.clearBackgroundImage(); });
-    bind('prop-bg-detach', 'click', function () { L.app.detachBackground(); });
-    bind('prop-bg-color', 'input', function () {
-      page.background.color = valueOf('prop-bg-color');
-      L.app.changed({ property: false });
-    });
-    bind('prop-bg-fit', 'change', function () {
-      page.background.fit = valueOf('prop-bg-fit');
+    bind('prop-bg-fit', 'change', function () { L.app.setBackgroundImageFit(set.id, image.id, valueOf('prop-bg-fit')); });
+    bind('prop-bg-x', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'x', Number(valueOf('prop-bg-x')) || 0); });
+    bind('prop-bg-y', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'y', Number(valueOf('prop-bg-y')) || 0); });
+    bind('prop-bg-w', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'width', Math.max(1, Number(valueOf('prop-bg-w')) || 1)); });
+    bind('prop-bg-h', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'height', Math.max(1, Number(valueOf('prop-bg-h')) || 1)); });
+    bind('prop-bg-rotation', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'rotation', Number(valueOf('prop-bg-rotation')) || 0); });
+    bind('prop-bg-ratio', 'change', function () {
+      const input = document.getElementById('prop-bg-ratio');
+      image.keepRatio = input ? input.checked : true;
       L.app.changed({ property: false });
     });
     bind('prop-bg-opacity', 'input', function () {
-      page.background.opacity = Number(valueOf('prop-bg-opacity'));
-      document.getElementById('prop-bg-opacity-value').textContent = page.background.opacity.toFixed(2);
+      image.opacity = Number(valueOf('prop-bg-opacity'));
+      const label = document.getElementById('prop-bg-opacity-value');
+      if (label) label.textContent = image.opacity.toFixed(2);
       L.app.changed({ property: false });
     });
     bind('prop-bg-blur', 'input', function () {
-      page.background.blur = Number(valueOf('prop-bg-blur'));
-      document.getElementById('prop-bg-blur-value').textContent = page.background.blur;
+      image.blur = Number(valueOf('prop-bg-blur'));
+      const label = document.getElementById('prop-bg-blur-value');
+      if (label) label.textContent = image.blur;
       L.app.changed({ property: false });
     });
+    bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(set.id, image.id); });
+    bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, 1); });
+    bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, -1); });
+    bind('prop-bg-replace', 'click', function () { L.app.pickBackgroundImage(set.id, image.id); });
+    bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(set.id, image.id); });
   }
 
   function fontField(prefix, style) {
@@ -906,6 +1055,59 @@
       L.app.changed({ property: false });
     });
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
+  }
+
+  function openBackgroundLibrary() {
+    const project = L.app.state.project;
+    const rows = (project.backgrounds || []).map(function (set) {
+      const count = model.backgroundReferenceCount(project, set.id);
+      const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+      const check = model.canDeleteBackground(project, set.id);
+      return '<div class="bg-library-row" data-bg-lib-row="' + esc(set.id) + '">' +
+        '<input class="input" data-bg-lib-name="' + esc(set.id) + '" value="' + esc(set.name) + '">' +
+        '<span class="hint">' + count + ' 页使用' + (isGlobal ? ' · 全局使用中' : '') + '</span>' +
+        '<div class="inline-actions">' +
+          '<button class="btn btn-sm" data-bg-lib-duplicate="' + esc(set.id) + '">复制</button>' +
+          '<button class="btn btn-sm btn-danger" data-bg-lib-delete="' + esc(set.id) + '"' +
+            (check.ok ? '' : ' disabled title="' + esc(check.reason) + '"') + '>删除</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    const modal = ui.modal.open({
+      title: '背景库',
+      width: '560px',
+      body: '<div class="prop-group">' +
+        '<p class="hint">背景库只管理背景本身；页面使用哪一套背景由页面属性或全局背景决定。</p>' +
+        '<div class="bg-library-list">' + rows + '</div>' +
+      '</div>',
+      actions: [
+        {
+          label: '新建空白背景',
+          onClick: function () {
+            L.app.addBackgroundSet();
+            openBackgroundLibrary();
+          }
+        },
+        { label: '关闭', className: 'btn-primary', onClick: function (close) { close(); } }
+      ]
+    });
+    modal.body.querySelectorAll('[data-bg-lib-name]').forEach(function (input) {
+      input.addEventListener('change', function () {
+        L.app.renameBackgroundSet(input.getAttribute('data-bg-lib-name'), input.value);
+      });
+    });
+    modal.body.querySelectorAll('[data-bg-lib-duplicate]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        L.app.duplicateBackgroundSet(button.getAttribute('data-bg-lib-duplicate'));
+        openBackgroundLibrary();
+      });
+    });
+    modal.body.querySelectorAll('[data-bg-lib-delete]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        L.app.deleteBackgroundSet(button.getAttribute('data-bg-lib-delete'));
+        openBackgroundLibrary();
+      });
+    });
   }
 
   /* ---------- modal ---------- */
