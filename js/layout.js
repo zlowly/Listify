@@ -258,17 +258,16 @@
     const songs = category ? category.songs : [];
     normalizeTables(element, songs.length);
     const sorted = sortSongs(songs);
+    const showTitle = element.showTitle !== false;
     const titleWidth = Math.max(1, element.width - BLOCK_PADDING * 2);
-    const titleLines = wrapText(
-      category ? category.name : '',
-      titleWidth,
-      element.titleStyle
-    );
+    const titleLines = showTitle
+      ? wrapText(category ? category.name : '', titleWidth, element.titleStyle)
+      : [];
     const titleLineHeight = element.titleStyle.fontSize * element.titleStyle.lineHeight;
-    const titleHeight = Math.max(1, titleLines.length) * titleLineHeight;
+    const titleHeight = showTitle ? Math.max(1, titleLines.length) * titleLineHeight : 0;
 
     let cursor = 0;
-    let tableY = BLOCK_PADDING + titleHeight + TITLE_GAP;
+    let tableY = BLOCK_PADDING + titleHeight + (showTitle ? TITLE_GAP : 0);
     const tables = element.tables.map(function (table) {
       const margins = model.normalizeMargins(table.margins);
       const left = model.clamp(margins.left, 0, element.width);
@@ -295,6 +294,7 @@
 
     const hasTableRows = tables.some(function (table) { return table.height > 0; });
     const layout = {
+      showTitle: showTitle,
       titleLines: titleLines,
       titleLineHeight: titleLineHeight,
       titleHeight: titleHeight,
@@ -303,7 +303,7 @@
       tables: tables,
       blockHeight: tableY + (hasTableRows ? 0 : BLOCK_PADDING),
       padding: BLOCK_PADDING,
-      titleGap: TITLE_GAP,
+      titleGap: showTitle ? TITLE_GAP : 0,
       cellPadX: CELL_PAD_X,
       cellPadY: CELL_PAD_Y,
       rowHeight: element.songStyle.fontSize * element.songStyle.lineHeight + CELL_PAD_Y * 2,

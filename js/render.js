@@ -187,17 +187,19 @@
     ctx.rect(element.x, element.y, element.width, Math.max(1, computed.blockHeight));
     ctx.clip();
 
-    ctx.font = model.fontString(titleStyle);
-    ctx.fillStyle = titleStyle.color || '#1f2937';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    computed.titleLines.forEach(function (line, index) {
-      ctx.fillText(
-        line,
-        element.x + computed.padding,
-        element.y + computed.titleY + computed.titleLineHeight * (index + 0.5)
-      );
-    });
+    if (element.showTitle !== false) {
+      ctx.font = model.fontString(titleStyle);
+      ctx.fillStyle = titleStyle.color || '#1f2937';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      computed.titleLines.forEach(function (line, index) {
+        ctx.fillText(
+          line,
+          element.x + computed.padding,
+          element.y + computed.titleY + computed.titleLineHeight * (index + 0.5)
+        );
+      });
+    }
 
     computed.tables.forEach(function (table) {
       const tableTop = element.y + table.y;

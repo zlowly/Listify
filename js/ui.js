@@ -827,6 +827,10 @@
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类名子分区</div>' +
+        field('', '<label class="check-row"><input id="prop-title-visible" type="checkbox"' +
+          (element.showTitle !== false ? ' checked' : '') + '> 显示分类名</label>') +
+        '<p class="hint" id="prop-title-hidden-hint"' +
+          (element.showTitle !== false ? ' hidden' : '') + '>隐藏时样式保留，重新显示后生效。</p>' +
         categoryStyleFields('prop-title', element.titleStyle) +
       '</div>' +
       '<div class="prop-group">' +
@@ -856,6 +860,13 @@
       const next = Math.max(120, Number(valueOf('prop-el-w')) || 120);
       L.app.resizeElementWidth(element, next);
       L.app.changed({ property: false });
+    });
+    bind('prop-title-visible', 'change', function () {
+      const input = document.getElementById('prop-title-visible');
+      element.showTitle = input ? input.checked : true;
+      L.app.changed({ property: false });
+      const hint = document.getElementById('prop-title-hidden-hint');
+      if (hint) hint.hidden = element.showTitle !== false;
     });
     bindCategoryStyle('prop-title', element.titleStyle);
     bindCategoryStyle('prop-song', element.songStyle);

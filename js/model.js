@@ -200,6 +200,7 @@
       id: uid('el'),
       type: 'category',
       category: categoryName,
+      showTitle: true,
       x: typeof x === 'number' ? x : project.margins.left,
       y: typeof y === 'number' ? y : project.margins.top,
       width: typeof width === 'number' ? width : fallbackWidth,
