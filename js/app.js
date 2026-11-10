@@ -1386,6 +1386,65 @@
     ui.renderAll();
   }
 
+  /* ---------- playlist editing ---------- */
+
+  function countSongChanges(original, next) {
+    const length = Math.max(original.length, next.length);
+    let count = 0;
+    for (let i = 0; i < length; i += 1) {
+      const before = original[i] == null ? null : String(original[i]).trim();
+      const after = next[i] == null ? null : String(next[i]).trim();
+      if (before !== after) count += 1;
+    }
+    return count;
+  }
+
+  function applyPlaylistEdits(categories) {
+    const renameMap = {};
+    const summary = { renamed: 0, songChanges: 0 };
+    categories.forEach(function (category) {
+      if (category.originalName !== category.name) {
+        renameMap[category.originalName] = category.name;
+        summary.renamed += 1;
+      }
+      summary.songChanges += countSongChanges(category.originalSongs || [], category.songs);
+    });
+
+    state.project.pages.forEach(function (page) {
+      page.elements.forEach(function (element) {
+        if (element.type === 'category' && Object.prototype.hasOwnProperty.call(renameMap, element.category)) {
+          element.category = renameMap[element.category];
+        }
+      });
+    });
+
+    state.project.playlist.categories = categories.map(function (category) {
+      return { name: category.name, songs: category.songs.slice() };
+    });
+
+    ui.renderAll();
+
+    const parts = [];
+    if (summary.songChanges) parts.push(summary.songChanges + ' 处歌名');
+    if (summary.renamed) parts.push(summary.renamed + ' 个分类改名');
+    ui.toast(parts.length ? '已更新：' + parts.join('，') + '。' : '歌单已更新。', 'success');
+  }
+
+  function openPlaylistEditor() {
+    if (!state.project.playlist.categories.length) {
+      ui.modal.alert('还没有歌单', '请先导入歌单，再编辑分类和歌名。');
+      return;
+    }
+    let defaultCategoryName = null;
+    const selected = selectedElement();
+    if (selected && selected.type === 'category') defaultCategoryName = selected.category;
+    ui.playlistEditor.open({
+      categories: state.project.playlist.categories,
+      defaultCategoryName: defaultCategoryName,
+      onApply: applyPlaylistEdits
+    });
+  }
+
   /* ---------- page settings ---------- */
 
   function setPageSize(width, height) {
@@ -2093,6 +2152,7 @@
     addPage: addPageDialog,
     deleteCurrentPage: deleteCurrentPage,
     jumpToCategory: jumpToCategory,
+    openPlaylistEditor: openPlaylistEditor,
     changed: changed,
     fit: fit,
     redraw: redraw,
