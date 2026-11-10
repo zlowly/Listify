@@ -124,11 +124,14 @@
     document.getElementById('btn-add-image').addEventListener('click', function () {
       L.app.pickFreeImage();
     });
+    document.getElementById('btn-new').addEventListener('click', function () {
+      L.app.newProject();
+    });
     document.getElementById('btn-save').addEventListener('click', function () {
-      L.app.saveProject();
+      L.app.exportProject();
     });
     document.getElementById('btn-load').addEventListener('click', function () {
-      L.app.openLoadProject();
+      L.app.openImportProject();
     });
     document.getElementById('btn-export').addEventListener('click', function () {
       L.exporter.openDialog();
@@ -198,7 +201,7 @@
     document.getElementById('load-file').addEventListener('change', function (event) {
       const file = event.target.files && event.target.files[0];
       event.target.value = '';
-      if (file) L.app.handleLoadFile(file);
+      if (file) L.app.handleImportProject(file);
     });
     document.getElementById('bg-file').addEventListener('change', function (event) {
       const file = event.target.files && event.target.files[0];

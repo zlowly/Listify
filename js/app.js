@@ -32,6 +32,20 @@
   let pendingBackgroundImageId = null;
   let uiRenderDepth = 0;
 
+  const draft = {
+    enabled: false,
+    restoring: true,
+    timer: 0,
+    lastKey: '',
+    lastSavedAt: 0,
+    status: 'unsaved',
+    lastError: '',
+    saving: false,
+    queued: false,
+    memoryOnly: false
+  };
+  let lastExternalDraftNotice = 0;
+
   const viewport = {
     scale: 1,
     offsetX: 0,
@@ -323,6 +337,7 @@
     if (surfaceIsLeafer && typeof surface.paint === 'function') surface.paint();
     drawOverlay();
     scheduleGeometryReflow();
+    scheduleDraftSave();
   }
 
   function fit() {
@@ -1536,6 +1551,7 @@
       const image = await L.assets.loadImage(assetId);
       const meta = L.assets.getMeta(assetId);
       model.ensureAssetMeta(state.project, assetId, source.name, meta ? meta.mime : source.type);
+      await persistDraftAssetQuietly(assetId);
       return { assetId: assetId, image: image };
     } catch (err) {
       releaseUnusedAsset(assetId);
@@ -1816,6 +1832,7 @@
       const loaded = await L.assets.loadImage(assetId);
       const meta = L.assets.getMeta(assetId);
       model.ensureAssetMeta(state.project, assetId, file.name, meta ? meta.mime : file.type);
+      await persistDraftAssetQuietly(assetId);
       const target = imageId
         ? (set.images || []).find(function (image) { return image.id === imageId; })
         : null;
@@ -2065,41 +2082,287 @@
     input.click();
   }
 
-  /* ---------- persistence ---------- */
+  /* ---------- draft persistence ---------- */
 
-  async function saveProject() {
-    try {
-      await L.io.downloadProject(state.project);
-      ui.toast('项目已保存为 JSON。', 'success');
-    } catch (err) {
-      ui.modal.alert('保存失败', err.message);
+  function formatDraftTime(timestamp) {
+    const date = new Date(timestamp || Date.now());
+    return String(date.getHours()).padStart(2, '0') + ':' +
+      String(date.getMinutes()).padStart(2, '0');
+  }
+
+  function draftSnapshotKey(envelope) {
+    return JSON.stringify({ ui: envelope.ui, project: envelope.project });
+  }
+
+  function setDraftStatus(status, error, title) {
+    draft.status = status;
+    draft.lastError = error || '';
+    const el = document.getElementById('draft-status');
+    if (!el) return;
+    let text = '草稿未保存';
+    if (status === 'saved') {
+      text = '草稿已自动保存 ' + formatDraftTime(draft.lastSavedAt);
+    } else if (status === 'unavailable') {
+      text = '草稿不可用';
+    }
+    el.textContent = text;
+    el.setAttribute('data-state', status);
+    let tip = title || '';
+    if (!tip) {
+      if (status === 'saved') {
+        tip = '草稿保存在本机浏览器中；导出项目可长期备份。';
+      } else if (error) {
+        tip = '原因：' + error;
+      } else {
+        tip = '尚未自动保存。';
+      }
+    }
+    el.title = tip;
+  }
+
+  function reportDraftError(err) {
+    const message = err && err.message ? err.message : '本地存储写入失败';
+    const previous = draft.lastError;
+    const fatal = err && (err.name === 'SecurityError' || err.name === 'NotSupportedError');
+    if (fatal) {
+      draft.enabled = false;
+      draft.memoryOnly = true;
+      setDraftStatus('unavailable', message);
+    } else {
+      setDraftStatus('unsaved', message);
+    }
+    if (previous !== message) {
+      ui.toast('草稿自动保存失败：' + message, 'error');
     }
   }
 
-  function openLoadProject() {
+  function scheduleDraftSave() {
+    if (!draft.enabled || draft.restoring) return;
+    if (draft.timer) clearTimeout(draft.timer);
+    draft.timer = setTimeout(function () {
+      draft.timer = 0;
+      saveDraftNow();
+    }, 300);
+  }
+
+  async function saveDraftNow(options) {
+    if (!draft.enabled || draft.restoring) return;
+    const force = !!(options && options.force);
+    const initialEnvelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
+    if (!force && draftSnapshotKey(initialEnvelope) === draft.lastKey) return;
+    if (draft.saving) {
+      draft.queued = true;
+      return;
+    }
+    draft.saving = true;
+    try {
+      try {
+        await L.io.ensureDraftAssets(state.project);
+      } catch (err) {
+        // 图片资产没落盘时不要写结构，避免恢复时把图片当作缺失资产删掉。
+        reportDraftError(err);
+        return;
+      }
+      if (!draft.enabled || draft.restoring) return;
+      // 等待资产写入期间可能又有编辑；总是落盘当前状态，避免旧结构覆盖新编辑。
+      const envelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
+      const key = draftSnapshotKey(envelope);
+      if (!force && key === draft.lastKey) return;
+      const savedAt = L.io.writeDraftEnvelope(envelope);
+      draft.lastKey = key;
+      draft.lastSavedAt = savedAt;
+      setDraftStatus('saved');
+      try {
+        await L.io.pruneDraftAssets(state.project);
+      } catch (err) {
+        /* 未引用资产残留不影响草稿；下次保存会再清理。 */
+      }
+    } catch (err) {
+      reportDraftError(err);
+    } finally {
+      draft.saving = false;
+      if (draft.queued) {
+        draft.queued = false;
+        scheduleDraftSave();
+      }
+    }
+  }
+
+  function flushDraftSync() {
+    if (!draft.enabled || draft.restoring) return;
+    const envelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
+    const key = draftSnapshotKey(envelope);
+    if (key === draft.lastKey) return;
+    try {
+      const savedAt = L.io.writeDraftEnvelope(envelope);
+      draft.lastKey = key;
+      draft.lastSavedAt = savedAt;
+      setDraftStatus('saved');
+    } catch (err) {
+      reportDraftError(err);
+    }
+  }
+
+  async function persistDraftAssetQuietly(assetId) {
+    if (!draft.enabled || !assetId) return;
+    try {
+      await L.io.persistDraftAsset(assetId, state.project);
+    } catch (err) {
+      reportDraftError(err);
+    }
+  }
+
+  async function restoreDraftOnStartup() {
+    draft.restoring = true;
+    draft.enabled = false;
+    let result;
+    try {
+      result = await L.io.restoreDraft();
+    } catch (err) {
+      draft.memoryOnly = true;
+      return { ok: false, reason: 'unavailable', error: err.message };
+    }
+    if (result && result.ok && result.project) {
+      L.io.installAssets(result.assets);
+      state.project = result.project;
+      const savedPageId = result.ui && result.ui.currentPageId;
+      state.currentPageId = model.getPage(state.project, savedPageId)
+        ? savedPageId
+        : state.project.pages[0].id;
+      state.selection = { type: 'page' };
+      draft.lastKey = draftSnapshotKey(
+        L.io.createDraftEnvelope(state.project, state.currentPageId)
+      );
+      draft.lastSavedAt = result.savedAt || Date.now();
+      draft.status = 'saved';
+      return { ok: true, restored: true, missingCount: result.missingCount || 0 };
+    }
+    if (result && result.ok && result.empty) {
+      draft.lastKey = '';
+      draft.lastSavedAt = 0;
+      return { ok: true, restored: false };
+    }
+    if (result && result.reason === 'unavailable') draft.memoryOnly = true;
+    return {
+      ok: false,
+      reason: (result && result.reason) || 'corrupt',
+      error: result && result.error,
+      errors: result && result.errors
+    };
+  }
+
+  function notifyDraftRecovery(startup) {
+    if (!startup || startup.ok) {
+      if (startup && startup.missingCount) {
+        ui.toast('草稿已恢复，但 ' + startup.missingCount +
+          ' 张图片缺失，相关图片已移除。', 'error');
+      }
+      return;
+    }
+    if (startup.reason === 'unavailable') {
+      setDraftStatus('unavailable', startup.error || '浏览器本地存储不可用');
+      ui.modal.alert('草稿不可用',
+        '浏览器本地存储不可用，草稿不会自动保存；仍可编辑并导出项目。');
+      return;
+    }
+    const message = startup.reason === 'version'
+      ? '草稿版本高于当前支持的版本，已打开空白项目。原始草稿已保留在 listify.draft.corrupt。'
+      : '草稿无法恢复，已打开空白项目。原始草稿已保留在 listify.draft.corrupt。';
+    ui.modal.alert('草稿无法恢复', message);
+  }
+
+  /* ---------- import / export ---------- */
+
+  async function exportProject() {
+    try {
+      await L.io.downloadProject(state.project);
+      ui.toast('项目已导出。', 'success');
+    } catch (err) {
+      ui.modal.alert('导出失败', err.message);
+    }
+  }
+
+  function openImportProject() {
     const input = document.getElementById('load-file');
     input.value = '';
     input.click();
   }
 
-  async function handleLoadFile(file) {
+  function discardBuiltAssets(store) {
+    if (!store || !store.urls) return;
+    store.urls.forEach(function (url) {
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  async function handleImportProject(file) {
     if (!file) return;
     const result = await L.io.loadProjectFile(file);
     if (!result.ok) {
-      ui.modal.alert('加载失败', result.error || '项目文件无法加载。');
+      ui.modal.alert('导入失败', result.error || '项目文件无法加载。');
       return;
     }
-    L.io.installAssets(result.assets);
-    state.project = result.project;
-    state.currentPageId = state.project.pages[0].id;
-    state.selection = { type: 'page' };
-    ui.renderAll();
-    ui.toast('项目已加载。', 'success');
+    const ok = await ui.modal.confirm(
+      '导入项目',
+      '导入会替换当前草稿，且不可撤销。确定继续吗？',
+      { confirmLabel: '替换草稿' }
+    );
+    if (!ok) {
+      discardBuiltAssets(result.assets);
+      return;
+    }
+
+    draft.restoring = true;
+    try {
+      try {
+        await L.io.persistAssetStore(result.assets);
+      } catch (err) {
+        reportDraftError(err);
+      }
+      L.io.installAssets(result.assets);
+      state.project = result.project;
+      state.currentPageId = state.project.pages[0].id;
+      state.selection = { type: 'page' };
+      draft.lastKey = '';
+      ui.renderAll();
+    } finally {
+      draft.restoring = false;
+    }
+    await saveDraftNow({ force: true });
+    ui.toast('项目已导入。', 'success');
+  }
+
+  async function newProject() {
+    const ok = await ui.modal.confirm(
+      '新建项目',
+      '新建会清空当前草稿和所有图片，且不可撤销。确定新建吗？',
+      { confirmLabel: '新建项目', danger: true }
+    );
+    if (!ok) return;
+
+    draft.restoring = true;
+    try {
+      try {
+        await L.io.clearDraft();
+      } catch (err) {
+        reportDraftError(err);
+      }
+      L.assets.clear();
+      state.project = model.createDefaultProject();
+      state.currentPageId = state.project.pages[0].id;
+      state.selection = { type: 'page' };
+      draft.lastKey = '';
+      ui.renderAll();
+    } finally {
+      draft.restoring = false;
+    }
+    await saveDraftNow({ force: true });
+    ui.toast('已新建空白项目。', 'success');
   }
 
   /* ---------- bootstrap ---------- */
 
-  function init() {
+  async function init() {
     setupSurface();
     ui.init();
     const originalRenderAll = ui.renderAll;
@@ -2122,6 +2385,19 @@
     pane.addEventListener('wheel', onCanvasWheel, { passive: false });
     if (scrollEl) scrollEl.addEventListener('scroll', onCanvasScroll);
 
+    window.addEventListener('pagehide', flushDraftSync);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') flushDraftSync();
+    });
+    window.addEventListener('storage', function (event) {
+      if (!event || event.key !== L.io.DRAFT_KEY) return;
+      if (draft.restoring) return;
+      const now = Date.now();
+      if (now - lastExternalDraftNotice < 8000) return;
+      lastExternalDraftNotice = now;
+      ui.toast('另一标签页更新了草稿，刷新可载入最新版本。', '');
+    });
+
     if (L.clipboardImage) {
       L.clipboardImage.install({
         shouldHandle: shouldHandleClipboardPaste,
@@ -2133,8 +2409,24 @@
       });
     }
 
+    const startup = await restoreDraftOnStartup();
     fit();
     ui.renderAll();
+    draft.restoring = false;
+
+    if (startup.reason === 'unavailable') {
+      draft.enabled = false;
+      setDraftStatus('unavailable', startup.error || '浏览器本地存储不可用');
+    } else {
+      draft.enabled = true;
+      setDraftStatus(startup.restored ? 'saved' : 'unsaved');
+      scheduleDraftSave();
+      if (startup.restored && startup.missingCount) {
+        saveDraftNow({ force: true });
+      }
+    }
+
+    notifyDraftRecovery(startup);
   }
 
   L.app = {
@@ -2193,9 +2485,13 @@
     copyUnifiedBackgroundToPage: copyUnifiedBackgroundToPage,
     openImport: openImport,
     handleImportFile: handleImportFile,
-    saveProject: saveProject,
-    openLoadProject: openLoadProject,
-    handleLoadFile: handleLoadFile,
+    newProject: newProject,
+    exportProject: exportProject,
+    openImportProject: openImportProject,
+    handleImportProject: handleImportProject,
+    saveProject: exportProject,
+    openLoadProject: openImportProject,
+    handleLoadFile: handleImportProject,
     moveLayer: moveLayer,
     deleteSelection: deleteSelection
   };
@@ -2204,5 +2500,10 @@
     return layout.devChecks();
   };
 
-  init();
+  init().catch(function (err) {
+    console.error('[Listify] 初始化失败', err);
+    try {
+      ui.toast('初始化失败：' + (err && err.message ? err.message : '未知错误'), 'error');
+    } catch (ignored) { /* empty */ }
+  });
 })();

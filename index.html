@@ -9,13 +9,17 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">♫</span>
-        <span>歌单排版</span>
+      <div class="topbar-left">
+        <div class="brand">
+          <span class="brand-mark">♫</span>
+          <span>歌单排版</span>
+        </div>
+        <span id="draft-status" class="draft-status" data-state="unsaved" title="尚未自动保存">草稿未保存</span>
       </div>
       <div class="topbar-actions">
-        <button id="btn-save" class="btn">保存项目</button>
-        <button id="btn-load" class="btn">加载项目</button>
+        <button id="btn-new" class="btn">新建项目</button>
+        <button id="btn-load" class="btn">导入项目</button>
+        <button id="btn-save" class="btn">导出项目</button>
         <span class="divider"></span>
         <button id="btn-export" class="btn btn-primary">导出 PNG</button>
       </div>
@@ -91,16 +95,16 @@
 
   <script src="vendor/leafer-editor.min.js"></script>
   <script src="vendor/leafer-filter.min.js"></script>
-  <script src="js/model.js?v=20261110b"></script>
-  <script src="js/layout.js?v=20261110b"></script>
-  <script src="js/import.js?v=20261110b"></script>
-  <script src="js/render.js?v=20261110b"></script>
-  <script src="js/io.js?v=20261110b"></script>
-  <script src="js/zip.js?v=20261110b"></script>
-  <script src="js/export.js?v=20261110b"></script>
-  <script src="js/ui.js?v=20261110b"></script>
-  <script src="js/fontpicker.js?v=20261110b"></script>
-  <script src="js/clipboard-image.js?v=20261110b"></script>
-  <script src="js/app.js?v=20261110b"></script>
+  <script src="js/model.js?v=20261110c"></script>
+  <script src="js/layout.js?v=20261110c"></script>
+  <script src="js/import.js?v=20261110c"></script>
+  <script src="js/render.js?v=20261110c"></script>
+  <script src="js/io.js?v=20261110c"></script>
+  <script src="js/zip.js?v=20261110c"></script>
+  <script src="js/export.js?v=20261110c"></script>
+  <script src="js/ui.js?v=20261110c"></script>
+  <script src="js/fontpicker.js?v=20261110c"></script>
+  <script src="js/clipboard-image.js?v=20261110c"></script>
+  <script src="js/app.js?v=20261110c"></script>
 </body>
 </html>
