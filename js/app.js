@@ -1271,7 +1271,7 @@
       state.project.pageSize.width - state.project.margins.left - state.project.margins.right
     );
     const position = categoryDropPosition(page, state.project, pt.y);
-    const element = model.createCategoryElement(name, position.x, position.y, state.project, width);
+    const element = model.createCategoryElement(name, position.x, position.y, state.project, width, page);
     page.elements.push(element);
     state.selection = { type: 'element', id: element.id };
     ui.renderAll();
@@ -1509,7 +1509,7 @@
   function addText() {
     const page = currentPage();
     if (!page) return;
-    const element = model.createTextElement(state.project, '双击编辑文字');
+    const element = model.createTextElement(state.project, '双击编辑文字', page);
     page.elements.push(element);
     state.selection = { type: 'element', id: element.id };
     ui.renderAll();

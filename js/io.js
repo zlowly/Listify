@@ -31,9 +31,12 @@
   }
 
   function serializeStyle(style) {
-    const pair = model.normalizeFontPair(style.fontPair);
-    const result = {
-      fontFamily: pair ? model.composeFontFamily(pair) : style.fontFamily,
+    const families = Array.isArray(style.fontFamilies)
+      ? model.normalizeFontFamilies(style.fontFamilies)
+      : model.fontFamiliesFromFamily(style.fontFamily);
+    return {
+      fontFamilies: families,
+      fontFamily: model.fontFamilyFromList(families),
       fontSize: style.fontSize,
       fontWeight: style.fontWeight,
       color: style.color,
@@ -42,13 +45,6 @@
       shadow: model.normalizeShadow(style.shadow),
       outline: model.normalizeOutline(style.outline)
     };
-    if (pair) {
-      const savedPair = {};
-      if (pair.latin) savedPair.latin = pair.latin;
-      if (pair.cjk) savedPair.cjk = pair.cjk;
-      result.fontPair = savedPair;
-    }
-    return result;
   }
 
   function loadStyle(style) {

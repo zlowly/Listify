@@ -2,10 +2,9 @@
   'use strict';
 
   const L = window.Listify = window.Listify || {};
-  const DEFAULT_LATIN_FONT = '"Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans"';
-  const DEFAULT_CJK_FONT = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei"';
-  const DEFAULT_FONT = DEFAULT_LATIN_FONT + ', ' + DEFAULT_CJK_FONT + ', sans-serif';
+  const DEFAULT_FONT = 'sans-serif';
   const DEFAULT_TITLE_STYLE = {
+    fontFamilies: ['sans-serif'],
     fontFamily: DEFAULT_FONT,
     fontSize: 44,
     fontWeight: 700,
@@ -15,6 +14,7 @@
     outline: { enabled: false, color: '#000000', width: 2 }
   };
   const DEFAULT_SONG_STYLE = {
+    fontFamilies: ['sans-serif'],
     fontFamily: DEFAULT_FONT,
     fontSize: 28,
     fontWeight: 400,
@@ -24,6 +24,7 @@
     outline: { enabled: false, color: '#000000', width: 2 }
   };
   const DEFAULT_TEXT_STYLE = {
+    fontFamilies: ['sans-serif'],
     fontFamily: DEFAULT_FONT,
     fontSize: 48,
     fontWeight: 700,
@@ -173,51 +174,76 @@
   }
 
   // Older picker builds stored the whole preview stack (e.g. `"Foo", sans-serif`)
-  // in the slot; keep only the family name so a stale picker cannot corrupt it.
+  // in the list; keep only the family name so a stale picker cannot corrupt it.
   function cleanFamilyName(value) {
     let name = String(value == null ? '' : value).replace(/[\r\n\f]/g, ' ').trim();
     if (!name) return '';
     const legacy = name.match(/^["']?([^"']+?)["']?\s*,\s*sans-serif\s*$/i);
     if (legacy) name = legacy[1];
     if (name.indexOf(',') !== -1) {
-      // A slot holds one family; a comma means an old picker saved a stack.
+      // A list item holds one family; a comma means an old picker saved a stack.
       name = name.split(',')[0];
     }
     return name.replace(/^["']+/, '').replace(/["']+$/, '').trim();
   }
 
-  function normalizeFontPair(pair) {
-    if (!pair || typeof pair !== 'object' || Array.isArray(pair)) return null;
-    const latin = typeof pair.latin === 'string' ? cleanFamilyName(pair.latin) : '';
-    const cjk = typeof pair.cjk === 'string' ? cleanFamilyName(pair.cjk) : '';
-    if (!latin && !cjk) return null;
-    return { latin: latin, cjk: cjk };
+  function normalizeFontFamilies(list) {
+    const source = Array.isArray(list) ? list : [];
+    const families = [];
+    const seen = Object.create(null);
+    source.forEach(function (item) {
+      const name = cleanFamilyName(item);
+      if (!name) return;
+      const key = name.toLocaleLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      families.push(name);
+    });
+    const concrete = families.filter(function (name) {
+      return name.toLocaleLowerCase() !== 'sans-serif';
+    });
+    if (concrete.length) return concrete;
+    return ['sans-serif'];
   }
 
-  function composeFontFamily(pair) {
-    const normalized = normalizeFontPair(pair);
-    if (!normalized) return DEFAULT_FONT;
+  function fontFamiliesFromFamily(fontFamily) {
+    const raw = String(fontFamily == null ? '' : fontFamily);
+    const families = splitFontStack(raw).map(function (part) {
+      let name = part.trim();
+      if ((name.charAt(0) === '"' && name.charAt(name.length - 1) === '"') ||
+          (name.charAt(0) === "'" && name.charAt(name.length - 1) === "'")) {
+        name = name.slice(1, -1);
+      }
+      name = name
+        .replace(/\\(["'\\])/g, '$1')
+        .replace(/[\r\n\f]/g, ' ')
+        .trim();
+      return cleanFamilyName(name);
+    }).filter(function (name) {
+      return name && name.toLocaleLowerCase() !== 'sans-serif';
+    });
+    return normalizeFontFamilies(families);
+  }
 
-    const latin = normalized.latin ? quoteFamily(normalized.latin) : DEFAULT_LATIN_FONT;
-    const cjk = normalized.cjk ? quoteFamily(normalized.cjk) : DEFAULT_CJK_FONT;
-
-    if (normalized.latin && normalized.cjk &&
-        normalized.latin.toLocaleLowerCase() === normalized.cjk.toLocaleLowerCase()) {
-      return latin + ', sans-serif';
+  function fontFamilyFromList(list) {
+    const families = normalizeFontFamilies(list);
+    if (families.length === 1 && families[0].toLocaleLowerCase() === 'sans-serif') {
+      return 'sans-serif';
     }
-    return latin + ', ' + cjk + ', sans-serif';
+    const parts = families.map(function (name) {
+      const key = name.toLocaleLowerCase();
+      return GENERIC_FONT_FAMILIES.indexOf(key) >= 0 ? key : quoteFamily(name);
+    });
+    if (parts.indexOf('sans-serif') === -1) parts.push('sans-serif');
+    return parts.join(', ');
   }
 
-  function applyFontPair(style, pair) {
+  function applyFontFamilies(style, list) {
     if (!style) return style;
-    const normalized = normalizeFontPair(pair);
-    if (normalized) {
-      style.fontPair = normalized;
-      style.fontFamily = composeFontFamily(normalized);
-    } else {
-      delete style.fontPair;
-      style.fontFamily = DEFAULT_FONT;
-    }
+    const families = normalizeFontFamilies(list);
+    style.fontFamilies = families;
+    style.fontFamily = fontFamilyFromList(families);
+    delete style.fontPair;
     return style;
   }
 
@@ -255,19 +281,60 @@
 
   function normalizeStyle(style) {
     if (!style || typeof style !== 'object') return style;
-    const pair = normalizeFontPair(style.fontPair);
-    if (pair) {
-      style.fontPair = pair;
-      style.fontFamily = composeFontFamily(pair);
+    delete style.fontPair;
+    if (Array.isArray(style.fontFamilies)) {
+      const families = normalizeFontFamilies(style.fontFamilies);
+      style.fontFamilies = families;
+      style.fontFamily = fontFamilyFromList(families);
     } else {
-      delete style.fontPair;
-      style.fontFamily = normalizeFontStack(
-        typeof style.fontFamily === 'string' ? style.fontFamily : ''
-      );
+      const saved = typeof style.fontFamily === 'string' ? style.fontFamily : '';
+      style.fontFamilies = fontFamiliesFromFamily(saved);
+      style.fontFamily = saved.trim() ? saved : DEFAULT_FONT;
     }
     style.shadow = normalizeShadow(style.shadow);
     style.outline = normalizeOutline(style.outline);
     return style;
+  }
+
+  function findStyleSource(project, page, type, y) {
+    const targetY = typeof y === 'number' && isFinite(y) ? y : 0;
+    const elements = page && Array.isArray(page.elements) ? page.elements : [];
+    const candidates = elements.filter(function (element) {
+      return element && element.type === type;
+    });
+
+    let above = null;
+    candidates.forEach(function (element) {
+      const elementY = typeof element.y === 'number' && isFinite(element.y) ? element.y : 0;
+      if (elementY <= targetY && (!above || elementY >= above.y)) {
+        above = { element: element, y: elementY };
+      }
+    });
+    if (above) return above.element;
+
+    let nearest = null;
+    candidates.forEach(function (element) {
+      const elementY = typeof element.y === 'number' && isFinite(element.y) ? element.y : 0;
+      const distance = Math.abs(elementY - targetY);
+      if (!nearest || distance <= nearest.distance) {
+        nearest = { element: element, distance: distance };
+      }
+    });
+    if (nearest) return nearest.element;
+
+    if (!project || !Array.isArray(project.pages)) return null;
+    let last = null;
+    project.pages.forEach(function (item) {
+      const list = item && Array.isArray(item.elements) ? item.elements : [];
+      list.forEach(function (element) {
+        if (element && element.type === type) last = element;
+      });
+    });
+    return last;
+  }
+
+  function inheritedStyle(sourceStyle, fallback) {
+    return normalizeStyle(copyStyle(sourceStyle || fallback));
   }
 
   function createBackgroundImage(assetId, fit) {
@@ -405,31 +472,35 @@
     };
   }
 
-  function createCategoryElement(categoryName, x, y, project, width) {
+  function createCategoryElement(categoryName, x, y, project, width, page) {
     const fallbackWidth = project.pageSize.width - project.margins.left - project.margins.right;
+    const elementY = typeof y === 'number' ? y : project.margins.top;
+    const source = page ? findStyleSource(project, page, 'category', elementY) : null;
     return {
       id: uid('el'),
       type: 'category',
       category: categoryName,
       showTitle: true,
       x: typeof x === 'number' ? x : project.margins.left,
-      y: typeof y === 'number' ? y : project.margins.top,
+      y: elementY,
       width: typeof width === 'number' ? width : fallbackWidth,
-      titleStyle: copyStyle(DEFAULT_TITLE_STYLE),
-      songStyle: copyStyle(DEFAULT_SONG_STYLE),
+      titleStyle: inheritedStyle(source && source.titleStyle, DEFAULT_TITLE_STYLE),
+      songStyle: inheritedStyle(source && source.songStyle, DEFAULT_SONG_STYLE),
       tables: [createTable()]
     };
   }
 
-  function createTextElement(project, text) {
+  function createTextElement(project, text, page) {
+    const elementY = Math.round(project.pageSize.height / 2 - 60);
+    const source = page ? findStyleSource(project, page, 'text', elementY) : null;
     return {
       id: uid('el'),
       type: 'text',
       x: Math.round(project.pageSize.width / 2 - 240),
-      y: Math.round(project.pageSize.height / 2 - 60),
+      y: elementY,
       width: 480,
       text: typeof text === 'string' ? text : '双击编辑文字',
-      style: copyStyle(DEFAULT_TEXT_STYLE)
+      style: inheritedStyle(source && source.style, DEFAULT_TEXT_STYLE)
     };
   }
 
@@ -825,8 +896,6 @@
 
   L.model = {
     DEFAULT_FONT: DEFAULT_FONT,
-    DEFAULT_LATIN_FONT: DEFAULT_LATIN_FONT,
-    DEFAULT_CJK_FONT: DEFAULT_CJK_FONT,
     DEFAULT_TITLE_STYLE: DEFAULT_TITLE_STYLE,
     DEFAULT_SONG_STYLE: DEFAULT_SONG_STYLE,
     DEFAULT_TEXT_STYLE: DEFAULT_TEXT_STYLE,
@@ -840,9 +909,11 @@
     copyStyle: copyStyle,
     quoteFamily: quoteFamily,
     normalizeFontStack: normalizeFontStack,
-    normalizeFontPair: normalizeFontPair,
-    composeFontFamily: composeFontFamily,
-    applyFontPair: applyFontPair,
+    normalizeFontFamilies: normalizeFontFamilies,
+    fontFamiliesFromFamily: fontFamiliesFromFamily,
+    fontFamilyFromList: fontFamilyFromList,
+    applyFontFamilies: applyFontFamilies,
+    findStyleSource: findStyleSource,
     normalizeStyle: normalizeStyle,
     normalizeShadow: normalizeShadow,
     normalizeOutline: normalizeOutline,

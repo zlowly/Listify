@@ -78,24 +78,21 @@
   function errorMessage(error) {
     const name = error && error.name;
     if (name === 'NotAllowedError' || name === 'SecurityError') {
-      return '未获得本机字体访问权限。请在浏览器地址栏的站点设置中允许后点“重新获取”，或直接手输字体族。';
+      return '未获得本机字体访问权限。请在浏览器地址栏的站点设置中允许后点“重新获取”。';
     }
     const detail = (error && error.message) || error || '未知错误';
-    return '读取本机字体失败：' + detail + '。可点“重新获取”，或直接手输字体族。';
+    return '读取本机字体失败：' + detail + '。可点“重新获取”。';
   }
 
   function open(options) {
     if (!isSupported()) {
-      if (ui && ui.toast) ui.toast('当前浏览器不支持本机字体选择，请直接输入字体族。');
+      if (ui && ui.toast) ui.toast('当前浏览器不支持本机字体选择。');
       return;
     }
 
     const opts = options || {};
-    const slot = opts.slot === 'cjk' ? 'cjk' : 'latin';
-    const isCjk = slot === 'cjk';
     const currentValue = opts.currentValue || '';
-    const defaultFamily = isCjk ? model.DEFAULT_CJK_FONT : model.DEFAULT_LATIN_FONT;
-    const sample = isCjk ? '歌单 中文歌曲' : 'Playlist 123 ABC';
+    const sample = '歌单 Playlist 123 ABC';
     let closed = false;
     let requestSeq = 0;
     let loading = false;
@@ -119,14 +116,12 @@
 
     const hint = document.createElement('p');
     hint.className = 'hint font-picker-hint';
-    hint.textContent = isCjk
-      ? '中文槽位用于西文字体缺字时的中文回退；字体不含中文字形时会显示系统回退。只读取本机字体，不上传。'
-      : '西文字体优先用于拉丁字符；若它包含中文字形，中文仍可能使用它。系统不检测字形覆盖。只读取本机字体，不上传。';
+    hint.textContent = '列表顺序就是回退顺序；只读取本机字体，不上传。系统不检测字形覆盖。';
 
     const list = document.createElement('div');
     list.className = 'font-picker-list';
     list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', isCjk ? '本机中文字体' : '本机西文字体');
+    list.setAttribute('aria-label', '本机字体');
 
     body.appendChild(search);
     body.appendChild(status);
@@ -152,7 +147,9 @@
       row.type = 'button';
       row.className = 'font-row';
       row.setAttribute('role', 'option');
-      const selected = value == null ? !currentValue : currentValue === value;
+      const selected = value == null
+        ? (!currentValue || currentValue === 'sans-serif')
+        : currentValue === value;
       row.setAttribute('aria-selected', selected ? 'true' : 'false');
       if (selected) row.classList.add('is-active');
 
@@ -174,8 +171,7 @@
 
     function renderList() {
       list.innerHTML = '';
-      appendRow('系统默认', null, defaultFamily + ', sans-serif',
-        isCjk ? '默认中文字体栈' : '默认西文字体栈');
+      appendRow('系统默认', null, 'sans-serif', '默认字体');
 
       const query = search.value.trim().toLocaleLowerCase();
       const filtered = query ? currentFamilies.filter(function (font) {
@@ -191,7 +187,7 @@
       } else if (failed) {
         setStatus(failed, 'error');
       } else if (!currentFamilies.length) {
-        setStatus('没有找到可用字体。可能未授权，或系统没有可用字体。可点“重新获取”，或直接手输字体族。', 'empty');
+        setStatus('没有找到可用字体。可能未授权，或系统没有可用字体。可点“重新获取”。', 'empty');
       } else if (query && !filtered.length) {
         setStatus('没有匹配的字体，试试其它关键词。', 'empty');
       } else {
@@ -231,7 +227,7 @@
       }
 
       if (!query) {
-        failed = '当前浏览器不支持本机字体选择，可继续手输字体族。';
+        failed = '当前浏览器不支持本机字体选择。';
         finishLoad();
         return;
       }
@@ -262,7 +258,7 @@
     }
 
     modal = ui.modal.open({
-      title: isCjk ? '选择中文字体' : '选择西文字体',
+      title: '选择字体',
       width: '560px',
       body: body,
       onClose: function () {

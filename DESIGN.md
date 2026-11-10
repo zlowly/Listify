@@ -183,12 +183,14 @@ components:
 ## Typography
 
 **Display Font:** 系统界面栈（"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif）
-**Canvas Font:** 西文默认栈 "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans" 在前，中文默认栈 "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei" 在后，末尾 `sans-serif`（导出内容的默认字体族，可在属性面板按西文/中文槽位或整条字体栈修改）
+**Canvas Font:** 默认字体列表只有“系统默认”一项（`sans-serif`）；用户可在属性面板按优先级增删字体族，列表顺序即 CSS 回退顺序，导出内容使用同一列表派生的字体栈
 **Label/Mono Font:** 无专用等宽字体；所有数字字段使用 `font-variant-numeric: tabular-nums`。
 
 **Character:** 完全依赖本机字体（运行时零网络，不能加载 webfont），因此语气由字号、字重与字距承担，而不是字族。结果是中性、可预期、没有品牌字体记忆点——这符合工坊身份：字体是工具，不是表达。
 
-字体策略是 best-effort：分类名、歌名和自由文字各有两个槽位（西文、中文），组合为“西文字体在前、中文字体在后”的普通 CSS 字体栈，让拉丁字符优先命中西文字体，缺字时再回退到中文字体。系统不检测字形覆盖；若西文字体自身包含中文字形，中文仍可能由它渲染。手动编辑整条字体栈会清除槽位配对并以手输值为准。
+字体策略是 best-effort：分类名、歌名和自由文字各自维护一条有序字体列表，列表顺序即 CSS 回退优先级。`sans-serif` 是“系统默认”的唯一标记，只有列表没有具体字体时才出现；存在具体字体时，派生字体栈末尾隐式补上 `sans-serif`。系统不检测字形覆盖；若某个字体自身包含中文字形，中文可能由它渲染。列表至少保留一项，第一版不提供拖动排序。
+
+新建分类块时，分类名和歌名分别继承同页上方最近同类型块的 `titleStyle` / `songStyle`；同页没有上方块时取最近块，再退到项目文档顺序中最后一个块。新自由文字继承上一个文字元素的完整文字样式。继承是创建时的深拷贝快照：不复制位置、宽度、显示开关、表格或文案，也不随后续修改联动。
 
 ### Hierarchy
 
@@ -206,7 +208,7 @@ components:
 
 **The 11px Floor Rule.** 11px 及以下只承担标注，不承载独立可点击操作；可点击控件的文字最小 12px，唯一例外是分段控件的 11px（密排枚举选择，靠整块点击区保证可点性）。低于 11px 的文字必须紧邻它所修饰的对象，不能独立成句。
 
-**The No-Webfont Rule.** 不引入 webfont、图标字体或网络字体。字体栈必须在本机可用，缺字时回退 `system-ui`。
+**The No-Webfont Rule.** 不引入 webfont、图标字体或网络字体。字体栈必须在本机可用，缺字时回退 `sans-serif`。
 
 本机字体选择器使用 Local Font Access API：它只枚举本机已安装字体，不请求网络、不读取字体文件内容，选择结果仍写入本机字体栈，因此不违反 No-Webfont Rule。
 

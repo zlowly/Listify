@@ -499,41 +499,50 @@ button { cursor: pointer; }
 }
 
 /* ---------- local font picker ---------- */
-.font-field-row { align-items: start; }
-.font-field-row > label { padding-top: 7px; }
-.font-field {
+.font-list-field { align-items: start; }
+.font-list-field > label { padding-top: 7px; }
+.font-list {
   display: flex;
   flex-direction: column;
   gap: 5px;
   width: 100%;
   min-width: 0;
 }
-.font-field-control {
+.font-list-row {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
-.font-field-control .input { flex: 1 1 auto; min-width: 0; }
-.font-pair-actions {
+.font-list-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 27px;
+  padding: 3px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.font-list-name:hover { border-color: var(--blue); }
+.font-list-name:focus-visible { outline: 2px solid rgba(37, 99, 235, 0.25); outline-offset: 1px; }
+.font-list-delete { flex: 0 0 auto; width: 27px; height: 27px; }
+.font-list-input { flex: 1 1 auto; min-width: 0; }
+.font-list-add { align-self: flex-start; }
+.font-list-manual {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
+  min-width: 0;
 }
-.font-pair-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
-.font-pair-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.font-pair-sep { color: var(--faint); }
-.font-pair-hint { margin: 0; }
-.font-pick-btn { flex: 0 0 auto; }
+.font-list-manual .input { flex: 1 1 auto; min-width: 0; }
+.font-list-hint { margin: 0; }
 
 .font-picker {
   display: flex;

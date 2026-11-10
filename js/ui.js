@@ -778,84 +778,138 @@
     bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(set.id, image.id); });
   }
 
-  function fontPairStatusHtml(style) {
-    const pair = model.normalizeFontPair(style.fontPair);
-    const isDefault = style.fontFamily === model.DEFAULT_FONT;
-    const latin = pair ? (pair.latin || '默认') : (isDefault ? '默认' : '自定义');
-    const cjk = pair ? (pair.cjk || '默认') : (isDefault ? '默认' : '自定义');
-    return '<span class="font-pair-value">西文：' + esc(latin) + '</span>' +
-      '<span class="font-pair-sep">·</span>' +
-      '<span class="font-pair-value">中文：' + esc(cjk) + '</span>';
+  function fontListValues(style) {
+    return Array.isArray(style.fontFamilies)
+      ? model.normalizeFontFamilies(style.fontFamilies)
+      : model.fontFamiliesFromFamily(style.fontFamily);
   }
 
-  function syncFontField(prefix, style) {
-    const input = document.getElementById(prefix + '-family');
-    if (input) input.value = style.fontFamily || '';
-    const status = document.getElementById(prefix + '-pair-status');
-    if (status) status.innerHTML = fontPairStatusHtml(style);
+  function isDefaultFont(family) {
+    return String(family || '').toLocaleLowerCase() === 'sans-serif';
   }
 
-  function fontField(prefix, style) {
+  function fontListField(prefix, style) {
     const supported = !!(L.fontPicker && L.fontPicker.isSupported && L.fontPicker.isSupported());
-    const disabled = supported ? '' : ' disabled title="当前浏览器不支持本机字体选择，请直接输入字体族"';
-    return '<div class="field font-field-row">' +
+    const families = fontListValues(style);
+    const rows = families.map(function (family, index) {
+      const isDefault = isDefaultFont(family);
+      const deleteDisabled = families.length <= 1 ? ' disabled' : '';
+      let name;
+      if (supported) {
+        name = '<button id="' + prefix + '-font-' + index + '" class="font-list-name" type="button" title="点击替换字体">' +
+          esc(isDefault ? '系统默认' : family) + '</button>';
+      } else {
+        name = '<input id="' + prefix + '-font-' + index + '" class="input font-list-input" type="text" value="' +
+          (isDefault ? '' : esc(family)) + '" placeholder="系统默认">';
+      }
+      return '<div class="font-list-row" data-font-index="' + index + '">' + name +
+        '<button id="' + prefix + '-font-delete-' + index + '" class="icon-btn font-list-delete" type="button" title="删除字体"' +
+        deleteDisabled + '>×</button></div>';
+    }).join('');
+    const add = supported
+      ? '<button id="' + prefix + '-font-add" class="btn btn-sm font-list-add" type="button">＋ 添加字体</button>'
+      : '<div class="font-list-manual">' +
+          '<input id="' + prefix + '-font-manual" class="input" type="text" placeholder="输入字体族名">' +
+          '<button id="' + prefix + '-font-manual-add" class="btn btn-sm" type="button">添加</button>' +
+        '</div>';
+    return '<div class="field font-list-field">' +
         '<label>字体</label>' +
-        '<div class="control">' +
-          '<div class="font-field">' +
-            '<div class="font-field-control">' +
-              textInput(prefix + '-family', style.fontFamily, '字体族') +
-            '</div>' +
-            '<div class="font-pair-actions">' +
-              '<button id="' + prefix + '-pick-latin" class="btn btn-sm font-pick-btn" type="button"' + disabled + '>选西文字体</button>' +
-              '<button id="' + prefix + '-pick-cjk" class="btn btn-sm font-pick-btn" type="button"' + disabled + '>选中文字体</button>' +
-              '<button id="' + prefix + '-pair-clear" class="btn btn-sm font-pick-btn" type="button">使用同一字体</button>' +
-            '</div>' +
-            '<div id="' + prefix + '-pair-status" class="font-pair-status">' + fontPairStatusHtml(style) + '</div>' +
-            '<p class="font-pair-hint">西文优先用于拉丁字符；系统不检测字形覆盖，中文可能仍用西文字形。</p>' +
-          '</div>' +
-        '</div>' +
+        '<div class="control"><div class="font-list">' + rows + add +
+          '<p class="font-list-hint">按列表顺序回退；至少保留一个字体。</p>' +
+        '</div></div>' +
       '</div>';
   }
 
-  function bindFontField(prefix, style) {
-    bind(prefix + '-family', 'input', function () {
-      style.fontFamily = valueOf(prefix + '-family');
-      delete style.fontPair;
-      const status = document.getElementById(prefix + '-pair-status');
-      if (status) status.innerHTML = fontPairStatusHtml(style);
-      L.app.changed({ property: false });
-    });
+  function bindFontList(prefix, style) {
+    const supported = !!(L.fontPicker && L.fontPicker.isSupported && L.fontPicker.isSupported());
 
-    bind(prefix + '-family', 'change', function () {
-      const normalized = model.normalizeFontStack(valueOf(prefix + '-family'));
-      if (normalized === style.fontFamily) return;
-      style.fontFamily = normalized;
-      syncFontField(prefix, style);
-      L.app.changed({ property: false });
-    });
+    function current() {
+      return fontListValues(style);
+    }
 
-    function openSlot(slot) {
-      if (!L.fontPicker || !L.fontPicker.isSupported()) return;
-      const pair = model.normalizeFontPair(style.fontPair) || { latin: '', cjk: '' };
+    function commit(list) {
+      model.applyFontFamilies(style, list);
+      L.app.changed({ property: false });
+      ui.renderPropertyPanel();
+    }
+
+    function pick(index) {
+      if (!supported || !L.fontPicker) return;
+      const families = current();
+      const value = index == null ? '' : families[index];
       L.fontPicker.open({
-        slot: slot,
-        currentValue: pair[slot] || '',
-        onPick: function (value) {
-          const next = model.normalizeFontPair(style.fontPair) || { latin: '', cjk: '' };
-          next[slot] = typeof value === 'string' ? value : '';
-          model.applyFontPair(style, next);
-          syncFontField(prefix, style);
-          L.app.changed({ property: false });
+        currentValue: isDefaultFont(value) ? '' : (value || ''),
+        onPick: function (picked) {
+          const next = current();
+          if (typeof picked === 'string' && picked) {
+            if (index == null) {
+              if (next.length === 1 && isDefaultFont(next[0])) next[0] = picked;
+              else next.push(picked);
+            } else {
+              next[index] = picked;
+            }
+          } else if (index != null && next.length > 1) {
+            next.splice(index, 1);
+          } else if (index != null) {
+            next[0] = 'sans-serif';
+          }
+          commit(next);
         }
       });
     }
 
-    bind(prefix + '-pick-latin', 'click', function () { openSlot('latin'); });
-    bind(prefix + '-pick-cjk', 'click', function () { openSlot('cjk'); });
-    bind(prefix + '-pair-clear', 'click', function () {
-      delete style.fontPair;
-      syncFontField(prefix, style);
-      L.app.changed({ property: false });
+    function deleteAt(index) {
+      const next = current();
+      if (next.length <= 1) return;
+      next.splice(index, 1);
+      commit(next);
+    }
+
+    if (supported) {
+      current().forEach(function (family, index) {
+        bind(prefix + '-font-' + index, 'click', function () { pick(index); });
+        bind(prefix + '-font-delete-' + index, 'click', function () { deleteAt(index); });
+      });
+      bind(prefix + '-font-add', 'click', function () { pick(null); });
+      return;
+    }
+
+    current().forEach(function (family, index) {
+      bind(prefix + '-font-' + index, 'change', function () {
+        const next = current();
+        const raw = valueOf(prefix + '-font-' + index).trim();
+        if (!raw) {
+          if (next.length <= 1) next[0] = 'sans-serif';
+          else next.splice(index, 1);
+        } else {
+          next[index] = raw;
+        }
+        commit(next);
+      });
+      bind(prefix + '-font-' + index, 'keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.target.blur();
+        }
+      });
+      bind(prefix + '-font-delete-' + index, 'click', function () { deleteAt(index); });
+    });
+
+    function addManual() {
+      const raw = valueOf(prefix + '-font-manual').trim();
+      if (!raw) return;
+      const next = current();
+      if (next.length === 1 && isDefaultFont(next[0])) next[0] = raw;
+      else next.push(raw);
+      commit(next);
+    }
+
+    bind(prefix + '-font-manual-add', 'click', addManual);
+    bind(prefix + '-font-manual', 'keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        addManual();
+      }
     });
   }
 
@@ -922,7 +976,7 @@
   }
 
   function categoryStyleFields(prefix, style) {
-    return fontField(prefix, style) +
+    return fontListField(prefix, style) +
       field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
       field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
@@ -931,7 +985,7 @@
   }
 
   function bindCategoryStyle(prefix, style) {
-    bindFontField(prefix, style);
+    bindFontList(prefix, style);
     bind(prefix + '-size', 'input', function () {
       style.fontSize = Math.max(6, Number(valueOf(prefix + '-size')) || 6);
       L.app.changed({ property: false });
@@ -1105,7 +1159,7 @@
   }
 
   function textStyleFields(prefix, style) {
-    return fontField(prefix, style) +
+    return fontListField(prefix, style) +
       field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
       field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
@@ -1153,7 +1207,7 @@
       element.width = Math.max(40, Number(valueOf('prop-text-w')) || 40);
       L.app.changed({ property: false });
     });
-    bindFontField('prop-text', element.style);
+    bindFontList('prop-text', element.style);
     bind('prop-text-size', 'input', function () {
       element.style.fontSize = Math.max(6, Number(valueOf('prop-text-size')) || 6);
       L.app.changed({ property: false });
