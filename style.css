@@ -676,6 +676,16 @@ button { cursor: pointer; }
 }
 .field-row .field > label { white-space: nowrap; }
 
+/* 阴影/轮廓分组：开关 + 参数行，关闭时参数禁用 */
+.so-group { margin-bottom: 7px; }
+.so-group .check-row { margin-bottom: 6px; }
+.so-sep {
+  border-top: 1px solid var(--line-strong);
+  margin: 10px 0 8px;
+}
+.so-group .input:disabled,
+.so-group .color-input:disabled { opacity: 0.45; }
+
 .hint {
   color: var(--faint);
   font-size: 10px;

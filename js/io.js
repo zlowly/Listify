@@ -38,7 +38,9 @@
       fontWeight: style.fontWeight,
       color: style.color,
       lineHeight: style.lineHeight,
-      align: style.align
+      align: style.align,
+      shadow: model.normalizeShadow(style.shadow),
+      outline: model.normalizeOutline(style.outline)
     };
     if (pair) {
       const savedPair = {};

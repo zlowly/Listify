@@ -10,14 +10,18 @@
     fontSize: 44,
     fontWeight: 700,
     color: '#1f2937',
-    lineHeight: 1.2
+    lineHeight: 1.2,
+    shadow: { enabled: false, color: '#000000', offsetX: 2, offsetY: 2, blur: 4 },
+    outline: { enabled: false, color: '#000000', width: 2 }
   };
   const DEFAULT_SONG_STYLE = {
     fontFamily: DEFAULT_FONT,
     fontSize: 28,
     fontWeight: 400,
     color: '#374151',
-    lineHeight: 1.35
+    lineHeight: 1.35,
+    shadow: { enabled: false, color: '#000000', offsetX: 2, offsetY: 2, blur: 4 },
+    outline: { enabled: false, color: '#000000', width: 2 }
   };
   const DEFAULT_TEXT_STYLE = {
     fontFamily: DEFAULT_FONT,
@@ -25,7 +29,9 @@
     fontWeight: 700,
     color: '#111827',
     lineHeight: 1.3,
-    align: 'left'
+    align: 'left',
+    shadow: { enabled: false, color: '#000000', offsetX: 2, offsetY: 2, blur: 4 },
+    outline: { enabled: false, color: '#000000', width: 2 }
   };
   const BACKGROUND_FITS = ['original', 'fill-width', 'fill-height', 'cover', 'none'];
   const DEFAULT_BACKGROUND_COLOR = '#ffffff';
@@ -58,7 +64,9 @@
   }
 
   function copyStyle(style, overrides) {
-    return Object.assign({}, style, overrides || {});
+    // Deep-clone so nested shadow/outline objects are not shared between
+    // elements (or with the DEFAULT_*_STYLE prototypes).
+    return Object.assign(clone(style || {}), overrides || {});
   }
 
   function quoteFamily(family) {
@@ -213,6 +221,38 @@
     return style;
   }
 
+  function styleNumber(value, fallback) {
+    return typeof value === 'number' && isFinite(value) ? value : fallback;
+  }
+
+  function styleColor(value) {
+    return typeof value === 'string' && value ? value : '#000000';
+  }
+
+  function normalizeShadow(shadow) {
+    if (!shadow || typeof shadow !== 'object' || Array.isArray(shadow)) {
+      return { enabled: false, color: '#000000', offsetX: 2, offsetY: 2, blur: 4 };
+    }
+    return {
+      enabled: shadow.enabled === true,
+      color: styleColor(shadow.color),
+      offsetX: styleNumber(shadow.offsetX, 2),
+      offsetY: styleNumber(shadow.offsetY, 2),
+      blur: Math.max(0, styleNumber(shadow.blur, 4))
+    };
+  }
+
+  function normalizeOutline(outline) {
+    if (!outline || typeof outline !== 'object' || Array.isArray(outline)) {
+      return { enabled: false, color: '#000000', width: 2 };
+    }
+    return {
+      enabled: outline.enabled === true,
+      color: styleColor(outline.color),
+      width: Math.max(0, styleNumber(outline.width, 2))
+    };
+  }
+
   function normalizeStyle(style) {
     if (!style || typeof style !== 'object') return style;
     const pair = normalizeFontPair(style.fontPair);
@@ -225,6 +265,8 @@
         typeof style.fontFamily === 'string' ? style.fontFamily : ''
       );
     }
+    style.shadow = normalizeShadow(style.shadow);
+    style.outline = normalizeOutline(style.outline);
     return style;
   }
 
@@ -802,6 +844,8 @@
     composeFontFamily: composeFontFamily,
     applyFontPair: applyFontPair,
     normalizeStyle: normalizeStyle,
+    normalizeShadow: normalizeShadow,
+    normalizeOutline: normalizeOutline,
     createBackgroundImage: createBackgroundImage,
     createBackgroundSet: createBackgroundSet,
     cloneBackgroundImage: cloneBackgroundImage,

@@ -118,6 +118,36 @@
     return model.rotateVector(x - centerX, y - centerY, -model.rotationRadians(element));
   }
 
+  function strokeAndFillText(ctx, style, text, x, y) {
+    const outline = style.outline;
+    if (outline && outline.enabled) {
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = outline.color || '#000000';
+      ctx.lineWidth = Math.max(0, outline.width || 0);
+      ctx.strokeText(text, x, y);
+    }
+    ctx.fillText(text, x, y);
+  }
+
+  // Two-pass "drop shadow": the first pass draws the whole region with the
+  // canvas shadow enabled, the second pass redraws it without shadow, so the
+  // text always covers its own shadow in any offset direction.
+  function drawTextWithStyle(ctx, style, drawTextFn) {
+    const shadow = style.shadow;
+    if (!shadow || !shadow.enabled) {
+      drawTextFn();
+      return;
+    }
+    ctx.save();
+    ctx.shadowColor = shadow.color || '#000000';
+    ctx.shadowOffsetX = shadow.offsetX || 0;
+    ctx.shadowOffsetY = shadow.offsetY || 0;
+    ctx.shadowBlur = Math.max(0, shadow.blur || 0);
+    drawTextFn();
+    ctx.restore();
+    drawTextFn();
+  }
+
   function drawFreeText(ctx, element, editMode) {
     const textLayout = layout.layoutText(element);
     const style = element.style;
@@ -130,12 +160,14 @@
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillStyle = style.color || '#111827';
-    textLayout.lines.forEach(function (line, index) {
-      const lineWidth = layout.measureText(line, style);
-      let x = element.x;
-      if (style.align === 'center') x += (element.width - lineWidth) / 2;
-      if (style.align === 'right') x += element.width - lineWidth;
-      ctx.fillText(line, x, element.y + textLayout.lineHeight * (index + 0.5));
+    drawTextWithStyle(ctx, style, function () {
+      textLayout.lines.forEach(function (line, index) {
+        const lineWidth = layout.measureText(line, style);
+        let x = element.x;
+        if (style.align === 'center') x += (element.width - lineWidth) / 2;
+        if (style.align === 'right') x += element.width - lineWidth;
+        strokeAndFillText(ctx, style, line, x, element.y + textLayout.lineHeight * (index + 0.5));
+      });
     });
     ctx.restore();
   }
@@ -159,18 +191,18 @@
     ctx.restore();
   }
 
-  function drawJustifiedText(ctx, text, x, baseline, innerWidth) {
+  function drawJustifiedText(ctx, style, text, x, baseline, innerWidth) {
     const chars = Array.from(text);
     if (chars.length <= 1) {
       const width = ctx.measureText(text).width;
-      ctx.fillText(text, x + (innerWidth - width) / 2, baseline);
+      strokeAndFillText(ctx, style, text, x + (innerWidth - width) / 2, baseline);
       return;
     }
     const textWidth = ctx.measureText(text).width;
     const spacing = Math.max(0, (innerWidth - textWidth) / (chars.length - 1));
     let cursor = x;
     chars.forEach(function (char) {
-      ctx.fillText(char, cursor, baseline);
+      strokeAndFillText(ctx, style, char, cursor, baseline);
       cursor += ctx.measureText(char).width + spacing;
     });
   }
@@ -192,12 +224,16 @@
       ctx.fillStyle = titleStyle.color || '#1f2937';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      computed.titleLines.forEach(function (line, index) {
-        ctx.fillText(
-          line,
-          element.x + computed.padding,
-          element.y + computed.titleY + computed.titleLineHeight * (index + 0.5)
-        );
+      drawTextWithStyle(ctx, titleStyle, function () {
+        computed.titleLines.forEach(function (line, index) {
+          strokeAndFillText(
+            ctx,
+            titleStyle,
+            line,
+            element.x + computed.padding,
+            element.y + computed.titleY + computed.titleLineHeight * (index + 0.5)
+          );
+        });
       });
     }
 
@@ -234,14 +270,16 @@
         ctx.beginPath();
         ctx.rect(cellX, cellY, cell.contentWidth, cell.height);
         ctx.clip();
-        if (table.align === 'justify') {
-          drawJustifiedText(ctx, cell.text, innerX, baseline, innerWidth);
-        } else {
-          let textX = innerX;
-          if (table.align === 'center') textX += (innerWidth - cell.textWidth) / 2;
-          if (table.align === 'right') textX += innerWidth - cell.textWidth;
-          ctx.fillText(cell.text, textX, baseline);
-        }
+        drawTextWithStyle(ctx, songStyle, function () {
+          if (table.align === 'justify') {
+            drawJustifiedText(ctx, songStyle, cell.text, innerX, baseline, innerWidth);
+          } else {
+            let textX = innerX;
+            if (table.align === 'center') textX += (innerWidth - cell.textWidth) / 2;
+            if (table.align === 'right') textX += innerWidth - cell.textWidth;
+            strokeAndFillText(ctx, songStyle, cell.text, textX, baseline);
+          }
+        });
         ctx.restore();
       });
 

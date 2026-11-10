@@ -27,11 +27,12 @@
       '</div>';
   }
 
-  function numberInput(id, value, min, max, step) {
+  function numberInput(id, value, min, max, step, disabled) {
     return '<input id="' + id + '" class="input" type="number" value="' + esc(value) + '"' +
       (min != null ? ' min="' + min + '"' : '') +
       (max != null ? ' max="' + max + '"' : '') +
-      ' step="' + (step || 1) + '">';
+      ' step="' + (step || 1) + '"' +
+      (disabled ? ' disabled' : '') + '>';
   }
 
   function textInput(id, value, placeholder) {
@@ -39,8 +40,9 @@
       (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '>';
   }
 
-  function colorInput(id, value) {
-    return '<input id="' + id + '" class="color-input" type="color" value="' + esc(value) + '">';
+  function colorInput(id, value, disabled) {
+    return '<input id="' + id + '" class="color-input" type="color" value="' + esc(value) + '"' +
+      (disabled ? ' disabled' : '') + '>';
   }
 
   function selectInput(id, options, value, disabled) {
@@ -797,12 +799,75 @@
     });
   }
 
+  function shadowOutlineFields(prefix, style) {
+    const shadow = model.normalizeShadow(style.shadow);
+    const outline = model.normalizeOutline(style.outline);
+    return '<div class="so-group">' +
+      '<label class="check-row"><input id="' + prefix + '-shadow-enabled" type="checkbox"' +
+        (shadow.enabled ? ' checked' : '') + '> 阴影（投影）</label>' +
+      fieldPair(
+        '颜色', colorInput(prefix + '-shadow-color', shadow.color, !shadow.enabled),
+        '模糊', numberInput(prefix + '-shadow-blur', shadow.blur, 0, 100, 1, !shadow.enabled)
+      ) +
+      fieldPair(
+        '偏移 X', numberInput(prefix + '-shadow-x', shadow.offsetX, -200, 200, 1, !shadow.enabled),
+        '偏移 Y', numberInput(prefix + '-shadow-y', shadow.offsetY, -200, 200, 1, !shadow.enabled)
+      ) +
+      '<div class="so-sep"></div>' +
+      '<label class="check-row"><input id="' + prefix + '-outline-enabled" type="checkbox"' +
+        (outline.enabled ? ' checked' : '') + '> 轮廓</label>' +
+      fieldPair(
+        '颜色', colorInput(prefix + '-outline-color', outline.color, !outline.enabled),
+        '线宽', numberInput(prefix + '-outline-width', outline.width, 0, 50, 0.5, !outline.enabled)
+      ) +
+    '</div>';
+  }
+
+  function bindShadowOutline(prefix, style) {
+    function shadowPatch(key, parse) {
+      return function () {
+        const shadow = model.normalizeShadow(style.shadow);
+        shadow[key] = parse();
+        style.shadow = shadow;
+        L.app.changed({ property: false });
+      };
+    }
+    function outlinePatch(key, parse) {
+      return function () {
+        const outline = model.normalizeOutline(style.outline);
+        outline[key] = parse();
+        style.outline = outline;
+        L.app.changed({ property: false });
+      };
+    }
+    function enablePatch(key, normalize) {
+      return function () {
+        const input = document.getElementById(prefix + '-' + key + '-enabled');
+        const value = normalize(style[key]);
+        value.enabled = !!(input && input.checked);
+        style[key] = value;
+        L.app.changed({ property: false });
+        ui.renderPropertyPanel();
+      };
+    }
+
+    bind(prefix + '-shadow-enabled', 'change', enablePatch('shadow', model.normalizeShadow));
+    bind(prefix + '-shadow-color', 'input', shadowPatch('color', function () { return valueOf(prefix + '-shadow-color'); }));
+    bind(prefix + '-shadow-x', 'input', shadowPatch('offsetX', function () { return Number(valueOf(prefix + '-shadow-x')) || 0; }));
+    bind(prefix + '-shadow-y', 'input', shadowPatch('offsetY', function () { return Number(valueOf(prefix + '-shadow-y')) || 0; }));
+    bind(prefix + '-shadow-blur', 'input', shadowPatch('blur', function () { return Math.max(0, Number(valueOf(prefix + '-shadow-blur')) || 0); }));
+    bind(prefix + '-outline-enabled', 'change', enablePatch('outline', model.normalizeOutline));
+    bind(prefix + '-outline-color', 'input', outlinePatch('color', function () { return valueOf(prefix + '-outline-color'); }));
+    bind(prefix + '-outline-width', 'input', outlinePatch('width', function () { return Math.max(0, Number(valueOf(prefix + '-outline-width')) || 0); }));
+  }
+
   function categoryStyleFields(prefix, style) {
     return fontField(prefix, style) +
       field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
       field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
-      field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05));
+      field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05)) +
+      shadowOutlineFields(prefix, style);
   }
 
   function bindCategoryStyle(prefix, style) {
@@ -823,6 +888,7 @@
       style.lineHeight = Math.max(0.8, Number(valueOf(prefix + '-lineheight')) || 0.8);
       L.app.changed({ property: false });
     });
+    bindShadowOutline(prefix, style);
   }
 
   function tableCard(table, index, isLast) {
@@ -984,7 +1050,8 @@
       field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
       field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05)) +
-      field('对齐', selectInput(prefix + '-align', alignOptions(), style.align || 'left'));
+      field('对齐', selectInput(prefix + '-align', alignOptions(), style.align || 'left')) +
+      shadowOutlineFields(prefix, style);
   }
 
   function renderTextProperties(element) {
@@ -1047,6 +1114,7 @@
       element.style.align = valueOf('prop-text-align');
       L.app.changed({ property: false });
     });
+    bindShadowOutline('prop-text', element.style);
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
   }
 
