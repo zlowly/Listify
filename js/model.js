@@ -2,7 +2,9 @@
   'use strict';
 
   const L = window.Listify = window.Listify || {};
-  const DEFAULT_FONT = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif';
+  const DEFAULT_LATIN_FONT = '"Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans"';
+  const DEFAULT_CJK_FONT = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei"';
+  const DEFAULT_FONT = DEFAULT_LATIN_FONT + ', ' + DEFAULT_CJK_FONT + ', sans-serif';
   const DEFAULT_TITLE_STYLE = {
     fontFamily: DEFAULT_FONT,
     fontSize: 44,
@@ -57,6 +59,173 @@
 
   function copyStyle(style, overrides) {
     return Object.assign({}, style, overrides || {});
+  }
+
+  function quoteFamily(family) {
+    const value = String(family == null ? '' : family).replace(/[\r\n\f]/g, ' ');
+    return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+
+  // CSS generic families must stay unquoted; everything else is quoted so that
+  // names like "Alibaba PuHuiTi 3.0" do not make the whole ctx.font invalid.
+  const GENERIC_FONT_FAMILIES = [
+    'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy',
+    'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded',
+    'emoji', 'math', 'fangsong'
+  ];
+
+  function splitFontStack(family) {
+    const text = String(family == null ? '' : family);
+    const parts = [];
+    let buffer = '';
+    let quote = '';
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text.charAt(i);
+      if (quote) {
+        buffer += ch;
+        if (ch === '\\' && i + 1 < text.length) {
+          buffer += text.charAt(i + 1);
+          i += 1;
+        } else if (ch === quote) {
+          quote = '';
+        }
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+        buffer += ch;
+      } else if (ch === ',') {
+        parts.push(buffer);
+        buffer = '';
+      } else {
+        buffer += ch;
+      }
+    }
+    parts.push(buffer);
+    return parts;
+  }
+
+  const fontStackCache = new Map();
+  let fontProbeCtx = null;
+
+  // A double-quoted family that itself ends in `, sans-serif` is the signature
+  // of an old picker value that was composed twice.
+  const LEGACY_PREVIEW_FAMILY = /["']\s*,\s*sans-serif\s*["']/i;
+
+  // Ask the canvas parser whether the stack is usable; an invalid stack makes
+  // ctx.font a silent no-op, which looks like "the font did not change".
+  function fontStackIsValid(raw) {
+    if (typeof document === 'undefined' || !document.createElement) return true;
+    if (!fontProbeCtx) {
+      const canvas = document.createElement('canvas');
+      fontProbeCtx = canvas.getContext ? canvas.getContext('2d') : null;
+    }
+    if (!fontProbeCtx) return true;
+    const probe = '16px "__listify_probe_a__"';
+    fontProbeCtx.font = probe;
+    const fallback = fontProbeCtx.font;
+    fontProbeCtx.font = '16px ' + raw;
+    return fontProbeCtx.font !== fallback;
+  }
+
+  function normalizeFontStack(family) {
+    const raw = String(family == null ? '' : family);
+    const cached = fontStackCache.get(raw);
+    if (cached) return cached;
+    if (!raw.trim()) return DEFAULT_FONT;
+    if (!LEGACY_PREVIEW_FAMILY.test(raw) && fontStackIsValid(raw)) {
+      fontStackCache.set(raw, raw);
+      return raw;
+    }
+
+    const families = [];
+    splitFontStack(raw).forEach(function (part) {
+      let name = part.trim();
+      if (!name) return;
+      if ((name.charAt(0) === '"' && name.charAt(name.length - 1) === '"') ||
+          (name.charAt(0) === "'" && name.charAt(name.length - 1) === "'")) {
+        name = name.slice(1, -1);
+      }
+      name = name
+        .replace(/\\(["'\\])/g, '$1')
+        .replace(/[\r\n\f]/g, ' ')
+        .trim();
+      if (!name) return;
+      name = cleanFamilyName(name);
+      if (!name) return;
+      if (GENERIC_FONT_FAMILIES.indexOf(name.toLocaleLowerCase()) >= 0) {
+        families.push(name.toLocaleLowerCase());
+      } else {
+        families.push(quoteFamily(name));
+      }
+    });
+
+    const value = families.length ? families.join(', ') : DEFAULT_FONT;
+    if (fontStackCache.size > 256) fontStackCache.clear();
+    fontStackCache.set(raw, value);
+    return value;
+  }
+
+  // Older picker builds stored the whole preview stack (e.g. `"Foo", sans-serif`)
+  // in the slot; keep only the family name so a stale picker cannot corrupt it.
+  function cleanFamilyName(value) {
+    let name = String(value == null ? '' : value).replace(/[\r\n\f]/g, ' ').trim();
+    if (!name) return '';
+    const legacy = name.match(/^["']?([^"']+?)["']?\s*,\s*sans-serif\s*$/i);
+    if (legacy) name = legacy[1];
+    if (name.indexOf(',') !== -1) {
+      // A slot holds one family; a comma means an old picker saved a stack.
+      name = name.split(',')[0];
+    }
+    return name.replace(/^["']+/, '').replace(/["']+$/, '').trim();
+  }
+
+  function normalizeFontPair(pair) {
+    if (!pair || typeof pair !== 'object' || Array.isArray(pair)) return null;
+    const latin = typeof pair.latin === 'string' ? cleanFamilyName(pair.latin) : '';
+    const cjk = typeof pair.cjk === 'string' ? cleanFamilyName(pair.cjk) : '';
+    if (!latin && !cjk) return null;
+    return { latin: latin, cjk: cjk };
+  }
+
+  function composeFontFamily(pair) {
+    const normalized = normalizeFontPair(pair);
+    if (!normalized) return DEFAULT_FONT;
+
+    const latin = normalized.latin ? quoteFamily(normalized.latin) : DEFAULT_LATIN_FONT;
+    const cjk = normalized.cjk ? quoteFamily(normalized.cjk) : DEFAULT_CJK_FONT;
+
+    if (normalized.latin && normalized.cjk &&
+        normalized.latin.toLocaleLowerCase() === normalized.cjk.toLocaleLowerCase()) {
+      return latin + ', sans-serif';
+    }
+    return latin + ', ' + cjk + ', sans-serif';
+  }
+
+  function applyFontPair(style, pair) {
+    if (!style) return style;
+    const normalized = normalizeFontPair(pair);
+    if (normalized) {
+      style.fontPair = normalized;
+      style.fontFamily = composeFontFamily(normalized);
+    } else {
+      delete style.fontPair;
+      style.fontFamily = DEFAULT_FONT;
+    }
+    return style;
+  }
+
+  function normalizeStyle(style) {
+    if (!style || typeof style !== 'object') return style;
+    const pair = normalizeFontPair(style.fontPair);
+    if (pair) {
+      style.fontPair = pair;
+      style.fontFamily = composeFontFamily(pair);
+    } else {
+      delete style.fontPair;
+      style.fontFamily = normalizeFontStack(
+        typeof style.fontFamily === 'string' ? style.fontFamily : ''
+      );
+    }
+    return style;
   }
 
   function createBackgroundImage(assetId, fit) {
@@ -596,7 +765,7 @@
   function fontString(style) {
     const weight = style && style.fontWeight ? style.fontWeight : 400;
     const size = style && style.fontSize ? style.fontSize : 16;
-    const family = style && style.fontFamily ? style.fontFamily : DEFAULT_FONT;
+    const family = normalizeFontStack(style && style.fontFamily ? style.fontFamily : DEFAULT_FONT);
     const italic = style && style.italic ? 'italic ' : '';
     return italic + weight + ' ' + size + 'px ' + family;
   }
@@ -614,6 +783,8 @@
 
   L.model = {
     DEFAULT_FONT: DEFAULT_FONT,
+    DEFAULT_LATIN_FONT: DEFAULT_LATIN_FONT,
+    DEFAULT_CJK_FONT: DEFAULT_CJK_FONT,
     DEFAULT_TITLE_STYLE: DEFAULT_TITLE_STYLE,
     DEFAULT_SONG_STYLE: DEFAULT_SONG_STYLE,
     DEFAULT_TEXT_STYLE: DEFAULT_TEXT_STYLE,
@@ -625,6 +796,12 @@
     clamp: clamp,
     clone: clone,
     copyStyle: copyStyle,
+    quoteFamily: quoteFamily,
+    normalizeFontStack: normalizeFontStack,
+    normalizeFontPair: normalizeFontPair,
+    composeFontFamily: composeFontFamily,
+    applyFontPair: applyFontPair,
+    normalizeStyle: normalizeStyle,
     createBackgroundImage: createBackgroundImage,
     createBackgroundSet: createBackgroundSet,
     cloneBackgroundImage: cloneBackgroundImage,

@@ -7,6 +7,8 @@
 
   let cache = null;
 
+  const quoteFamily = model.quoteFamily;
+
   function isSupported() {
     return (typeof window.queryLocalFonts === 'function') ||
       (typeof navigator !== 'undefined' && typeof navigator.queryLocalFonts === 'function');
@@ -20,11 +22,6 @@
       return navigator.queryLocalFonts.bind(navigator);
     }
     return null;
-  }
-
-  function quoteFamily(family) {
-    const value = String(family == null ? '' : family).replace(/[\r\n\f]/g, ' ');
-    return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
   }
 
   function makeCollator() {
@@ -94,7 +91,11 @@
     }
 
     const opts = options || {};
+    const slot = opts.slot === 'cjk' ? 'cjk' : 'latin';
+    const isCjk = slot === 'cjk';
     const currentValue = opts.currentValue || '';
+    const defaultFamily = isCjk ? model.DEFAULT_CJK_FONT : model.DEFAULT_LATIN_FONT;
+    const sample = isCjk ? '歌单 中文歌曲' : 'Playlist 123 ABC';
     let closed = false;
     let requestSeq = 0;
     let loading = false;
@@ -118,12 +119,14 @@
 
     const hint = document.createElement('p');
     hint.className = 'hint font-picker-hint';
-    hint.textContent = '只读取本机字体，不上传；选择会替换当前字体栈，可随时手输恢复。';
+    hint.textContent = isCjk
+      ? '中文槽位用于西文字体缺字时的中文回退；字体不含中文字形时会显示系统回退。只读取本机字体，不上传。'
+      : '西文字体优先用于拉丁字符；若它包含中文字形，中文仍可能使用它。系统不检测字形覆盖。只读取本机字体，不上传。';
 
     const list = document.createElement('div');
     list.className = 'font-picker-list';
     list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', '本机字体');
+    list.setAttribute('aria-label', isCjk ? '本机中文字体' : '本机西文字体');
 
     body.appendChild(search);
     body.appendChild(status);
@@ -149,7 +152,7 @@
       row.type = 'button';
       row.className = 'font-row';
       row.setAttribute('role', 'option');
-      const selected = currentValue === value;
+      const selected = value == null ? !currentValue : currentValue === value;
       row.setAttribute('aria-selected', selected ? 'true' : 'false');
       if (selected) row.classList.add('is-active');
 
@@ -160,7 +163,7 @@
 
       const preview = document.createElement('span');
       preview.className = 'font-preview';
-      preview.textContent = '歌单 Playlist 123';
+      preview.textContent = sample;
       preview.style.fontFamily = previewFamily;
 
       row.appendChild(name);
@@ -171,7 +174,8 @@
 
     function renderList() {
       list.innerHTML = '';
-      appendRow('系统默认', model.DEFAULT_FONT, model.DEFAULT_FONT, '项目默认字体栈');
+      appendRow('系统默认', null, defaultFamily + ', sans-serif',
+        isCjk ? '默认中文字体栈' : '默认西文字体栈');
 
       const query = search.value.trim().toLocaleLowerCase();
       const filtered = query ? currentFamilies.filter(function (font) {
@@ -179,8 +183,7 @@
       }) : currentFamilies;
 
       filtered.forEach(function (font) {
-        appendRow(font.family, quoteFamily(font.family) + ', sans-serif',
-          quoteFamily(font.family) + ', sans-serif', font.family);
+        appendRow(font.family, font.family, quoteFamily(font.family) + ', sans-serif', font.family);
       });
 
       if (loading) {
@@ -259,7 +262,7 @@
     }
 
     modal = ui.modal.open({
-      title: '选择本机字体',
+      title: isCjk ? '选择中文字体' : '选择西文字体',
       width: '560px',
       body: body,
       onClose: function () {

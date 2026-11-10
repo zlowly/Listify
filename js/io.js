@@ -24,14 +24,26 @@
   }
 
   function serializeStyle(style) {
-    return {
-      fontFamily: style.fontFamily,
+    const pair = model.normalizeFontPair(style.fontPair);
+    const result = {
+      fontFamily: pair ? model.composeFontFamily(pair) : style.fontFamily,
       fontSize: style.fontSize,
       fontWeight: style.fontWeight,
       color: style.color,
       lineHeight: style.lineHeight,
       align: style.align
     };
+    if (pair) {
+      const savedPair = {};
+      if (pair.latin) savedPair.latin = pair.latin;
+      if (pair.cjk) savedPair.cjk = pair.cjk;
+      result.fontPair = savedPair;
+    }
+    return result;
+  }
+
+  function loadStyle(style) {
+    return model.normalizeStyle(model.copyStyle(style));
   }
 
   function serializeTable(table) {
@@ -643,8 +655,8 @@
                 x: element.x,
                 y: element.y,
                 width: element.width,
-                titleStyle: model.copyStyle(element.titleStyle),
-                songStyle: model.copyStyle(element.songStyle),
+                titleStyle: loadStyle(element.titleStyle),
+                songStyle: loadStyle(element.songStyle),
                 tables: element.tables.map(function (table) {
                   return {
                     columns: table.columns,
@@ -666,7 +678,7 @@
                 y: element.y,
                 width: element.width,
                 text: element.text,
-                style: model.copyStyle(element.style)
+                style: loadStyle(element.style)
               };
             }
             if (!isV1) {

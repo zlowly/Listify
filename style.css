@@ -477,14 +477,40 @@ button { cursor: pointer; }
 }
 
 /* ---------- local font picker ---------- */
-.font-control {
+.font-field-row { align-items: start; }
+.font-field-row > label { padding-top: 7px; }
+.font-field {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 5px;
   width: 100%;
   min-width: 0;
 }
-.font-control .input { flex: 1 1 auto; min-width: 0; }
+.font-field-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.font-field-control .input { flex: 1 1 auto; min-width: 0; }
+.font-pair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.font-pair-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.font-pair-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.font-pair-sep { color: var(--faint); }
+.font-pair-hint { margin: 0; }
 .font-pick-btn { flex: 0 0 auto; }
 
 .font-picker {

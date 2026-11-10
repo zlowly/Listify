@@ -7,6 +7,10 @@
   const renderer = L.render;
   const ui = L.ui;
 
+  const BUILD = '20261110b';
+  L.BUILD = BUILD;
+  console.info('[Listify] build ' + BUILD);
+
   const state = {
     project: model.createDefaultProject(),
     currentPageId: null,

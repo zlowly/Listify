@@ -710,33 +710,84 @@
     bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(set.id, image.id); });
   }
 
+  function fontPairStatusHtml(style) {
+    const pair = model.normalizeFontPair(style.fontPair);
+    const isDefault = style.fontFamily === model.DEFAULT_FONT;
+    const latin = pair ? (pair.latin || '默认') : (isDefault ? '默认' : '自定义');
+    const cjk = pair ? (pair.cjk || '默认') : (isDefault ? '默认' : '自定义');
+    return '<span class="font-pair-value">西文：' + esc(latin) + '</span>' +
+      '<span class="font-pair-sep">·</span>' +
+      '<span class="font-pair-value">中文：' + esc(cjk) + '</span>';
+  }
+
+  function syncFontField(prefix, style) {
+    const input = document.getElementById(prefix + '-family');
+    if (input) input.value = style.fontFamily || '';
+    const status = document.getElementById(prefix + '-pair-status');
+    if (status) status.innerHTML = fontPairStatusHtml(style);
+  }
+
   function fontField(prefix, style) {
     const supported = !!(L.fontPicker && L.fontPicker.isSupported && L.fontPicker.isSupported());
-    return field('字体',
-      '<div class="font-control">' +
-        textInput(prefix + '-family', style.fontFamily, '字体族') +
-        '<button id="' + prefix + '-family-pick" class="btn btn-sm font-pick-btn" type="button"' +
-          (supported ? '' : ' disabled title="当前浏览器不支持本机字体选择，请直接输入字体族"') +
-        '>选择</button>' +
-      '</div>');
+    const disabled = supported ? '' : ' disabled title="当前浏览器不支持本机字体选择，请直接输入字体族"';
+    return '<div class="field font-field-row">' +
+        '<label>字体</label>' +
+        '<div class="control">' +
+          '<div class="font-field">' +
+            '<div class="font-field-control">' +
+              textInput(prefix + '-family', style.fontFamily, '字体族') +
+            '</div>' +
+            '<div class="font-pair-actions">' +
+              '<button id="' + prefix + '-pick-latin" class="btn btn-sm font-pick-btn" type="button"' + disabled + '>选西文字体</button>' +
+              '<button id="' + prefix + '-pick-cjk" class="btn btn-sm font-pick-btn" type="button"' + disabled + '>选中文字体</button>' +
+              '<button id="' + prefix + '-pair-clear" class="btn btn-sm font-pick-btn" type="button">使用同一字体</button>' +
+            '</div>' +
+            '<div id="' + prefix + '-pair-status" class="font-pair-status">' + fontPairStatusHtml(style) + '</div>' +
+            '<p class="font-pair-hint">西文优先用于拉丁字符；系统不检测字形覆盖，中文可能仍用西文字形。</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
   }
 
   function bindFontField(prefix, style) {
     bind(prefix + '-family', 'input', function () {
       style.fontFamily = valueOf(prefix + '-family');
+      delete style.fontPair;
+      const status = document.getElementById(prefix + '-pair-status');
+      if (status) status.innerHTML = fontPairStatusHtml(style);
       L.app.changed({ property: false });
     });
-    bind(prefix + '-family-pick', 'click', function () {
+
+    bind(prefix + '-family', 'change', function () {
+      const normalized = model.normalizeFontStack(valueOf(prefix + '-family'));
+      if (normalized === style.fontFamily) return;
+      style.fontFamily = normalized;
+      syncFontField(prefix, style);
+      L.app.changed({ property: false });
+    });
+
+    function openSlot(slot) {
       if (!L.fontPicker || !L.fontPicker.isSupported()) return;
+      const pair = model.normalizeFontPair(style.fontPair) || { latin: '', cjk: '' };
       L.fontPicker.open({
-        currentValue: style.fontFamily,
+        slot: slot,
+        currentValue: pair[slot] || '',
         onPick: function (value) {
-          style.fontFamily = value;
-          const input = document.getElementById(prefix + '-family');
-          if (input) input.value = value;
+          const next = model.normalizeFontPair(style.fontPair) || { latin: '', cjk: '' };
+          next[slot] = typeof value === 'string' ? value : '';
+          model.applyFontPair(style, next);
+          syncFontField(prefix, style);
           L.app.changed({ property: false });
         }
       });
+    }
+
+    bind(prefix + '-pick-latin', 'click', function () { openSlot('latin'); });
+    bind(prefix + '-pick-cjk', 'click', function () { openSlot('cjk'); });
+    bind(prefix + '-pair-clear', 'click', function () {
+      delete style.fontPair;
+      syncFontField(prefix, style);
+      L.app.changed({ property: false });
     });
   }
 

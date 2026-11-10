@@ -183,10 +183,12 @@ components:
 ## Typography
 
 **Display Font:** 系统界面栈（"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif）
-**Canvas Font:** "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif（导出内容的默认字体族，可在属性面板逐区修改）
+**Canvas Font:** 西文默认栈 "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans" 在前，中文默认栈 "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei" 在后，末尾 `sans-serif`（导出内容的默认字体族，可在属性面板按西文/中文槽位或整条字体栈修改）
 **Label/Mono Font:** 无专用等宽字体；所有数字字段使用 `font-variant-numeric: tabular-nums`。
 
 **Character:** 完全依赖本机字体（运行时零网络，不能加载 webfont），因此语气由字号、字重与字距承担，而不是字族。结果是中性、可预期、没有品牌字体记忆点——这符合工坊身份：字体是工具，不是表达。
+
+字体策略是 best-effort：分类名、歌名和自由文字各有两个槽位（西文、中文），组合为“西文字体在前、中文字体在后”的普通 CSS 字体栈，让拉丁字符优先命中西文字体，缺字时再回退到中文字体。系统不检测字形覆盖；若西文字体自身包含中文字形，中文仍可能由它渲染。手动编辑整条字体栈会清除槽位配对并以手输值为准。
 
 ### Hierarchy
 
