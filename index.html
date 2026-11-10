@@ -46,21 +46,35 @@
         <div id="canvas-toolbar" class="canvas-toolbar" role="group" aria-label="页面与插入工具">
           <div class="canvas-toolbar-group canvas-toolbar-pages" role="group" aria-label="页面">
             <div id="page-tabs" class="page-tabs" role="tablist" aria-label="页面列表"></div>
-            <button id="btn-add-page" class="icon-btn" title="新增页面" aria-label="新增页面">＋</button>
-            <button id="btn-delete-page" class="icon-btn" title="删除当前页" aria-label="删除当前页">🗑</button>
+            <button id="btn-add-page" class="icon-btn" aria-label="新增页面">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+            </button>
+            <button id="btn-delete-page" class="icon-btn" aria-label="删除当前页">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+            </button>
           </div>
           <span class="toolbar-divider" aria-hidden="true"></span>
           <div class="canvas-toolbar-group" role="group" aria-label="插入内容">
-            <button id="btn-add-text" class="btn btn-sm">添加文字</button>
-            <button id="btn-add-image" class="btn btn-sm" title="添加图片（也可 Ctrl+V 粘贴）">添加图片</button>
+            <button id="btn-add-text" class="icon-btn" aria-label="添加文字">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
+            </button>
+            <button id="btn-add-image" class="icon-btn" aria-label="添加图片（也可 Ctrl+V 粘贴）">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+            </button>
           </div>
           <span class="toolbar-divider" aria-hidden="true"></span>
           <div id="canvas-zoom-controls" class="canvas-toolbar-group canvas-zoom" role="group" aria-label="视图缩放">
-            <button id="btn-zoom-out" class="icon-btn" title="缩小（10% 为下限）" aria-label="缩小">−</button>
+            <button id="btn-zoom-out" class="icon-btn" aria-label="缩小（10% 为下限）">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+            </button>
             <input id="zoom-input" class="zoom-input" type="text" inputmode="numeric" value="100%"
-              aria-label="缩放比例，10% 至 400%" title="输入 10%–400% 后按回车">
-            <button id="btn-zoom-in" class="icon-btn" title="放大（400% 为上限）" aria-label="放大">＋</button>
-            <button id="btn-zoom-fit" class="btn btn-sm" title="适应窗口" aria-label="适应窗口">适应窗口</button>
+              aria-label="缩放比例，10% 至 400%">
+            <button id="btn-zoom-in" class="icon-btn" aria-label="放大（400% 为上限）">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+            </button>
+            <button id="btn-zoom-fit" class="icon-btn" aria-label="适应窗口">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            </button>
           </div>
         </div>
         <div id="canvas-scroll" class="canvas-scroll">

@@ -188,9 +188,9 @@
     surfaceIsLeafer = false;
   }
 
-  function toolbarChromeTop() {
+  function toolbarChromeLeft() {
     const toolbar = document.getElementById('canvas-toolbar');
-    return toolbar ? Math.round(toolbar.getBoundingClientRect().height) + 24 : 0;
+    return toolbar ? Math.round(toolbar.getBoundingClientRect().width) + 24 : 0;
   }
 
   function measureCanvas() {
@@ -199,13 +199,13 @@
     viewport.height = Math.max(1, scrollEl.clientHeight || 1);
     viewport.dpr = window.devicePixelRatio || 1;
     viewport.padding = Math.min(72, Math.max(24, Math.min(viewport.width, viewport.height) * 0.08));
-    const chromeTop = toolbarChromeTop();
-    const availableHeight = Math.max(1, viewport.height - chromeTop);
+    const chromeLeft = toolbarChromeLeft();
+    const availableWidth = Math.max(1, viewport.width - chromeLeft);
     const pageW = Math.max(1, state.project.pageSize.width);
     const pageH = Math.max(1, state.project.pageSize.height);
     viewport.fitScale = Math.max(0.05, Math.min(1.6, Math.min(
-      (viewport.width - viewport.padding * 2 - 1) / pageW,
-      (availableHeight - viewport.padding * 2 - 1) / pageH
+      (availableWidth - viewport.padding * 2 - 1) / pageW,
+      (viewport.height - viewport.padding * 2 - 1) / pageH
     )));
     return true;
   }
@@ -221,10 +221,10 @@
     let previousSize = '';
     for (let pass = 0; pass < 2; pass++) {
       measureCanvas();
-      const chromeTop = toolbarChromeTop();
+      const chromeLeft = toolbarChromeLeft();
       const scale = effectiveScale();
-      const contentW = pageW * scale + viewport.padding * 2;
-      const contentH = pageH * scale + chromeTop + viewport.padding * 2;
+      const contentW = pageW * scale + chromeLeft + viewport.padding * 2;
+      const contentH = pageH * scale + viewport.padding * 2;
       const stageW = contentW <= viewport.width + 0.01 ? viewport.width : Math.ceil(contentW);
       const stageH = contentH <= viewport.height + 0.01 ? viewport.height : Math.ceil(contentH);
       stageEl.style.width = stageW + 'px';
@@ -233,11 +233,11 @@
       viewport.stageWidth = stageW;
       viewport.stageHeight = stageH;
       viewport.originX = stageW > viewport.width + 0.5
-        ? viewport.padding
-        : (viewport.width - pageW * scale) / 2;
+        ? chromeLeft + viewport.padding
+        : chromeLeft + (viewport.width - chromeLeft - pageW * scale) / 2;
       viewport.originY = stageH > viewport.height + 0.5
-        ? chromeTop + viewport.padding
-        : chromeTop + (viewport.height - chromeTop - pageH * scale) / 2;
+        ? viewport.padding
+        : (viewport.height - pageH * scale) / 2;
       // Scrollbars may appear or disappear after the stage resize; measure once
       // more so the origin and offsets use the real visible area.
       const size = scrollEl.clientWidth + 'x' + scrollEl.clientHeight;

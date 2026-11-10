@@ -101,6 +101,63 @@
     return Math.round(angle * 10) / 10;
   }
 
+  function initToolbarTips() {
+    const toolbar = document.getElementById('canvas-toolbar');
+    if (!toolbar) return;
+    const tip = document.createElement('div');
+    tip.className = 'canvas-tip';
+    tip.setAttribute('role', 'tooltip');
+    tip.hidden = true;
+    document.body.appendChild(tip);
+
+    let showTimer = null;
+    let current = null;
+
+    function place(el) {
+      const rect = el.getBoundingClientRect();
+      tip.style.left = (rect.right + 10) + 'px';
+      tip.style.top = (rect.top + rect.height / 2) + 'px';
+    }
+    function show(el) {
+      const label = el.getAttribute('aria-label');
+      if (!label) return;
+      current = el;
+      tip.textContent = label;
+      place(el);
+      tip.hidden = false;
+      requestAnimationFrame(function () { tip.classList.add('show'); });
+    }
+    function hide() {
+      clearTimeout(showTimer);
+      showTimer = null;
+      current = null;
+      tip.classList.remove('show');
+      tip.hidden = true;
+    }
+    function onEnter(event) {
+      const el = event.target.closest && event.target.closest('button[aria-label]');
+      if (!el || el === current) return;
+      clearTimeout(showTimer);
+      showTimer = setTimeout(function () { show(el); }, 150);
+    }
+    function onLeave(event) {
+      const to = event.relatedTarget;
+      if (to && to.closest && to.closest('button[aria-label]') === current) return;
+      hide();
+    }
+    toolbar.addEventListener('mouseover', onEnter);
+    toolbar.addEventListener('mouseout', onLeave);
+    toolbar.addEventListener('focusin', function (event) {
+      const el = event.target.closest && event.target.closest('button[aria-label]');
+      if (el) show(el);
+    });
+    toolbar.addEventListener('focusout', function (event) {
+      const to = event.relatedTarget;
+      if (to && to.closest && to.closest('button[aria-label]')) return;
+      hide();
+    });
+  }
+
   ui.init = function () {
     if (ui.initialized) return;
     ui.initialized = true;
@@ -246,6 +303,8 @@
         L.app.selectPage();
       }
     });
+
+    initToolbarTips();
   };
 
   ui.setPanel = function (panel) {
@@ -278,7 +337,8 @@
     ui.els.pageTabs.innerHTML = project.pages.map(function (page, index) {
       const active = page.id === current;
       return '<button class="page-tab' + (active ? ' active' : '') + '" role="tab" aria-selected="' +
-        (active ? 'true' : 'false') + '" data-page-id="' + esc(page.id) + '">第 ' + (index + 1) + ' 页</button>';
+        (active ? 'true' : 'false') + '" aria-label="第 ' + (index + 1) + ' 页" data-page-id="' +
+        esc(page.id) + '">' + (index + 1) + '</button>';
     }).join('');
     ui.els.pageTabs.querySelectorAll('.page-tab').forEach(function (button) {
       button.addEventListener('click', function () {
