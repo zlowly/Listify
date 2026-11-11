@@ -152,12 +152,15 @@
     };
   }
 
-  function assignTableSongs(sorted, table, cursor, tableWidth, songStyle) {
+  function assignTableSongs(sorted, table, cursor, tableWidth, songStyle, placeholderEligible) {
     const columns = table.columns;
     const isDynamic = table.rows === 0;
     const remaining = Math.max(0, sorted.length - cursor);
     const take = isDynamic ? remaining : Math.min(remaining, columns * table.rows);
-    const rowCount = isDynamic ? (take === 0 ? 0 : Math.ceil(take / columns)) : table.rows;
+    const placeholder = !!(isDynamic && take === 0 && placeholderEligible);
+    const rowCount = isDynamic
+      ? (take === 0 ? (placeholder ? 1 : 0) : Math.ceil(take / columns))
+      : table.rows;
     const songs = sorted.slice(cursor, cursor + take);
     const cells = new Array(rowCount * columns).fill(null);
 
@@ -238,6 +241,7 @@
     return {
       columns: columns,
       rows: rowCount,
+      placeholder: placeholder,
       fill: table.fill,
       align: table.align,
       widthMode: useManual ? 'manual' : 'auto',
@@ -254,7 +258,8 @@
     };
   }
 
-  function layoutCategory(category, element) {
+  function layoutCategory(category, element, options) {
+    const editMode = !!(options && options.editMode);
     const songs = category ? category.songs : [];
     normalizeTables(element, songs.length);
     const sorted = sortSongs(songs);
@@ -268,7 +273,7 @@
 
     let cursor = 0;
     let tableY = BLOCK_PADDING + titleHeight + (showTitle ? TITLE_GAP : 0);
-    const tables = element.tables.map(function (table) {
+    const tables = element.tables.map(function (table, index) {
       const margins = model.normalizeMargins(table.margins);
       const left = model.clamp(margins.left, 0, element.width);
       const right = model.clamp(margins.right, 0, element.width);
@@ -280,7 +285,8 @@
         table,
         cursor,
         tableWidth,
-        element.songStyle
+        element.songStyle,
+        editMode && index === element.tables.length - 1
       );
       cursor += assigned.take;
       assigned.y = tableY;
@@ -309,7 +315,8 @@
       rowHeight: element.songStyle.fontSize * element.songStyle.lineHeight + CELL_PAD_Y * 2,
       sorted: sorted
     };
-    element._layout = layout;
+    if (!element._layoutByMode) element._layoutByMode = {};
+    element._layoutByMode[editMode ? 'edit' : 'export'] = layout;
     return layout;
   }
 
@@ -323,9 +330,9 @@
     };
   }
 
-  function elementHeight(element, category) {
+  function elementHeight(element, category, options) {
     if (element.type === 'category') {
-      return layoutCategory(category, element).blockHeight;
+      return layoutCategory(category, element, options).blockHeight;
     }
     if (element.type === 'text') {
       return layoutText(element).height;
@@ -350,7 +357,8 @@
   }
 
   function addTable(element, category) {
-    const layout = layoutCategory(category, element);
+    // 冻结旧动态表行数必须用数据视角（不含占位行）
+    const layout = layoutCategory(category, element, { editMode: false });
     const lastIndex = element.tables.length - 1;
     const last = element.tables[lastIndex];
     if (last && last.rows === 0) {

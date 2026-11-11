@@ -1227,7 +1227,7 @@
       const category = element.type === 'category'
         ? model.getCategory(project, element.category)
         : null;
-      const bottom = element.y + layout.elementHeight(element, category);
+      const bottom = element.y + layout.elementHeight(element, category, { editMode: true });
       if (lowestBottom === null || bottom > lowestBottom) lowestBottom = bottom;
     });
 

@@ -209,7 +209,7 @@
 
   function drawCategory(ctx, project, page, element, editMode, selected) {
     const category = model.getCategory(project, element.category);
-    const computed = layout.layoutCategory(category, element);
+    const computed = layout.layoutCategory(category, element, { editMode: editMode });
     const color = element.songStyle.color || '#374151';
     const titleStyle = element.titleStyle;
     const songStyle = element.songStyle;
@@ -251,6 +251,20 @@
             );
           }
         });
+        if (table.placeholder) {
+          ctx.fillStyle = '#fee2e2';
+          ctx.fillRect(element.x + table.x, tableTop, table.tableWidth, table.rowHeight);
+          const labelSize = Math.max(10, songStyle.fontSize * 0.7);
+          ctx.font = model.fontString(Object.assign({}, songStyle, { fontSize: labelSize }));
+          ctx.fillStyle = '#9ca3af';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(
+            '空',
+            element.x + table.x + table.tableWidth / 2,
+            tableTop + table.rowHeight / 2
+          );
+        }
       }
 
       ctx.font = model.fontString(songStyle);
@@ -354,7 +368,7 @@
     let height = 0;
     if (element.type === 'category') {
       const category = model.getCategory(project, element.category);
-      height = layout.layoutCategory(category, element).blockHeight;
+      height = layout.layoutCategory(category, element, { editMode: true }).blockHeight;
     } else if (element.type === 'text') {
       height = layout.layoutText(element).height;
     } else {
@@ -393,7 +407,7 @@
 
   function tableDividers(project, page, element) {
     if (!element || element.type !== 'category') return [];
-    const computed = layout.layoutCategory(model.getCategory(project, element.category), element);
+    const computed = layout.layoutCategory(model.getCategory(project, element.category), element, { editMode: true });
     const result = [];
     computed.tables.forEach(function (table, tableIndex) {
       if (table.height <= 0) return;
