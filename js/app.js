@@ -38,13 +38,46 @@
     timer: 0,
     lastKey: '',
     lastSavedAt: 0,
-    status: 'unsaved',
+    status: 'idle',
     lastError: '',
     saving: false,
     queued: false,
     memoryOnly: false
   };
   let lastExternalDraftNotice = 0;
+
+  const undo = {
+    stack: [],
+    max: 20
+  };
+
+  function pushUndo(label) {
+    undo.stack.push({
+      label: label,
+      project: JSON.parse(JSON.stringify(state.project)),
+      currentPageId: state.currentPageId,
+      selection: JSON.parse(JSON.stringify(state.selection))
+    });
+    if (undo.stack.length > undo.max) undo.stack.shift();
+  }
+
+  function performUndo() {
+    const entry = undo.stack.pop();
+    if (!entry) {
+      ui.toast('没有可撤销的操作。');
+      return;
+    }
+    state.project = entry.project;
+    state.currentPageId = model.getPage(state.project, entry.currentPageId)
+      ? entry.currentPageId
+      : state.project.pages[0].id;
+    state.selection = entry.selection && entry.selection.type === 'element' && findElementAnywhere(entry.selection.id)
+      ? entry.selection
+      : { type: 'page' };
+    ui.renderAll();
+    scheduleDraftSave();
+    ui.toast('已撤销：' + entry.label + '。');
+  }
 
   const viewport = {
     scale: 1,
@@ -862,6 +895,7 @@
         startWidth: state.project.pageSize.width,
         startHeight: state.project.pageSize.height
       };
+      pushUndo('调整页面尺寸');
       beginPointer(event);
       return;
     }
@@ -895,6 +929,7 @@
           startBounds: handle.bounds
         };
       }
+      pushUndo(drag.background ? '调整背景图片' : '调整元素大小');
       beginPointer(event);
       return;
     }
@@ -910,6 +945,7 @@
         startClientX: event.clientX,
         startClientY: event.clientY
       };
+      pushUndo('调整列宽');
       beginPointer(event);
       return;
     }
@@ -929,6 +965,7 @@
         startX: hit.element.x,
         startY: hit.element.y
       };
+      pushUndo('移动元素');
       beginPointer(event);
       return;
     }
@@ -951,6 +988,7 @@
           startX: backgroundHit.image.x,
           startY: backgroundHit.image.y
         };
+        pushUndo('移动背景图片');
         beginPointer(event);
         return;
       }
@@ -965,6 +1003,7 @@
         startClientY: event.clientY,
         startValue: state.project.margins[margin.side]
       };
+      pushUndo('调整页边距');
       beginPointer(event);
       return;
     }
@@ -1277,6 +1316,32 @@
     ui.renderAll();
   }
 
+  function placeCategory(name) {
+    const page = currentPage();
+    if (!page) return;
+    const category = model.getCategory(state.project, name);
+    if (!category) return;
+    const placed = model.getPlacedBlock(state.project, name);
+    if (placed) {
+      if (placed.page.id !== state.currentPageId) switchPage(placed.page.id);
+      state.selection = { type: 'element', id: placed.element.id };
+      ui.renderAll();
+      ui.toast('“' + name + '”已经放置，已为你选中。');
+      return;
+    }
+    const width = Math.max(
+      120,
+      state.project.pageSize.width - state.project.margins.left - state.project.margins.right
+    );
+    const position = categoryDropPosition(page, state.project, Infinity);
+    pushUndo('放置分类');
+    const element = model.createCategoryElement(name, position.x, position.y, state.project, width, page);
+    page.elements.push(element);
+    state.selection = { type: 'element', id: element.id };
+    ui.renderAll();
+    ui.toast('已把“' + name + '”放到第 ' + (state.project.pages.indexOf(page) + 1) + ' 页。', 'success');
+  }
+
   /* ---------- page and selection actions ---------- */
 
   function selectPage() {
@@ -1329,6 +1394,7 @@
       ? state.project.unifiedBackgroundId
       : (current && current.backgroundId) || (state.project.backgrounds[0] || {}).id || null;
     const page = model.createPage(backgroundId);
+    pushUndo('新增页面');
     state.project.pages.push(page);
     state.currentPageId = page.id;
     state.selection = { type: 'page' };
@@ -1349,6 +1415,7 @@
       { confirmLabel: '删除', danger: true }
     ).then(function (ok) {
       if (!ok) return;
+      pushUndo('删除页面');
       state.project.pages.splice(index, 1);
       const next = state.project.pages[Math.min(index, state.project.pages.length - 1)];
       state.currentPageId = next.id;
@@ -1370,6 +1437,7 @@
       if (!ok) return;
       const index = page.elements.indexOf(element);
       if (index < 0) return;
+      pushUndo('删除元素');
       page.elements.splice(index, 1);
       state.selection = { type: 'page' };
       ui.renderAll();
@@ -1383,6 +1451,7 @@
     const target = index + delta;
     if (index < 0 || index >= page.elements.length || target < 0 || target >= page.elements.length) return;
     const element = page.elements[index];
+    pushUndo('调整图层顺序');
     page.elements.splice(index, 1);
     page.elements.splice(target, 0, element);
     ui.renderAll();
@@ -1415,6 +1484,7 @@
   }
 
   function applyPlaylistEdits(categories) {
+    pushUndo('编辑歌单');
     const renameMap = {};
     const summary = { renamed: 0, songChanges: 0 };
     categories.forEach(function (category) {
@@ -1466,6 +1536,7 @@
     const w = Number(width);
     const h = Number(height);
     if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+    pushUndo('修改页面尺寸');
     state.project.pageSize.width = Math.round(clamp(w, 320, 5000));
     state.project.pageSize.height = Math.round(clamp(h, 320, 5000));
     ui.renderAll();
@@ -1473,6 +1544,7 @@
 
   function setMargins(margins) {
     if (!margins) return;
+    pushUndo('修改页边距');
     const max = Math.min(state.project.pageSize.width, state.project.pageSize.height) / 2;
     ['top', 'right', 'bottom', 'left'].forEach(function (side) {
       const value = Number(margins[side]);
@@ -1983,7 +2055,7 @@
     const body =
       '<div class="prop-group">' +
         '<p class="hint">' + escapeHtml(message) + '</p>' +
-        '<div class="field"><label>尝试编码</label><div class="control">' +
+        '<div class="field"><label for="encoding-select">尝试编码</label><div class="control">' +
           '<select id="encoding-select" class="select">' +
             '<option value="utf-8">UTF-8</option>' +
             '<option value="gb18030">GB18030</option>' +
@@ -2015,7 +2087,16 @@
   function confirmReimport(result) {
     const rec = L.importer.reconcile(state.project, result.categories);
     if (!state.project.playlist.categories.length) return Promise.resolve(true);
-    if (!rec.added.length && !rec.removed.length) return Promise.resolve(true);
+
+    const oldSongs = {};
+    state.project.playlist.categories.forEach(function (category) { oldSongs[category.name] = category.songs; });
+    const newSongs = {};
+    result.categories.forEach(function (category) { newSongs[category.name] = category.songs; });
+    const songUpdates = (rec.kept || []).map(function (name) {
+      return { name: name, count: countSongChanges(oldSongs[name] || [], newSongs[name] || []) };
+    }).filter(function (item) { return item.count > 0; });
+
+    if (!rec.added.length && !rec.removed.length && !songUpdates.length) return Promise.resolve(true);
 
     return new Promise(function (resolve) {
       let settled = false;
@@ -2030,6 +2111,10 @@
       }
       if (rec.removed.length) {
         lines.push('<p><strong>将删除分类块：</strong>' + escapeHtml(rec.removed.join('、')) + '</p>');
+      }
+      if (songUpdates.length) {
+        lines.push('<p><strong>将更新歌名：</strong>' +
+          escapeHtml(songUpdates.map(function (item) { return item.name + '（' + item.count + ' 处）'; }).join('、')) + '</p>');
       }
       lines.push('<p class="hint">同名分类会保留位置、尺寸、样式、表格结构和手动列宽，只更新歌名并重新排序。</p>');
       const modal = ui.modal.open({
@@ -2067,6 +2152,7 @@
     const ok = await confirmReimport(result);
     if (!ok) return;
 
+    pushUndo('导入歌单');
     L.importer.applyImport(state.project, result.categories);
     if (state.selection.type === 'element') {
       const found = findElementAnywhere(state.selection.id);
@@ -2080,6 +2166,37 @@
     const input = document.getElementById('import-file');
     input.value = '';
     input.click();
+  }
+
+  // 与 samples/21songs.txt 保持同步的内嵌副本：file:// 页面无法 fetch 本地文件，只能内嵌。
+  const SAMPLE_PLAYLIST_TEXT = [
+    '#测试21首',
+    '测试歌曲01',
+    '测试歌曲02',
+    '测试歌曲03',
+    '测试歌曲04',
+    '测试歌曲05',
+    '测试歌曲06',
+    '测试歌曲07',
+    '测试歌曲08',
+    '测试歌曲09',
+    '测试歌曲10',
+    '测试歌曲11',
+    '测试歌曲12',
+    '测试歌曲13',
+    '测试歌曲14',
+    '测试歌曲15',
+    '测试歌曲16',
+    '测试歌曲17',
+    '测试歌曲18',
+    '测试歌曲19',
+    '测试歌曲20',
+    '测试歌曲21'
+  ].join('\n');
+
+  function importSamplePlaylist() {
+    const file = new File([SAMPLE_PLAYLIST_TEXT + '\n'], '示例歌单.txt', { type: 'text/plain' });
+    handleImportFile(file);
   }
 
   /* ---------- draft persistence ---------- */
@@ -2104,6 +2221,8 @@
       text = '草稿已自动保存 ' + formatDraftTime(draft.lastSavedAt);
     } else if (status === 'unavailable') {
       text = '草稿不可用';
+    } else if (status === 'idle') {
+      text = '自动保存已开启';
     }
     el.textContent = text;
     el.setAttribute('data-state', status);
@@ -2111,6 +2230,8 @@
     if (!tip) {
       if (status === 'saved') {
         tip = '草稿保存在本机浏览器中；导出项目可长期备份。';
+      } else if (status === 'idle') {
+        tip = '草稿会自动保存在本机浏览器中；导出项目可长期备份。';
       } else if (error) {
         tip = '原因：' + error;
       } else {
@@ -2324,6 +2445,7 @@
       state.currentPageId = state.project.pages[0].id;
       state.selection = { type: 'page' };
       draft.lastKey = '';
+      undo.stack.length = 0;
       ui.renderAll();
     } finally {
       draft.restoring = false;
@@ -2352,11 +2474,12 @@
       state.currentPageId = state.project.pages[0].id;
       state.selection = { type: 'page' };
       draft.lastKey = '';
+      undo.stack.length = 0;
       ui.renderAll();
     } finally {
       draft.restoring = false;
     }
-    await saveDraftNow({ force: true });
+    setDraftStatus('idle');
     ui.toast('已新建空白项目。', 'success');
   }
 
@@ -2419,8 +2542,7 @@
       setDraftStatus('unavailable', startup.error || '浏览器本地存储不可用');
     } else {
       draft.enabled = true;
-      setDraftStatus(startup.restored ? 'saved' : 'unsaved');
-      scheduleDraftSave();
+      setDraftStatus(startup.restored ? 'saved' : 'idle');
       if (startup.restored && startup.missingCount) {
         saveDraftNow({ force: true });
       }
@@ -2485,6 +2607,9 @@
     copyUnifiedBackgroundToPage: copyUnifiedBackgroundToPage,
     openImport: openImport,
     handleImportFile: handleImportFile,
+    importSamplePlaylist: importSamplePlaylist,
+    placeCategory: placeCategory,
+    undo: performUndo,
     newProject: newProject,
     exportProject: exportProject,
     openImportProject: openImportProject,

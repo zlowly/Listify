@@ -18,7 +18,9 @@
   }
 
   function field(label, control) {
-    return '<div class="field"><label>' + esc(label) + '</label><div class="control">' + control + '</div></div>';
+    const match = / id="([^"]+)"/.exec(control);
+    const forAttr = match ? ' for="' + match[1] + '"' : '';
+    return '<div class="field"><label' + forAttr + '>' + esc(label) + '</label><div class="control">' + control + '</div></div>';
   }
 
   function fieldPair(labelA, controlA, labelB, controlB) {
@@ -293,6 +295,11 @@
       const tag = (event.target && event.target.tagName || '').toLowerCase();
       const editing = tag === 'input' || tag === 'textarea' || tag === 'select';
       if (editing) return;
+      if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z')) {
+        event.preventDefault();
+        if (L.app.undo) L.app.undo();
+        return;
+      }
       if (event.key === 'Delete' || event.key === 'Backspace') {
         if (L.app.state.selection.type === 'element') {
           event.preventDefault();
@@ -351,13 +358,22 @@
     const project = L.app.state.project;
     const categories = project.playlist.categories;
     if (!categories.length) {
-      ui.els.categoryPanel.innerHTML = '<div class="panel-empty">还没有歌单。<br>点击上方“导入歌单”，或把 .txt 文件拖到这里。</div>';
+      ui.els.categoryPanel.innerHTML = '<div class="panel-empty">还没有歌单。<br>点击上方“导入歌单”，或把 .txt 文件拖到这里。<br>' +
+        '<button type="button" class="btn btn-sm" id="btn-sample-playlist">导入示例歌单</button></div>';
+      const sampleButton = ui.els.categoryPanel.querySelector('#btn-sample-playlist');
+      if (sampleButton) {
+        sampleButton.addEventListener('click', function () { L.app.importSamplePlaylist(); });
+      }
       return;
     }
     ui.els.categoryPanel.innerHTML = categories.map(function (category) {
       const placed = model.getPlacedBlock(project, category.name);
       const pageIndex = placed ? project.pages.indexOf(placed.page) : -1;
-      return '<div class="category-row ' + (placed ? 'placed' : 'unplaced') + '" draggable="true" data-category="' +
+      const rowHint = placed
+        ? '已放在第 ' + (pageIndex + 1) + ' 页，回车或点击跳转'
+        : '未放置，回车或点击放到当前页';
+      return '<div class="category-row ' + (placed ? 'placed' : 'unplaced') + '" draggable="true" tabindex="0" role="button" aria-label="' +
+        esc('分类 ' + category.name + '，' + category.songs.length + ' 首，' + rowHint) + '" data-category="' +
         esc(category.name) + '">' +
         '<span class="category-name" title="' + esc(category.name) + '">' + esc(category.name) + '</span>' +
         '<span class="category-meta">' + category.songs.length + ' 首</span>' +
@@ -368,12 +384,19 @@
 
     ui.els.categoryPanel.querySelectorAll('.category-row').forEach(function (row) {
       const name = row.getAttribute('data-category');
-      row.addEventListener('click', function () {
+      const activate = function () {
         const placed = model.getPlacedBlock(project, name);
         if (placed) {
           L.app.jumpToCategory(name);
         } else {
-          ui.toast('把“' + name + '”拖到画布上放置', '');
+          L.app.placeCategory(name);
+        }
+      };
+      row.addEventListener('click', activate);
+      row.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          activate();
         }
       });
       row.addEventListener('dragstart', function (event) {
@@ -813,7 +836,7 @@
           '<button id="' + prefix + '-font-manual-add" class="btn btn-sm" type="button">添加</button>' +
         '</div>';
     return '<div class="field font-list-field">' +
-        '<label>字体</label>' +
+        '<label for="' + prefix + '-font-0">字体</label>' +
         '<div class="control"><div class="font-list">' + rows + add +
           '<p class="font-list-hint">按列表顺序回退；至少保留一个字体。</p>' +
         '</div></div>' +
@@ -1361,6 +1384,8 @@
   }
 
   /* ---------- modal ---------- */
+  let modalSeq = 0;
+
   ui.modal = {
     open: function (options) {
       const root = ui.els.modalRoot;
@@ -1368,10 +1393,15 @@
       root.innerHTML = '';
       const modal = document.createElement('div');
       modal.className = 'modal';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('tabindex', '-1');
+      const titleId = 'modal-title-' + (++modalSeq);
+      modal.setAttribute('aria-labelledby', titleId);
       if (options.width) modal.style.width = options.width;
       const header = document.createElement('div');
       header.className = 'modal-header';
-      header.innerHTML = '<div class="modal-title">' + esc(options.title || '') + '</div>' +
+      header.innerHTML = '<div class="modal-title" id="' + titleId + '">' + esc(options.title || '') + '</div>' +
         '<button class="modal-close" type="button" aria-label="关闭">×</button>';
       const body = document.createElement('div');
       body.className = 'modal-body';
@@ -1384,6 +1414,7 @@
       modal.appendChild(footer);
       root.appendChild(modal);
 
+      const previousFocus = document.activeElement;
       let closed = false;
       function close(force) {
         if (closed) return;
@@ -1395,12 +1426,41 @@
         root.innerHTML = '';
         document.removeEventListener('keydown', onKey);
         root.removeEventListener('click', onBackdrop);
+        if (previousFocus && document.contains(previousFocus) && typeof previousFocus.focus === 'function') {
+          previousFocus.focus();
+        }
         if (options.onClose) options.onClose();
+      }
+      function focusableList() {
+        return Array.prototype.filter.call(
+          modal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+          function (el) { return !el.disabled && el.offsetParent !== null; }
+        );
       }
       function onKey(event) {
         if (event.key === 'Escape') {
           event.preventDefault();
           close();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const list = focusableList();
+        if (!list.length) {
+          event.preventDefault();
+          modal.focus();
+          return;
+        }
+        const first = list[0];
+        const last = list[list.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey) {
+          if (active === first || !modal.contains(active)) {
+            event.preventDefault();
+            last.focus();
+          }
+        } else if (active === last || !modal.contains(active)) {
+          event.preventDefault();
+          first.focus();
         }
       }
       function onBackdrop(event) {
@@ -1421,6 +1481,9 @@
         });
         footer.appendChild(button);
       });
+      const primaryAction = footer.querySelector('.btn-primary');
+      const initialFocus = primaryAction || focusableList()[0] || modal;
+      if (initialFocus && typeof initialFocus.focus === 'function') initialFocus.focus();
       return { close: close, body: body, footer: footer, root: root };
     },
 
@@ -1576,6 +1639,7 @@
             '<input id="playlist-editor-category-name" class="input playlist-editor-name-input" type="text"' +
               ' autocomplete="off" spellcheck="false" aria-label="当前分类名">' +
             '<span class="playlist-editor-songcount hint"></span>' +
+            '<span class="playlist-editor-keyhint hint">Enter 下一格  Esc 还原  Delete 删除当前格（空格需先清空）</span>' +
           '</div>' +
           '<div class="playlist-editor-grid" role="group" aria-label="歌名列表"></div>' +
         '</div>' +
@@ -1746,6 +1810,13 @@
             input.value = initial;
             currentCategory().songs[index] = initial;
             updateValidation();
+          } else if (event.key === 'Delete' || (event.key === 'Backspace' && input.value === '')) {
+            event.preventDefault();
+            const categoryNow = currentCategory();
+            if (categoryNow.songs[index] == null) return;
+            categoryNow.songs.splice(index, 1);
+            refreshAfterStructureChange();
+            focusCell(index < categoryNow.songs.length ? index : categoryNow.songs.length);
           }
         });
       }
