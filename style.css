@@ -1153,6 +1153,12 @@ button { cursor: pointer; }
 }
 .playlist-editor-rail-row.has-error { color: var(--red); }
 .playlist-editor-rail-row.has-error .playlist-editor-rail-count { color: var(--red); }
+.playlist-editor-rail-row.drop-target {
+  background: #eaf2ff;
+  color: var(--blue-dark);
+  outline: 2px dashed rgba(37, 99, 235, 0.55);
+  outline-offset: -2px;
+}
 .playlist-editor-rail-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -1181,7 +1187,12 @@ button { cursor: pointer; }
 .playlist-editor-head-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .playlist-editor-name-input { flex: 0 1 260px; height: 30px; }
 .playlist-editor-songcount { margin-left: auto; white-space: nowrap; }
-.playlist-editor-keyhint { white-space: nowrap; }
+.playlist-editor-head .playlist-editor-sort { flex: 0 0 auto; }
+.playlist-editor-head .help-tip { margin-left: 0; }
+.playlist-editor-sort:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
 .playlist-editor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -1197,6 +1208,7 @@ button { cursor: pointer; }
   width: 100%;
   height: 30px;
   padding-right: 22px;
+  padding-left: 24px;
   text-overflow: ellipsis;
 }
 .playlist-editor-input.is-invalid,
@@ -1204,6 +1216,13 @@ button { cursor: pointer; }
   border-color: var(--red);
   background: #fff7f7;
   box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.12);
+}
+/* 错误 + 聚焦：边框继续表达错误，焦点改由半透明蓝环表达 */
+.playlist-editor-input.is-invalid:focus,
+.playlist-editor-name-input.is-invalid:focus {
+  border-color: var(--red);
+  background: #fff7f7;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 }
 .playlist-editor-delete {
   position: absolute;
@@ -1221,10 +1240,32 @@ button { cursor: pointer; }
   opacity: 0;
   transition: opacity 0.12s, background 0.12s, color 0.12s;
 }
+.playlist-editor-drag {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.playlist-editor-cell:hover .playlist-editor-drag,
+.playlist-editor-cell:focus-within .playlist-editor-drag { opacity: 1; }
+.playlist-editor-drag:hover { background: #eef1f5; color: var(--text); }
+.playlist-editor-drag:active { cursor: grabbing; }
 .playlist-editor-cell:hover .playlist-editor-delete,
 .playlist-editor-cell:focus-within .playlist-editor-delete { opacity: 1; }
 .playlist-editor-delete:hover { background: var(--red-soft); color: var(--red); }
 .playlist-editor-add-input { border-style: dashed; color: var(--muted); }
+.playlist-editor-add-cell .playlist-editor-input { padding-left: 10px; }
 .playlist-editor-status { margin-right: auto; font-size: 12px; color: var(--muted); }
 .playlist-editor-status.has-errors { color: var(--red); font-weight: 600; }
 .playlist-editor-discard {
@@ -1243,11 +1284,8 @@ button { cursor: pointer; }
   font-size: 12px;
 }
 .playlist-editor-discard-text { flex: 1 1 auto; }
-.playlist-editor-input:focus-visible,
-.playlist-editor-name-input:focus-visible,
-.playlist-editor-rail-row:focus-visible,
-.playlist-editor-delete:focus-visible {
-  outline: 2px solid var(--blue);
+.playlist-editor-rail-row:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
   outline-offset: 1px;
 }
 @media (max-width: 1000px) {

@@ -1472,27 +1472,60 @@
 
   /* ---------- playlist editing ---------- */
 
+  function songKey(value) {
+    return String(value == null ? '' : value).trim();
+  }
+
+  /* 多重集比较：同名的数量差才是真实的增删改，重排不产生差异 */
+  function diffSongChanges(original, next) {
+    const counts = new Map();
+    (original || []).forEach(function (song) {
+      const key = songKey(song);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    let added = 0;
+    (next || []).forEach(function (song) {
+      const key = songKey(song);
+      const remaining = counts.get(key) || 0;
+      if (remaining > 0) counts.set(key, remaining - 1);
+      else added += 1;
+    });
+    let removed = 0;
+    counts.forEach(function (remaining) { removed += remaining; });
+    const modified = Math.min(added, removed);
+    return { modified: modified, added: added - modified, removed: removed - modified };
+  }
+
   function countSongChanges(original, next) {
-    const length = Math.max(original.length, next.length);
-    let count = 0;
-    for (let i = 0; i < length; i += 1) {
-      const before = original[i] == null ? null : String(original[i]).trim();
-      const after = next[i] == null ? null : String(next[i]).trim();
-      if (before !== after) count += 1;
+    const diff = diffSongChanges(original, next);
+    return diff.modified + diff.added + diff.removed;
+  }
+
+  function songOrderChanged(original, next) {
+    if (original.length !== next.length) return false;
+    for (let i = 0; i < original.length; i += 1) {
+      if (songKey(original[i]) !== songKey(next[i])) return true;
     }
-    return count;
+    return false;
   }
 
   function applyPlaylistEdits(categories) {
     pushUndo('编辑歌单');
     const renameMap = {};
-    const summary = { renamed: 0, songChanges: 0 };
+    const summary = { renamed: 0, modified: 0, added: 0, removed: 0, sorted: 0 };
     categories.forEach(function (category) {
       if (category.originalName !== category.name) {
         renameMap[category.originalName] = category.name;
         summary.renamed += 1;
       }
-      summary.songChanges += countSongChanges(category.originalSongs || [], category.songs);
+      const originalSongs = category.originalSongs || [];
+      const diff = diffSongChanges(originalSongs, category.songs);
+      summary.modified += diff.modified;
+      summary.added += diff.added;
+      summary.removed += diff.removed;
+      if (category.sorted && songOrderChanged(originalSongs, category.songs)) {
+        summary.sorted += 1;
+      }
     });
 
     state.project.pages.forEach(function (page) {
@@ -1510,8 +1543,11 @@
     ui.renderAll();
 
     const parts = [];
-    if (summary.songChanges) parts.push(summary.songChanges + ' 处歌名');
+    if (summary.modified) parts.push(summary.modified + ' 处歌名修改');
+    if (summary.added) parts.push(summary.added + ' 首新增');
+    if (summary.removed) parts.push(summary.removed + ' 首删除');
     if (summary.renamed) parts.push(summary.renamed + ' 个分类改名');
+    if (summary.sorted) parts.push(summary.sorted + ' 个分类已排序');
     ui.toast(parts.length ? '已更新：' + parts.join('，') + '。' : '歌单已更新。', 'success');
   }
 

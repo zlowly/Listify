@@ -1690,6 +1690,8 @@
 
       let activeIndex = working.activeIndex;
       let errors = {};
+      let dragPayload = null;
+      let gridRenderToken = 0;
       let modal = null;
 
       function currentCategory() {
@@ -1761,7 +1763,9 @@
             '<input id="playlist-editor-category-name" class="input playlist-editor-name-input" type="text"' +
               ' autocomplete="off" spellcheck="false" aria-label="当前分类名">' +
             '<span class="playlist-editor-songcount hint"></span>' +
-            '<span class="playlist-editor-keyhint hint">Enter 下一格  Esc 还原  Delete 删除当前格（空格需先清空）</span>' +
+            '<button type="button" class="btn btn-sm playlist-editor-sort"' +
+              ' title="按虚拟字数升序排列当前分类，结果与画布顺序一致">按字数排序</button>' +
+            helpTip('Enter 下一格  Esc 还原  Delete 删除当前格（空格需先清空）') +
           '</div>' +
           '<div class="playlist-editor-grid" role="group" aria-label="歌名列表"></div>' +
         '</div>' +
@@ -1775,6 +1779,7 @@
       const nameInput = body.querySelector('#playlist-editor-category-name');
       const grid = body.querySelector('.playlist-editor-grid');
       const countEl = body.querySelector('.playlist-editor-songcount');
+      const sortButton = body.querySelector('.playlist-editor-sort');
       const discardBar = body.querySelector('.playlist-editor-discard');
 
       modal = ui.modal.open({
@@ -1812,7 +1817,8 @@
                     originalName: category.originalName,
                     name: category.name,
                     originalSongs: category.originalSongs.slice(),
-                    songs: category.songs.slice()
+                    songs: category.songs.slice(),
+                    sorted: !!category.sorted
                   };
                 }));
               }
@@ -1840,6 +1846,10 @@
         modal.close(true);
       });
 
+      sortButton.addEventListener('click', function () {
+        sortCurrentCategory();
+      });
+
       function categoryHasError(categoryIndex) {
         return Object.keys(errors).some(function (key) {
           return key === 'cat:' + categoryIndex ||
@@ -1863,16 +1873,41 @@
             '</button>';
         }).join('');
         railList.querySelectorAll('[data-cat-index]').forEach(function (button) {
+          const index = Number(button.getAttribute('data-cat-index'));
           button.addEventListener('click', function () {
-            selectCategory(Number(button.getAttribute('data-cat-index')));
+            selectCategory(index);
+          });
+          button.addEventListener('dragenter', function (event) {
+            if (!dragPayload) return;
+            event.preventDefault();
+          });
+          button.addEventListener('dragover', function (event) {
+            if (!dragPayload) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            railList.querySelectorAll('[data-cat-index]').forEach(function (row) {
+              row.classList.toggle('drop-target', row === button && index !== dragPayload.categoryIndex);
+            });
+          });
+          button.addEventListener('dragleave', function (event) {
+            if (event.relatedTarget && button.contains(event.relatedTarget)) return;
+            button.classList.remove('drop-target');
+          });
+          button.addEventListener('drop', function (event) {
+            event.preventDefault();
+            moveSongToTarget(index);
           });
         });
       }
 
       function renderGrid() {
         const category = currentCategory();
+        // 每次重建网格都递增令牌：旧节点被移除时触发的 blur 不再回写数据。
+        gridRenderToken += 1;
         grid.innerHTML = category.songs.map(function (song, index) {
           return '<div class="playlist-editor-cell" data-song-index="' + index + '">' +
+            '<button type="button" class="playlist-editor-drag" draggable="true" tabindex="-1"' +
+              ' aria-label="拖动歌名 ' + esc(song) + '" title="拖动到其他分类">⠿</button>' +
             '<input class="input playlist-editor-input" type="text" value="' + esc(song) + '"' +
               ' autocomplete="off" spellcheck="false"' +
               ' aria-label="第 ' + (index + 1) + ' 首歌名" title="' + esc(song) + '">' +
@@ -1889,6 +1924,20 @@
           const index = Number(cell.getAttribute('data-song-index'));
           const input = cell.querySelector('input');
           bindCellInput(input, index);
+          const dragHandle = cell.querySelector('.playlist-editor-drag');
+          dragHandle.addEventListener('dragstart', function (event) {
+            commitActiveElement();
+            const song = currentCategory().songs[index];
+            dragPayload = { categoryIndex: activeIndex, songIndex: index, song: song };
+            if (event.dataTransfer) {
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', song);
+            }
+          });
+          dragHandle.addEventListener('dragend', function () {
+            dragPayload = null;
+            clearDropTarget();
+          });
           const deleteButton = cell.querySelector('.playlist-editor-delete');
           deleteButton.addEventListener('click', function () {
             const categoryNow = currentCategory();
@@ -1903,6 +1952,10 @@
       }
 
       function bindCellInput(input, index) {
+        // 记录绑定时的分类与渲染轮次；切换分类或重新渲染会移除旧格并触发 blur，
+        // 此时不能把旧格的值写回可能已重排的歌名数组。
+        const categoryAtBind = activeIndex;
+        const renderTokenAtBind = gridRenderToken;
         input.addEventListener('focus', function () {
           input.__initialValue = input.value;
         });
@@ -1917,6 +1970,11 @@
           updateValidation();
         });
         input.addEventListener('blur', function () {
+          // 重新渲染会移除聚焦格并触发 blur，此时节点可能仍报告已连接，
+          // 用渲染轮次判断：旧轮次的输入框一律不回写。
+          if (renderTokenAtBind !== gridRenderToken) return;
+          if (!input.isConnected) return;
+          if (activeIndex !== categoryAtBind) return;
           commitCell(input, index);
         });
         input.addEventListener('keydown', function (event) {
@@ -1991,6 +2049,40 @@
         if (cell) commitCell(active, Number(cell.getAttribute('data-song-index')));
       }
 
+      function songOrderChanged(before, after) {
+        if (before.length !== after.length) return false;
+        for (let i = 0; i < before.length; i += 1) {
+          if (before[i] !== after[i]) return true;
+        }
+        return false;
+      }
+
+      function announce(message) {
+        if (Object.keys(errors).length) ui.toast(message);
+        else status.textContent = message;
+      }
+
+      function sortCurrentCategory() {
+        commitActiveElement();
+        const category = currentCategory();
+        const before = category.songs.slice();
+        const sorted = L.layout.sortSongs(before);
+        if (!songOrderChanged(before, sorted)) {
+          announce('当前分类已是按字数排序后的顺序。');
+          sortButton.focus();
+          return;
+        }
+        let moved = 0;
+        before.forEach(function (song, index) {
+          if (song !== sorted[index]) moved += 1;
+        });
+        category.songs = sorted;
+        category.sorted = true;
+        refreshAfterStructureChange();
+        announce('已按字数排序，' + moved + ' 首位置变化。');
+        sortButton.focus();
+      }
+
       function focusCell(index) {
         const inputs = grid.querySelectorAll('[data-song-index] .playlist-editor-input');
         if (index >= 0 && index < inputs.length) {
@@ -2052,9 +2144,33 @@
 
       function selectCategory(index) {
         if (index < 0 || index >= working.categories.length) return;
+        // 切换分类前先提交当前格，避免聚焦格仍属于旧分类时写错分类
+        if (index !== activeIndex) commitActiveElement();
         activeIndex = index;
         working.activeIndex = index;
         renderActive();
+      }
+
+      function clearDropTarget() {
+        railList.querySelectorAll('.drop-target').forEach(function (row) {
+          row.classList.remove('drop-target');
+        });
+      }
+
+      function moveSongToTarget(targetIndex) {
+        const payload = dragPayload;
+        dragPayload = null;
+        clearDropTarget();
+        if (!payload || targetIndex === payload.categoryIndex) return;
+        const source = working.categories[payload.categoryIndex];
+        const target = working.categories[targetIndex];
+        if (!source || !target) return;
+        if (source.songs[payload.songIndex] !== payload.song) return;
+        source.songs.splice(payload.songIndex, 1);
+        target.songs.push(payload.song);
+        refreshAfterStructureChange();
+        const remaining = source.songs.length;
+        focusCell(payload.songIndex < remaining ? payload.songIndex : remaining);
       }
 
       function refreshAfterStructureChange() {
@@ -2103,6 +2219,7 @@
         status.textContent = count ? count + ' 处待修正' : '';
         status.classList.toggle('has-errors', count > 0);
         if (applyButton) applyButton.disabled = count > 0;
+        if (sortButton) sortButton.disabled = currentCategory().songs.length < 2;
 
         // keep the rail label in sync with the text being typed
         const activeRow = railList.querySelector('[data-cat-index="' + activeIndex + '"]');
