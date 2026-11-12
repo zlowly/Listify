@@ -1,0 +1,285 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="816" viewBox="0 0 1100 816">
+  <title>属性面板改造布局稿 v2</title>
+  <style>
+    text { font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; }
+    .t16 { font-size: 16px; font-weight: 700; fill: #1f2937; }
+    .t11b { font-size: 11px; font-weight: 700; fill: #6b7280; letter-spacing: 0.03em; }
+    .lab { font-size: 11px; fill: #6b7280; }
+    .val { font-size: 12px; fill: #1f2937; font-variant-numeric: tabular-nums; }
+    .unit { font-size: 10px; fill: #6b7280; }
+    .hint { font-size: 10px; fill: #6b7280; }
+    .anno-t { font-size: 12px; font-weight: 700; fill: #1f2937; }
+    .anno { font-size: 11px; fill: #6b7280; }
+    .input { fill: #ffffff; stroke: #cbd2dc; stroke-width: 1; }
+    .divider { stroke: #e2e6ec; stroke-width: 1; stroke-dasharray: 4 3; }
+    .leader { stroke: #b7c3d4; stroke-width: 1; stroke-dasharray: 3 3; fill: none; }
+    .panel { fill: #ffffff; stroke: #e2e6ec; stroke-width: 1; }
+    .glyph { fill: none; stroke: #c3cad4; stroke-width: 1; }
+  </style>
+  <defs>
+    <g id="spin">
+      <path d="M -2.2 -1.2 L 2.2 -1.2 L 0 -4.2 Z" fill="#9ca3af"/>
+      <path d="M -2.2 1.2 L 2.2 1.2 L 0 4.2 Z" fill="#9ca3af"/>
+    </g>
+    <linearGradient id="fadeB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1100" height="816" fill="#e9edf2"/>
+
+  <!-- 标题 -->
+  <text class="t16" x="40" y="48">属性面板改造 · 布局稿 v2</text>
+  <text x="40" y="70" font-size="11" fill="#6b7280">1:1 实宽（面板 320px）· 帮助改浮动提示 · 数值按位数定宽（含 16px 箭头区）· 输入纵向对齐 · 边距十字 · 2026-11-12</text>
+
+  <!-- 标签：现状 / 改后 -->
+  <rect x="40" y="86" width="44" height="20" rx="999" fill="#e2e6ec"/>
+  <text x="62" y="100" font-size="11" fill="#6b7280" text-anchor="middle">现状</text>
+  <rect x="420" y="86" width="44" height="20" rx="999" fill="#dbeafe"/>
+  <text x="442" y="100" font-size="11" fill="#1d4ed8" text-anchor="middle">改后</text>
+
+  <!-- ================= 现状面板 ================= -->
+  <rect class="panel" x="40" y="112" width="320" height="340" rx="10"/>
+  <text class="t11b" x="52" y="138">分类块</text>
+  <rect x="308" y="126" width="44" height="17" rx="999" fill="#d1fae5"/>
+  <text x="330" y="138" font-size="10" fill="#047857" text-anchor="middle">21 首</text>
+
+  <text class="lab" x="52" y="169">位置 X</text>
+  <rect class="input" x="131" y="152" width="66" height="27" rx="5"/>
+  <text class="val" x="182" y="169" text-anchor="end">120</text>
+  <use href="#spin" x="188" y="165.5"/>
+  <text class="lab" x="204" y="169">位置 Y</text>
+  <rect class="input" x="284" y="152" width="64" height="27" rx="5"/>
+  <text class="val" x="333" y="169" text-anchor="end">80</text>
+  <use href="#spin" x="339" y="165.5"/>
+
+  <text class="lab" x="52" y="201">宽度</text>
+  <rect class="input" x="131" y="184" width="209" height="27" rx="5"/>
+  <text class="val" x="325" y="201" text-anchor="end">1080</text>
+  <use href="#spin" x="331" y="197.5"/>
+  <ellipse cx="235" cy="197" rx="116" ry="20" fill="none" stroke="#dc2626" stroke-width="1" stroke-dasharray="4 3"/>
+
+  <line class="divider" x1="52" y1="224" x2="348" y2="224"/>
+  <text class="t11b" x="52" y="246">分类名子分区</text>
+
+  <text class="lab" x="52" y="279">字号</text>
+  <rect class="input" x="131" y="262" width="209" height="27" rx="5"/>
+  <text class="val" x="325" y="279" text-anchor="end">28</text>
+  <use href="#spin" x="331" y="275.5"/>
+  <text class="unit" x="344" y="279">px</text>
+  <text class="hint" x="52" y="303">按列表顺序回退；至少保留一个字体。</text>
+
+  <text class="lab" x="52" y="333">行距</text>
+  <rect class="input" x="131" y="316" width="209" height="27" rx="5"/>
+  <text class="val" x="325" y="333" text-anchor="end">1.35</text>
+  <use href="#spin" x="331" y="329.5"/>
+
+  <line class="divider" x1="52" y1="356" x2="348" y2="356"/>
+  <text class="t11b" x="52" y="378">表格</text>
+  <rect x="308" y="366" width="44" height="17" rx="999" fill="#dbeafe"/>
+  <text x="330" y="378" font-size="10" fill="#1d4ed8" text-anchor="middle">1 个</text>
+  <text class="hint" x="52" y="398">只有最后一个表格可以是动态行（行数 0）。</text>
+  <text class="hint" x="52" y="412">列宽拖动后整表变为固定列宽。表格边距相对</text>
+  <text class="hint" x="52" y="426">分类块边缘，上下边距相加。</text>
+  <rect x="40" y="430" width="320" height="22" fill="url(#fadeB)"/>
+  <text x="200" y="446" font-size="14" fill="#9ca3af" text-anchor="middle">⋯</text>
+  <text x="40" y="476" font-size="11" fill="#6b7280">帮助段落占位 3 行 · 单值输入撑满整行（含箭头）</text>
+
+  <!-- ================= 改后面板 ================= -->
+  <rect class="panel" x="420" y="112" width="320" height="648" rx="10"/>
+
+  <!-- 输入列对齐轴 -->
+  <line x1="509" y1="148" x2="509" y2="470" stroke="#b7c3d4" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="654" y1="148" x2="654" y2="179" stroke="#b7c3d4" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <text class="t11b" x="432" y="138">分类块</text>
+  <rect x="676" y="126" width="52" height="17" rx="999" fill="#d1fae5"/>
+  <text x="702" y="138" font-size="10" fill="#047857" text-anchor="middle">21 首</text>
+
+  <!-- 位置 X / Y 配对行：72px 含箭头区 -->
+  <text class="lab" x="432" y="169">位置 X</text>
+  <rect class="input" x="511" y="152" width="72" height="27" rx="5"/>
+  <text class="val" x="568" y="169" text-anchor="end">120</text>
+  <use href="#spin" x="574" y="165.5"/>
+  <text class="lab" x="593" y="169">位置 Y</text>
+  <rect class="input" x="656" y="152" width="72" height="27" rx="5"/>
+  <text class="val" x="713" y="169" text-anchor="end">80</text>
+  <use href="#spin" x="719" y="165.5"/>
+
+  <!-- 宽度：72px + 单位 + ? -->
+  <text class="lab" x="432" y="201">宽度</text>
+  <rect class="input" x="511" y="184" width="72" height="27" rx="5"/>
+  <text class="val" x="568" y="201" text-anchor="end">1080</text>
+  <use href="#spin" x="574" y="197.5"/>
+  <text class="unit" x="589" y="201">px</text>
+  <circle cx="716" cy="197" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="716" y="200.5" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <line class="divider" x1="432" y1="224" x2="728" y2="224"/>
+
+  <text class="t11b" x="432" y="246">分类名子分区</text>
+
+  <!-- 显示分类名 check -->
+  <rect x="432" y="260" width="14" height="14" rx="3" fill="#2563eb"/>
+  <path d="M 435 267 L 438.5 270.5 L 443.5 263.5" stroke="#ffffff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="452" y="272" font-size="12" fill="#6b7280">显示分类名</text>
+
+  <!-- 字体：整行按钮 + ? -->
+  <text class="lab" x="432" y="301">字体</text>
+  <rect class="input" x="511" y="284" width="190" height="27" rx="5"/>
+  <text x="518" y="301" font-size="12" fill="#1f2937">系统默认</text>
+  <path d="M 688 296 L 692 300 L 696 296" stroke="#6b7280" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+  <circle cx="716" cy="297" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="716" y="300.5" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <!-- 字号：56px + 箭头区 + 单位 + ? -->
+  <text class="lab" x="432" y="337">字号</text>
+  <rect class="input" x="511" y="320" width="56" height="27" rx="5"/>
+  <text class="val" x="552" y="337" text-anchor="end">28</text>
+  <use href="#spin" x="558" y="333.5"/>
+  <text class="unit" x="573" y="337">px</text>
+  <circle cx="716" cy="333" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="716" y="336.5" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <!-- 行距：64px + 箭头区 + ?（hover 态，提示浮出） -->
+  <text class="lab" x="432" y="373">行距</text>
+  <rect class="input" x="511" y="356" width="64" height="27" rx="5"/>
+  <text class="val" x="560" y="373" text-anchor="end">1.35</text>
+  <use href="#spin" x="566" y="369.5"/>
+  <circle cx="716" cy="369" r="6" fill="#2563eb"/>
+  <text x="716" y="372.5" font-size="9" fill="#ffffff" text-anchor="middle" font-weight="700">?</text>
+
+  <line class="divider" x1="432" y1="398" x2="728" y2="398"/>
+  <text class="t11b" x="432" y="420">歌名子分区</text>
+  <text x="520" y="420" font-size="11" fill="#9ca3af">（同上，略）</text>
+  <line class="divider" x1="432" y1="442" x2="728" y2="442"/>
+
+  <!-- 表格组 -->
+  <text class="t11b" x="432" y="464">表格</text>
+  <rect x="648" y="452" width="44" height="17" rx="999" fill="#dbeafe"/>
+  <text x="670" y="464" font-size="10" fill="#1d4ed8" text-anchor="middle">1 个</text>
+  <circle cx="716" cy="460" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="716" y="463.5" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <!-- 表格卡片：内标签列 52px，? 距输入 ≥10px -->
+  <rect class="panel" x="432" y="478" width="296" height="224" rx="7"/>
+  <text x="444" y="500" font-size="12" font-weight="600" fill="#1f2937">表格 1</text>
+  <text x="488" y="500" font-size="11" fill="#6b7280">末表</text>
+  <rect x="598" y="488" width="70" height="24" rx="6" fill="#ffffff" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="633" y="504" font-size="11" fill="#1f2937" text-anchor="middle">恢复自动</text>
+  <rect x="674" y="488" width="24" height="24" rx="6" fill="#ffffff" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="686" y="505" font-size="12" fill="#6b7280" text-anchor="middle">×</text>
+  <line class="divider" x1="433" y1="516" x2="727" y2="516"/>
+
+  <text class="lab" x="444" y="543">列数</text>
+  <rect class="input" x="502" y="526" width="56" height="27" rx="5"/>
+  <text class="val" x="543" y="543" text-anchor="end">6</text>
+  <use href="#spin" x="549" y="539.5"/>
+  <text class="lab" x="586" y="543">行数</text>
+  <rect class="input" x="644" y="526" width="56" height="27" rx="5"/>
+  <text class="val" x="685" y="543" text-anchor="end">0</text>
+  <use href="#spin" x="691" y="539.5"/>
+  <circle cx="716" cy="539.5" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="716" y="543" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <text class="lab" x="444" y="577">填充</text>
+  <rect class="input" x="502" y="560" width="214" height="27" rx="5"/>
+  <text x="509" y="577" font-size="12" fill="#1f2937">列优先（从上往下逐列）</text>
+  <path d="M 704 570 L 708 574 L 712 570" stroke="#6b7280" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+
+  <!-- 边距十字 -->
+  <text class="lab" x="444" y="648">边距</text>
+  <rect class="input" x="568" y="596" width="56" height="27" rx="5"/>
+  <text class="val" x="609" y="613" text-anchor="end">8</text>
+  <use href="#spin" x="615" y="609.5"/>
+  <rect class="input" x="502" y="631" width="56" height="27" rx="5"/>
+  <text class="val" x="543" y="648" text-anchor="end">24</text>
+  <use href="#spin" x="549" y="644.5"/>
+  <rect class="glyph" x="589" y="635.5" width="14" height="18" rx="2"/>
+  <rect class="input" x="634" y="631" width="56" height="27" rx="5"/>
+  <text class="val" x="675" y="648" text-anchor="end">24</text>
+  <use href="#spin" x="681" y="644.5"/>
+  <rect class="input" x="568" y="666" width="56" height="27" rx="5"/>
+  <text class="val" x="609" y="683" text-anchor="end">8</text>
+  <use href="#spin" x="615" y="679.5"/>
+
+  <!-- 删除 + ? -->
+  <rect x="432" y="718" width="88" height="24" rx="6" fill="#dc2626"/>
+  <text x="476" y="734" font-size="11" fill="#ffffff" text-anchor="middle">删除分类块</text>
+  <circle cx="536" cy="730" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="536" y="733.5" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <!-- 浮动提示：行距 ? 的 hover 态 -->
+  <path d="M 708 388 L 716 377 L 724 388 Z" fill="#111827" fill-opacity="0.95"/>
+  <rect x="506" y="388" width="220" height="50" rx="6" fill="#111827" fill-opacity="0.95"/>
+  <text x="518" y="408" font-size="12" fill="#ffffff">1.0 = 单倍行距，越大行距越松。</text>
+  <text x="518" y="426" font-size="12" fill="#ffffff">歌名建议 1.3 – 1.6。</text>
+
+  <text x="420" y="782" font-size="11" fill="#6b7280">帮助 0 行占位 · 输入 56–72px（含 16px 箭头区）· 列对齐 · 边距十字</text>
+
+  <!-- ================= 页面面板：边距十字 ================= -->
+  <text class="t11b" x="40" y="494">页面面板（未选中时）</text>
+  <rect class="panel" x="40" y="500" width="320" height="180" rx="10"/>
+  <text class="t11b" x="52" y="524">页面边距</text>
+  <circle cx="336" cy="520" r="6" fill="none" stroke="#9ca3af" stroke-width="1"/>
+  <text x="336" y="523.5" font-size="9" fill="#9ca3af" text-anchor="middle">?</text>
+
+  <!-- 十字：上 / 左·页面·右 / 下，臂 64px 含箭头区 -->
+  <rect class="input" x="168" y="540" width="64" height="27" rx="5"/>
+  <text class="val" x="217" y="557" text-anchor="end">64</text>
+  <use href="#spin" x="223" y="553.5"/>
+  <rect class="input" x="94" y="577" width="64" height="27" rx="5"/>
+  <text class="val" x="143" y="594" text-anchor="end">64</text>
+  <use href="#spin" x="149" y="590.5"/>
+  <rect class="glyph" x="193" y="581.5" width="14" height="18" rx="2"/>
+  <rect class="input" x="242" y="577" width="64" height="27" rx="5"/>
+  <text class="val" x="291" y="594" text-anchor="end">64</text>
+  <use href="#spin" x="297" y="590.5"/>
+  <rect class="input" x="168" y="614" width="64" height="27" rx="5"/>
+  <text class="val" x="217" y="631" text-anchor="end">64</text>
+  <use href="#spin" x="223" y="625.5"/>
+
+  <text x="40" y="704" font-size="11" fill="#6b7280">边距十字：方位即语义，中心为页面示意</text>
+
+  <!-- ================= 标注 ================= -->
+  <circle cx="799" cy="158" r="9" fill="#2563eb"/>
+  <text x="799" y="162" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+  <text class="anno-t" x="816" y="162">输入纵向对齐</text>
+  <text class="anno" x="816" y="180">标签列 72px 固定；单值与配对字段（X/Y）</text>
+  <text class="anno" x="816" y="196">共用同一列节奏；表格卡片内标签列 52px，</text>
+  <text class="anno" x="816" y="212">输入列同样纵向对齐。</text>
+  <path class="leader" d="M 788 158 L 758 158 L 758 122 L 512 122 L 512 146"/>
+
+  <circle cx="799" cy="288" r="9" fill="#2563eb"/>
+  <text x="799" y="292" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+  <text class="anno-t" x="816" y="292">数值输入按位数定宽</text>
+  <text class="anno" x="816" y="310">3 位 56px  2 位/小数 64px  4 位及坐标 72px；</text>
+  <text class="anno" x="816" y="326">右侧预留 16px 给上下箭头区；右对齐 +</text>
+  <text class="anno" x="816" y="342">等宽数字。下拉、色块、文本框保持整行。</text>
+  <path class="leader" d="M 788 288 L 770 288 L 770 351 L 569 351"/>
+
+  <circle cx="799" cy="388" r="9" fill="#2563eb"/>
+  <text x="799" y="392" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+  <text class="anno-t" x="816" y="392">帮助 → 浮动提示</text>
+  <text class="anno" x="816" y="410">? 图标距控件右缘 ≥10px，悬停或键盘</text>
+  <text class="anno" x="816" y="426">焦点浮出提示，替代原先占位的 10px 帮助</text>
+  <text class="anno" x="816" y="442">段落；状态信息（页码、图片名、使用页数）</text>
+  <text class="anno" x="816" y="458">保持行内文本，不进提示。</text>
+  <path class="leader" d="M 788 388 L 762 388 L 762 369 L 724 369"/>
+
+  <circle cx="799" cy="498" r="9" fill="#2563eb"/>
+  <text x="799" y="502" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+  <text class="anno-t" x="816" y="502">提示样式复用画布语言</text>
+  <text class="anno" x="816" y="520">95% 深墨底、白字 12px、6px 圆角、约</text>
+  <text class="anno" x="816" y="536">150ms 淡入；键盘可达，Esc 关闭。</text>
+  <path class="leader" d="M 788 498 L 772 498 L 772 420 L 728 420"/>
+
+  <circle cx="799" cy="608" r="9" fill="#2563eb"/>
+  <text x="799" y="612" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+  <text class="anno-t" x="816" y="612">边距排成十字</text>
+  <text class="anno" x="816" y="630">上/下/左/右按方位排成十字，方位即语义，</text>
+  <text class="anno" x="816" y="646">中心为页面示意；页面面板的「页面边距」</text>
+  <text class="anno" x="816" y="662">同样采用十字排布。</text>
+  <path class="leader" d="M 788 608 L 768 608 L 768 645 L 694 645"/>
+</svg>
