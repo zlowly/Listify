@@ -23,18 +23,55 @@
     return '<div class="field"><label' + forAttr + '>' + esc(label) + '</label><div class="control">' + control + '</div></div>';
   }
 
+  function fieldHelp(label, control, tip) {
+    const match = / id="([^"]+)"/.exec(control);
+    const forAttr = match ? ' for="' + match[1] + '"' : '';
+    return '<div class="field field-help"><label' + forAttr + '>' + esc(label) + '</label><div class="control">' + control + '</div>' +
+      helpTip(tip) + '</div>';
+  }
+
   function fieldPair(labelA, controlA, labelB, controlB) {
+    const half = function (cls, label, control) {
+      const match = / id="([^"]+)"/.exec(control);
+      const forAttr = match ? ' for="' + match[1] + '"' : '';
+      return '<div class="field ' + cls + '"><label' + forAttr + '>' + esc(label) + '</label><div class="control">' + control + '</div></div>';
+    };
     return '<div class="field-row">' +
-      field(labelA, controlA) + field(labelB, controlB) +
+      half('field-a', labelA, controlA) + half('field-b', labelB, controlB) +
       '</div>';
   }
 
+  function helpTip(text) {
+    return '<button type="button" class="help-tip" data-tip="' + esc(text) + '" aria-label="' + esc(text) + '">?</button>';
+  }
+
+  /* 数值宽度档位：|max|≥1000 或带符号 → 72px；小数或两位 → 64px；其余三位整数 → 56px */
+  function numberTier(min, max, step) {
+    if ((max != null && Math.abs(max) >= 1000) || (min != null && min < 0)) return 'num-wide';
+    const s = Number(step) || 1;
+    if (s < 1 || (max != null && max <= 99)) return 'num-slim';
+    return 'num-mid';
+  }
+
   function numberInput(id, value, min, max, step, disabled) {
-    return '<input id="' + id + '" class="input" type="number" value="' + esc(value) + '"' +
+    return '<input id="' + id + '" class="input ' + numberTier(min, max, step) + '" type="number" value="' + esc(value) + '"' +
       (min != null ? ' min="' + min + '"' : '') +
       (max != null ? ' max="' + max + '"' : '') +
       ' step="' + (step || 1) + '"' +
       (disabled ? ' disabled' : '') + '>';
+  }
+
+  /* 页面边距十字：上(1,2) 左(2,1) 右(2,3) 下(3,2)，中心页面示意 */
+  function marginCross(margins, idPrefix) {
+    const item = function (side) {
+      return '<input id="' + idPrefix + side + '" class="input ' + numberTier(0, 1000, 1) + ' cross-' + side +
+        '" type="number" min="0" max="1000" step="1" value="' + esc(margins[side]) + '">';
+    };
+    return '<div class="margin-cross">' +
+      item('top') + item('left') + item('right') +
+      '<span class="cross-page"></span>' +
+      item('bottom') +
+    '</div>';
   }
 
   function textInput(id, value, placeholder) {
@@ -158,6 +195,100 @@
       if (to && to.closest && to.closest('button[aria-label]')) return;
       hide();
     });
+  }
+
+  /* 属性面板共享浮动提示：全局单例 + 事件委托，面板重渲染前隐藏 */
+  const propTip = {
+    el: null,
+    current: null,
+    ensure: function () {
+      if (this.el) return this.el;
+      const el = document.createElement('div');
+      el.className = 'prop-tip pos-below';
+      el.setAttribute('role', 'tooltip');
+      el.hidden = true;
+      document.body.appendChild(el);
+      this.el = el;
+      return el;
+    },
+    show: function (el) {
+      const tip = this.ensure();
+      const text = el.getAttribute('data-tip');
+      if (!text) return;
+      this.current = el;
+      tip.textContent = text;
+      tip.hidden = false;
+      this.place(el);
+      requestAnimationFrame(function () { tip.classList.add('show'); });
+    },
+    place: function (el) {
+      const tip = this.el;
+      const rect = el.getBoundingClientRect();
+      const tipWidth = tip.offsetWidth;
+      const tipHeight = tip.offsetHeight;
+      const pad = 8;
+      let left = rect.right - tipWidth;
+      let top = rect.bottom + pad;
+      let below = true;
+      if (top + tipHeight > window.innerHeight - pad) {
+        top = rect.top - pad - tipHeight;
+        below = false;
+      }
+      if (top < pad) top = pad;
+      if (left + tipWidth > window.innerWidth - pad) left = window.innerWidth - pad - tipWidth;
+      if (left < pad) left = pad;
+      tip.classList.toggle('pos-below', below);
+      tip.classList.toggle('pos-above', !below);
+      let arrowX = rect.left + rect.width / 2 - left;
+      if (arrowX < 12) arrowX = 12;
+      if (arrowX > tipWidth - 12) arrowX = tipWidth - 12;
+      tip.style.setProperty('--arrow-x', arrowX + 'px');
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    },
+    hide: function () {
+      if (!this.el) return;
+      this.current = null;
+      this.el.classList.remove('show');
+      this.el.hidden = true;
+    }
+  };
+
+  function initPropTips() {
+    propTip.ensure();
+    [ui.els.propertyPanel, ui.els.modalRoot].forEach(function (root) {
+      if (!root) return;
+      root.addEventListener('mouseover', function (event) {
+        const el = event.target.closest && event.target.closest('.help-tip');
+        if (!el || el === propTip.current) return;
+        propTip.show(el);
+      });
+      root.addEventListener('mouseout', function (event) {
+        const el = event.target.closest && event.target.closest('.help-tip');
+        if (!el || propTip.current !== el) return;
+        const to = event.relatedTarget;
+        if (to && to.closest && to.closest('.help-tip') === el) return;
+        propTip.hide();
+      });
+      root.addEventListener('focusin', function (event) {
+        const el = event.target.closest && event.target.closest('.help-tip');
+        if (el) propTip.show(el);
+      });
+      root.addEventListener('focusout', function (event) {
+        const el = event.target.closest && event.target.closest('.help-tip');
+        if (!el || propTip.current !== el) return;
+        const to = event.relatedTarget;
+        if (to && to.closest && to.closest('.help-tip')) return;
+        propTip.hide();
+      });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      if (propTip.el && !propTip.el.hidden) {
+        propTip.hide();
+        event.stopPropagation();
+      }
+    }, true);
   }
 
   ui.init = function () {
@@ -312,6 +443,7 @@
     });
 
     initToolbarTips();
+    initPropTips();
   };
 
   ui.setPanel = function (panel) {
@@ -538,6 +670,7 @@
   };
 
   ui.renderPropertyPanel = function () {
+    propTip.hide();
     const project = L.app.state.project;
     const page = L.app.currentPage();
     if (!page) return;
@@ -580,8 +713,8 @@
     const pageIndex = project.pages.indexOf(page);
     ui.els.propertyPanel.innerHTML =
       '<div class="prop-group">' +
-        '<div class="prop-group-title">当前页</div>' +
-        '<p class="hint">第 ' + (pageIndex + 1) + ' 页 / 共 ' + project.pages.length + ' 页。页面尺寸与边距为全局设置。</p>' +
+        '<div class="prop-group-title">当前页' + helpTip('页面尺寸与边距为全局设置。') + '</div>' +
+        '<p class="hint">第 ' + (pageIndex + 1) + ' 页 / 共 ' + project.pages.length + ' 页。</p>' +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">页面尺寸</div>' +
@@ -593,21 +726,13 @@
         '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>' +
       '</div>' +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">页面边距 <span class="hint">仅参考线</span></div>' +
-        fieldPair(
-          '上', numberInput('prop-margin-top', project.margins.top, 0, 1000, 1) + '<span class="unit">px</span>',
-          '下', numberInput('prop-margin-bottom', project.margins.bottom, 0, 1000, 1) + '<span class="unit">px</span>'
-        ) +
-        fieldPair(
-          '左', numberInput('prop-margin-left', project.margins.left, 0, 1000, 1) + '<span class="unit">px</span>',
-          '右', numberInput('prop-margin-right', project.margins.right, 0, 1000, 1) + '<span class="unit">px</span>'
-        ) +
+        '<div class="prop-group-title">页面边距' + helpTip('仅参考线') + '</div>' +
+        marginCross(project.margins, 'prop-margin-') +
       '</div>' +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">页面背景</div>' +
-        (project.unifiedBackground
-          ? '<p class="hint">全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。</p>'
-          : '<p class="hint">背景位于内容下方，可在图层中选中后编辑。</p>') +
+        '<div class="prop-group-title">页面背景' + helpTip(project.unifiedBackground
+          ? '全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。'
+          : '背景位于内容下方，可在图层中选中后编辑。') + '</div>' +
         field('当前页背景', selectInput('prop-page-bg', backgroundOptions(project), page.backgroundId, project.unifiedBackground)) +
         field('', '<label class="check-row"><input id="prop-unified" type="checkbox"' +
           (project.unifiedBackground ? ' checked' : '') + '> 所有页面使用同一背景</label>') +
@@ -615,8 +740,8 @@
         '<div class="inline-actions"><button id="prop-bg-library" class="btn btn-sm">管理背景库</button></div>' +
       '</div>' +
       '<div class="prop-group">' +
-        '<button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
-        '<p class="hint">在画布或图层面板中选择内容后可删除。</p>' +
+        '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
+          helpTip('在画布或图层面板中选择内容后可删除。') + '</div>' +
       '</div>';
 
     bind('prop-page-w', 'change', function () {
@@ -685,8 +810,8 @@
         field('填充色', colorInput('prop-bg-set-color', set.color || '#ffffff')) +
       '</div>' +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">图片 <span class="hint">' + (set.images || []).length + ' 张</span></div>' +
-        '<p class="hint">图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。</p>' +
+        '<div class="prop-group-title">图片<span class="title-right"><span class="hint">' + (set.images || []).length + ' 张</span>' +
+          helpTip('图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。') + '</span></div>' +
         '<div class="inline-actions">' +
           '<button id="prop-bg-add-image" class="btn btn-sm">添加图片</button>' +
           '<button id="prop-bg-duplicate" class="btn btn-sm">复制背景</button>' +
@@ -697,8 +822,7 @@
       '</div>' +
       (project.unifiedBackground
         ? '<div class="prop-group">' +
-            '<div class="prop-group-title">全局背景</div>' +
-            '<p class="hint">取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。</p>' +
+            '<div class="prop-group-title">全局背景' + helpTip('取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。') + '</div>' +
             '<div class="inline-actions">' +
               '<button id="prop-bg-bake" class="btn btn-sm">固化到所有页</button>' +
               '<button id="prop-bg-copy" class="btn btn-sm">本页独立副本</button>' +
@@ -735,27 +859,27 @@
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">定位</div>' +
-        field('尺寸', selectInput('prop-bg-fit', [
+        (custom ? field : fieldHelp)('尺寸', selectInput('prop-bg-fit', [
           { value: 'original', label: '原大小' },
           { value: 'fill-width', label: '横向占满' },
           { value: 'fill-height', label: '竖向占满' },
           { value: 'cover', label: '最适合（居中裁剪）' },
           { value: 'none', label: '自定义' }
-        ], image.fit || 'cover')) +
+        ], image.fit || 'cover'), '该模式随页面尺寸自动重排。直接在画布拖动或缩放会转为自定义。') +
         (custom
           ? fieldPair(
-              'X', numberInput('prop-bg-x', Math.round(image.x), -20000, 20000, 1) + '<span class="unit">px</span>',
-              'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1) + '<span class="unit">px</span>'
+              'X', numberInput('prop-bg-x', Math.round(image.x), -20000, 20000, 1),
+              'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1)
             ) +
             fieldPair(
-              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1) + '<span class="unit">px</span>',
-              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1) + '<span class="unit">px</span>'
+              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1),
+              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1)
             ) +
             field('旋转', numberInput('prop-bg-rotation', Math.round(Number(image.rotation) || 0), -360, 360, 1) + '<span class="unit">°</span>') +
             field('', '<label class="check-row"><input id="prop-bg-ratio" type="checkbox"' +
               (image.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>') +
             '<div class="inline-actions"><button id="prop-bg-restore" class="btn btn-sm">恢复为最适合</button></div>'
-          : '<p class="hint">该模式随页面尺寸自动重排。直接在画布拖动或缩放会转为自定义。</p>') +
+          : '') +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">显示</div>' +
@@ -835,11 +959,10 @@
           '<input id="' + prefix + '-font-manual" class="input" type="text" placeholder="输入字体族名">' +
           '<button id="' + prefix + '-font-manual-add" class="btn btn-sm" type="button">添加</button>' +
         '</div>';
-    return '<div class="field font-list-field">' +
+    return '<div class="field font-list-field field-help">' +
         '<label for="' + prefix + '-font-0">字体</label>' +
-        '<div class="control"><div class="font-list">' + rows + add +
-          '<p class="font-list-hint">按列表顺序回退；至少保留一个字体。</p>' +
-        '</div></div>' +
+        '<div class="control"><div class="font-list">' + rows + add + '</div></div>' +
+        helpTip('按列表顺序回退；至少保留一个字体。') +
       '</div>';
   }
 
@@ -1031,10 +1154,9 @@
   function tableCard(table, index, isLast) {
     const widthLabel = table.widthMode === 'manual' ? '固定' : '自动';
     const margins = model.normalizeMargins(table.margins);
-    function marginInput(side, label) {
-      return '<label class="table-margin-item">' + label +
-        '<input class="input" data-table-field="margin-' + side + '" type="number" min="0" step="1" value="' +
-        esc(margins[side]) + '"></label>';
+    function marginInput(side) {
+      return '<input class="input num-mid cross-' + side + '" data-table-field="margin-' + side +
+        '" type="number" min="0" step="1" value="' + esc(margins[side]) + '">';
     }
     return '<div class="table-card" data-table-index="' + index + '">' +
       '<div class="table-card-head"><span class="table-card-title">表格 ' + (index + 1) +
@@ -1044,8 +1166,8 @@
       '<button class="icon-btn" data-table-action="remove" title="删除表格">×</button>' +
       '</span></div>' +
       fieldPair(
-        '列数', '<input class="input" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">',
-        '行数', '<input class="input" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
+        '列数', '<input class="input num-slim" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">',
+        '行数', '<input class="input num-mid" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
         '" max="500" step="1" value="' + table.rows + '">'
       ) +
       field('填充', '<select class="select" data-table-field="fill">' +
@@ -1057,14 +1179,16 @@
           return '<option value="' + option.value + '"' + (table.align === option.value ? ' selected' : '') + '>' +
             option.label + '</option>';
         }).join('') + '</select>') +
-      field('边距', '<div class="table-margin-grid">' +
-        marginInput('top', '上') +
-        marginInput('bottom', '下') +
-        marginInput('left', '左') +
-        marginInput('right', '右') +
+      field('边距', '<div class="margin-cross">' +
+        marginInput('top') + marginInput('left') + marginInput('right') +
+        '<span class="cross-page"></span>' +
+        marginInput('bottom') +
       '</div>') +
-      field('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
-        widthLabel + '</span><span class="hint">' + (isLast && table.rows === 0 ? '0 行 = 动态行' : '') + '</span>') +
+      (isLast && table.rows === 0
+        ? fieldHelp('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
+          widthLabel + '</span>', '0 行 = 动态行')
+        : field('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
+          widthLabel + '</span>')) +
       '</div>';
   }
 
@@ -1080,17 +1204,16 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类块 <span class="pill pill-green">' + (category ? category.songs.length : 0) + ' 首</span></div>' +
         fieldPair(
-          '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>',
-          '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
+          '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1),
+          '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1)
         ) +
         field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1) + '<span class="unit">px</span>') +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类名子分区</div>' +
-        field('', '<label class="check-row"><input id="prop-title-visible" type="checkbox"' +
-          (element.showTitle !== false ? ' checked' : '') + '> 显示分类名</label>') +
-        '<p class="hint" id="prop-title-hidden-hint"' +
-          (element.showTitle !== false ? ' hidden' : '') + '>隐藏时样式保留，重新显示后生效。</p>' +
+        fieldHelp('', '<label class="check-row"><input id="prop-title-visible" type="checkbox"' +
+          (element.showTitle !== false ? ' checked' : '') + '> 显示分类名</label>',
+          '隐藏时样式保留，重新显示后生效。') +
         categoryStyleFields('prop-title', element.titleStyle) +
       '</div>' +
       '<div class="prop-group">' +
@@ -1098,14 +1221,14 @@
         categoryStyleFields('prop-song', element.songStyle) +
       '</div>' +
       '<div class="prop-group">' +
-        '<div class="prop-group-title">表格 <span class="hint">' + tables.length + ' 个</span></div>' +
+        '<div class="prop-group-title">表格<span class="title-right"><span class="hint">' + tables.length + ' 个</span>' +
+          helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。') + '</span></div>' +
         tableCards +
         '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>' +
-        '<p class="hint">只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。</p>' +
       '</div>' +
       '<div class="prop-group">' +
-        '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除分类块</button>' +
-        '<p class="hint">删除后分类回到左侧未放置状态，歌单数据保留。</p>' +
+        '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除分类块</button>' +
+          helpTip('删除后分类回到左侧未放置状态，歌单数据保留。') + '</div>' +
       '</div>';
 
     bind('prop-el-x', 'input', function () {
@@ -1125,8 +1248,6 @@
       const input = document.getElementById('prop-title-visible');
       element.showTitle = input ? input.checked : true;
       L.app.changed({ property: false });
-      const hint = document.getElementById('prop-title-hidden-hint');
-      if (hint) hint.hidden = element.showTitle !== false;
     });
     bindCategoryStyle('prop-title', element.titleStyle);
     bindCategoryStyle('prop-song', element.songStyle);
@@ -1195,18 +1316,17 @@
     ui.els.propertyPanel.innerHTML =
       '<div class="prop-group">' +
         '<div class="prop-group-title">自由文字</div>' +
-        field('内容', '<textarea id="prop-text-content" class="input" rows="3" style="height:auto;padding:6px 7px;resize:vertical">' +
-          esc(element.text) + '</textarea>') +
-        '<p class="hint">也可以双击画布上的文字直接编辑。</p>' +
+        fieldHelp('内容', '<textarea id="prop-text-content" class="input" rows="3" style="height:auto;padding:6px 7px;resize:vertical">' +
+          esc(element.text) + '</textarea>', '也可以双击画布上的文字直接编辑。') +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">位置与尺寸</div>' +
         fieldPair(
-          '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>',
-          '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
+          '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1),
+          '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1)
         ) +
-        field('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>') +
-        '<p class="hint">高度随文字自动增长。</p>' +
+        fieldHelp('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>',
+          '高度随文字自动增长。') +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">文字样式</div>' +
@@ -1268,12 +1388,12 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">位置与尺寸</div>' +
         fieldPair(
-          '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1) + '<span class="unit">px</span>',
-          '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1) + '<span class="unit">px</span>'
+          '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1),
+          '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1)
         ) +
         fieldPair(
-          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>',
-          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1) + '<span class="unit">px</span>'
+          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1),
+          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1)
         ) +
       '</div>' +
       '<div class="prop-group">' +
@@ -1350,7 +1470,9 @@
       title: '背景库',
       width: '560px',
       body: '<div class="prop-group">' +
-        '<p class="hint">背景库只管理背景本身；页面使用哪一套背景由页面属性或全局背景决定。</p>' +
+        '<div class="bg-library-tiprow">' +
+          helpTip('背景库只管理背景本身；页面使用哪一套背景由页面属性或全局背景决定。') +
+        '</div>' +
         '<div class="bg-library-list">' + rows + '</div>' +
       '</div>',
       actions: [
