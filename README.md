@@ -79,6 +79,7 @@ Listify/
 ├── DESIGN.md           # 设计系统与视觉规范
 ├── PRODUCT.md          # 产品定位、用户与约束
 ├── AGENTS.md           # 开发约定与易错领域规则
+├── LICENSE             # MIT 许可证
 ├── VERSION             # 唯一版本号来源（语义化 x.y.z）
 └── build.sh            # 发布打包脚本（运行时不参与构建）
 ```
@@ -120,5 +121,11 @@ Listify/
 - 历史变更：`openspec/changes/archive/`
 - 视觉规范：`DESIGN.md`
 - 产品定位：`PRODUCT.md`
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE) 发布。
+
+`vendor/` 目录中的 LeaferJS 属于第三方依赖，遵循其自身许可，不在本项目的 MIT 许可范围内；再分发时请保留其原始许可声明。
 
 当前版本：`1.0.0`
