@@ -669,7 +669,41 @@
     ui.els.emptyHint.hidden = !empty;
   };
 
+  /* 重渲染前后捕获/恢复面板内聚焦控件（含光标）：点数值箭头改值会触发重渲染，
+     若不恢复，聚焦节点被 innerHTML 销毁后焦点丢失，蓝色焦点边框随之消失 */
+  function capturePanelFocus() {
+    const active = document.activeElement;
+    if (!active || !ui.els.propertyPanel.contains(active)) return null;
+    const tag = active.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return null;
+    const state = { id: active.id, tag: tag };
+    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+      state.start = active.selectionStart;
+      state.end = active.selectionEnd;
+    }
+    return state;
+  }
+
+  function restorePanelFocus(state) {
+    if (!state || !state.id) return;
+    const el = document.getElementById(state.id);
+    if (!el) return;
+    el.focus();
+    if ((state.tag === 'INPUT' || state.tag === 'TEXTAREA') && state.start != null) {
+      try { el.setSelectionRange(state.start, state.end); } catch (err) { /* 部分控件不支持 */ }
+    }
+  }
+
   ui.renderPropertyPanel = function () {
+    const focusState = capturePanelFocus();
+    try {
+      renderPropertyPanelBody();
+    } finally {
+      restorePanelFocus(focusState);
+    }
+  };
+
+  const renderPropertyPanelBody = function () {
     propTip.hide();
     const project = L.app.state.project;
     const page = L.app.currentPage();
@@ -1166,8 +1200,8 @@
       '<button class="icon-btn" data-table-action="remove" title="删除表格">×</button>' +
       '</span></div>' +
       fieldPair(
-        '列数', '<input class="input num-slim" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">',
-        '行数', '<input class="input num-mid" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
+        '列数', '<input id="prop-table-' + index + '-columns" class="input num-slim" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">',
+        '行数', '<input id="prop-table-' + index + '-rows" class="input num-mid" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
         '" max="500" step="1" value="' + table.rows + '">'
       ) +
       field('填充', '<select class="select" data-table-field="fill">' +
