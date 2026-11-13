@@ -2204,35 +2204,17 @@
     input.click();
   }
 
-  // 与 samples/21songs.txt 保持同步的内嵌副本：file:// 页面无法 fetch 本地文件，只能内嵌。
-  const SAMPLE_PLAYLIST_TEXT = [
-    '#测试21首',
-    '测试歌曲01',
-    '测试歌曲02',
-    '测试歌曲03',
-    '测试歌曲04',
-    '测试歌曲05',
-    '测试歌曲06',
-    '测试歌曲07',
-    '测试歌曲08',
-    '测试歌曲09',
-    '测试歌曲10',
-    '测试歌曲11',
-    '测试歌曲12',
-    '测试歌曲13',
-    '测试歌曲14',
-    '测试歌曲15',
-    '测试歌曲16',
-    '测试歌曲17',
-    '测试歌曲18',
-    '测试歌曲19',
-    '测试歌曲20',
-    '测试歌曲21'
-  ].join('\n');
-
-  function importSamplePlaylist() {
-    const file = new File([SAMPLE_PLAYLIST_TEXT + '\n'], '示例歌单.txt', { type: 'text/plain' });
-    handleImportFile(file);
+  function exportPlaylist() {
+    const result = L.playlistExport.exportPlaylist(state.project);
+    if (result.empty) {
+      ui.modal.confirm('没有歌单', '目前没有歌单，是否要导出歌单模板？', { confirmLabel: '导出模板' }).then(function (ok) {
+        if (!ok) return;
+        L.playlistExport.downloadTemplate();
+        ui.toast('歌单模板已导出。', 'success');
+      });
+      return;
+    }
+    ui.toast('歌单已导出。', 'success');
   }
 
   /* ---------- draft persistence ---------- */
@@ -2642,8 +2624,8 @@
     bakeUnifiedBackground: bakeUnifiedBackground,
     copyUnifiedBackgroundToPage: copyUnifiedBackgroundToPage,
     openImport: openImport,
+    exportPlaylist: exportPlaylist,
     handleImportFile: handleImportFile,
-    importSamplePlaylist: importSamplePlaylist,
     placeCategory: placeCategory,
     undo: performUndo,
     newProject: newProject,

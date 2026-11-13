@@ -272,7 +272,6 @@ button { cursor: pointer; }
   padding: 26px 10px;
   line-height: 1.7;
 }
-.panel-empty .btn { margin-top: 12px; }
 
 /* category list */
 .category-row {

@@ -256,7 +256,7 @@
 
   function initPropTips() {
     propTip.ensure();
-    [ui.els.propertyPanel, ui.els.modalRoot].forEach(function (root) {
+    [ui.els.propertyPanel, ui.els.modalRoot, ui.els.categoryToolbar].forEach(function (root) {
       if (!root) return;
       root.addEventListener('mouseover', function (event) {
         const el = event.target.closest && event.target.closest('.help-tip');
@@ -306,6 +306,9 @@
 
     document.getElementById('btn-import').addEventListener('click', function () {
       L.app.openImport();
+    });
+    document.getElementById('btn-export-playlist').addEventListener('click', function () {
+      L.app.exportPlaylist();
     });
     document.getElementById('btn-edit-playlist').addEventListener('click', function () {
       L.app.openPlaylistEditor();
@@ -490,12 +493,7 @@
     const project = L.app.state.project;
     const categories = project.playlist.categories;
     if (!categories.length) {
-      ui.els.categoryPanel.innerHTML = '<div class="panel-empty">还没有歌单。<br>点击上方“导入歌单”，或把 .txt 文件拖到这里。<br>' +
-        '<button type="button" class="btn btn-sm" id="btn-sample-playlist">导入示例歌单</button></div>';
-      const sampleButton = ui.els.categoryPanel.querySelector('#btn-sample-playlist');
-      if (sampleButton) {
-        sampleButton.addEventListener('click', function () { L.app.importSamplePlaylist(); });
-      }
+      ui.els.categoryPanel.innerHTML = '<div class="panel-empty">还没有歌单。<br>点击上方“导入歌单”，或把 .txt 文件拖到这里。</div>';
       return;
     }
     ui.els.categoryPanel.innerHTML = categories.map(function (category) {
