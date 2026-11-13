@@ -53,19 +53,20 @@
     return 'num-mid';
   }
 
-  function numberInput(id, value, min, max, step, disabled) {
+  function numberInput(id, value, min, max, step, disabled, ctrlStep) {
     return '<input id="' + id + '" class="input ' + numberTier(min, max, step) + '" type="number" value="' + esc(value) + '"' +
       (min != null ? ' min="' + min + '"' : '') +
       (max != null ? ' max="' + max + '"' : '') +
       ' step="' + (step || 1) + '"' +
-      (disabled ? ' disabled' : '') + '>';
+      (disabled ? ' disabled' : '') +
+      (ctrlStep != null ? ' data-ctrl-step="' + ctrlStep + '"' : '') + '>';
   }
 
   /* 页面边距十字：上(1,2) 左(2,1) 右(2,3) 下(3,2)，中心页面示意 */
   function marginCross(margins, idPrefix) {
     const item = function (side) {
       return '<input id="' + idPrefix + side + '" class="input ' + numberTier(0, 1000, 1) + ' cross-' + side +
-        '" type="number" min="0" max="1000" step="1" value="' + esc(margins[side]) + '">';
+        '" type="number" min="0" max="1000" step="1" data-ctrl-step="10" value="' + esc(margins[side]) + '">';
     };
     return '<div class="margin-cross">' +
       item('top') + item('left') + item('right') +
@@ -130,6 +131,24 @@
   function valueOf(id) {
     const el = document.getElementById(id);
     return el ? el.value : '';
+  }
+
+  /* Ctrl/⌘ + ↑/↓ 大步进：仅作用于带 data-ctrl-step 的框，复用其 input/change 提交路径 */
+  function ctrlStepNumber(target, dir) {
+    const big = Number(target.getAttribute('data-ctrl-step'));
+    if (!Number.isFinite(big) || big <= 0) return;
+    const current = Number(target.value);
+    if (!Number.isFinite(current)) return;
+    const step = Number(target.step);
+    const decimals = step > 0 && step < 1 ? (String(step).split('.')[1] || '').length : 0;
+    let next = Number((current + dir * big).toFixed(decimals));
+    const min = target.min !== '' ? Number(target.min) : null;
+    const max = target.max !== '' ? Number(target.max) : null;
+    if (min != null && Number.isFinite(min) && next < min) next = min;
+    if (max != null && Number.isFinite(max) && next > max) next = max;
+    target.value = next;
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function normalizeAngle(value) {
@@ -299,6 +318,15 @@
     ui.els.categoryPanel = document.getElementById('category-panel');
     ui.els.layerPanel = document.getElementById('layer-panel');
     ui.els.propertyPanel = document.getElementById('property-panel');
+    /* 事件委托挂在面板上，跨属性面板重渲染存活 */
+    ui.els.propertyPanel.addEventListener('keydown', function (event) {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+      const target = event.target;
+      if (!target || !target.matches || !target.matches('input[type=number][data-ctrl-step]')) return;
+      event.preventDefault();
+      ctrlStepNumber(target, event.key === 'ArrowUp' ? 1 : -1);
+    });
     ui.els.selectionLabel = document.getElementById('selection-label');
     ui.els.emptyHint = document.getElementById('empty-hint');
     ui.els.modalRoot = document.getElementById('modal-root');
@@ -751,8 +779,8 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">页面尺寸</div>' +
         fieldPair(
-          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1) + '<span class="unit">px</span>',
-          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1) + '<span class="unit">px</span>'
+          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1, false, 10) + '<span class="unit">px</span>',
+          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1, false, 10) + '<span class="unit">px</span>'
         ) +
         '<div class="inline-actions"><button id="prop-orient-portrait" class="btn btn-sm">纵向 1080×1920</button>' +
         '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>' +
@@ -900,14 +928,14 @@
         ], image.fit || 'cover'), '该模式随页面尺寸自动重排。直接在画布拖动或缩放会转为自定义。') +
         (custom
           ? fieldPair(
-              'X', numberInput('prop-bg-x', Math.round(image.x), -20000, 20000, 1),
-              'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1)
+              'X', numberInput('prop-bg-x', Math.round(image.x), -20000, 20000, 1, false, 10),
+              'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1, false, 10)
             ) +
             fieldPair(
-              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1),
-              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1)
+              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1, false, 10),
+              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1, false, 10)
             ) +
-            field('旋转', numberInput('prop-bg-rotation', Math.round(Number(image.rotation) || 0), -360, 360, 1) + '<span class="unit">°</span>') +
+            field('旋转', numberInput('prop-bg-rotation', Math.round(Number(image.rotation) || 0), -360, 360, 1, false, 45) + '<span class="unit">°</span>') +
             field('', '<label class="check-row"><input id="prop-bg-ratio" type="checkbox"' +
               (image.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>') +
             '<div class="inline-actions"><button id="prop-bg-restore" class="btn btn-sm">恢复为最适合</button></div>'
@@ -1236,10 +1264,10 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类块 <span class="pill pill-green">' + (category ? category.songs.length : 0) + ' 首</span></div>' +
         fieldPair(
-          '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1),
-          '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1)
+          '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1, false, 10)
         ) +
-        field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1) + '<span class="unit">px</span>') +
+        field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1, false, 10) + '<span class="unit">px</span>') +
       '</div>' +
       '<div class="prop-group">' +
         '<div class="prop-group-title">分类名子分区</div>' +
@@ -1354,10 +1382,10 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">位置与尺寸</div>' +
         fieldPair(
-          '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1),
-          '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1)
+          '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1, false, 10)
         ) +
-        fieldHelp('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1) + '<span class="unit">px</span>',
+        fieldHelp('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1, false, 10) + '<span class="unit">px</span>',
           '高度随文字自动增长。') +
       '</div>' +
       '<div class="prop-group">' +
@@ -1420,12 +1448,12 @@
       '<div class="prop-group">' +
         '<div class="prop-group-title">位置与尺寸</div>' +
         fieldPair(
-          '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1),
-          '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1)
+          '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1, false, 10)
         ) +
         fieldPair(
-          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1),
-          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1)
+          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1, false, 10),
+          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1, false, 10)
         ) +
       '</div>' +
       '<div class="prop-group">' +
@@ -1434,7 +1462,7 @@
           '<label class="check-row"><input id="prop-img-ratio" type="checkbox"' +
           (element.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>' +
         '</div></div>' +
-        field('旋转', numberInput('prop-img-rotation', Math.round(element.rotation || 0), -180, 180, 1) +
+        field('旋转', numberInput('prop-img-rotation', Math.round(element.rotation || 0), -180, 180, 1, false, 45) +
           '<span class="unit">°</span>') +
         field('透明度', rangeInput('prop-img-opacity', element.opacity == null ? 1 : element.opacity, 0, 1, 0.01)) +
         field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
