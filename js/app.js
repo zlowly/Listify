@@ -1091,6 +1091,7 @@
 
   function beginPointer(event) {
     if (overlay.setPointerCapture) overlay.setPointerCapture(event.pointerId);
+    renderer.setBlurCacheFrozen(true);
     event.preventDefault();
   }
 
@@ -1218,6 +1219,7 @@
     if (!drag) return;
     const finished = drag;
     drag = null;
+    renderer.setBlurCacheFrozen(false);
 
     if (finished.type === 'page-size') {
       state.project.pageSize.width = Math.round(clamp(state.project.pageSize.width, 320, 5000));

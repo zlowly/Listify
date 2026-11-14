@@ -20,6 +20,80 @@
     return { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
   }
 
+  // 模糊位图缓存：ctx.filter 的模糊按设备像素计算，且每次绘制都会重新执行。
+  // 拖拽图片只改变位置时缓存可命中；尺寸按 64px 分桶，缩放时仅跨桶才重建。
+  const BLUR_CACHE_BUCKET = 64;
+  const BLUR_CACHE_MAX_PIXELS = 12 * 1024 * 1024;
+  const BLUR_CACHE_MAX_ENTRY_PIXELS = 8 * 1024 * 1024;
+  const blurredImages = new Map();
+  let blurredImagePixels = 0;
+  let blurCacheFrozen = false;
+
+  function setBlurCacheFrozen(frozen) {
+    blurCacheFrozen = !!frozen;
+  }
+
+  function contextRatio(ctx) {
+    const matrix = ctx.getTransform();
+    return Math.max(0.1, Math.hypot(matrix.a, matrix.b));
+  }
+
+  function blurredImage(assetId, blur, width, height, ratio) {
+    const img = L.assets.getCachedImage(assetId);
+    if (!img || !(width > 0) || !(height > 0)) return null;
+    const deviceWidth = width * ratio;
+    const deviceHeight = height * ratio;
+    // 超大图片按像素预算降采样缓存；绘制时放大，模糊半径按同比例缩放，
+    // 使最终显示半径仍等于 blur。
+    const budgetScale = Math.min(1, Math.sqrt(BLUR_CACHE_MAX_ENTRY_PIXELS / (deviceWidth * deviceHeight)));
+    const bucketWidth = Math.max(1, Math.ceil(deviceWidth * budgetScale / BLUR_CACHE_BUCKET) * BLUR_CACHE_BUCKET);
+    const bucketHeight = Math.max(1, Math.ceil(deviceHeight * budgetScale / BLUR_CACHE_BUCKET) * BLUR_CACHE_BUCKET);
+    const key = assetId + '|' + blur + '|' + bucketWidth + 'x' + bucketHeight;
+    const cached = blurredImages.get(key);
+    if (cached) {
+      blurredImages.delete(key);
+      blurredImages.set(key, cached);
+      return cached;
+    }
+    // 交互（拖拽缩放）期间复用已有位图，避免每次跨尺寸桶都重新执行模糊；
+    // 拖拽结束后由上层重绘，生成与最终尺寸一致的缓存。
+    if (blurCacheFrozen) {
+      const prefix = assetId + '|' + blur + '|';
+      for (const [cachedKey, canvas] of blurredImages) {
+        if (cachedKey.indexOf(prefix) === 0) return canvas;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = bucketWidth;
+    canvas.height = bucketHeight;
+    const cacheContext = canvas.getContext('2d');
+    const blurScale = Math.min(1, bucketWidth / deviceWidth);
+    cacheContext.filter = 'blur(' + Math.max(0.5, blur * blurScale) + 'px)';
+    cacheContext.drawImage(img, 0, 0, bucketWidth, bucketHeight);
+    const pixels = bucketWidth * bucketHeight;
+    blurredImages.set(key, canvas);
+    blurredImagePixels += pixels;
+    while (blurredImagePixels > BLUR_CACHE_MAX_PIXELS && blurredImages.size > 1) {
+      const oldestKey = blurredImages.keys().next().value;
+      const oldest = blurredImages.get(oldestKey);
+      blurredImagePixels -= oldest.width * oldest.height;
+      blurredImages.delete(oldestKey);
+    }
+    return canvas;
+  }
+
+  function drawImageWithBlur(ctx, assetId, img, blur, x, y, width, height) {
+    if (blur > 0) {
+      const cached = blurredImage(assetId, blur, width, height, contextRatio(ctx));
+      if (cached) {
+        ctx.drawImage(cached, x, y, width, height);
+        return;
+      }
+      ctx.filter = 'blur(' + blur + 'px)';
+    }
+    ctx.drawImage(img, x, y, width, height);
+  }
+
   function backgroundGeometry(pageSize, img, fit) {
     const iw = img.naturalWidth || img.width;
     const ih = img.naturalHeight || img.height;
@@ -76,8 +150,8 @@
         ctx.rotate(model.rotationRadians(image));
         ctx.globalAlpha = model.clamp(Number(image.opacity), 0, 1);
         const blur = Number(image.blur);
-        if (blur > 0) ctx.filter = 'blur(' + blur + 'px)';
-        ctx.drawImage(img, -rect.width / 2, -rect.height / 2, rect.width, rect.height);
+        drawImageWithBlur(ctx, image.assetId, img, blur,
+          -rect.width / 2, -rect.height / 2, rect.width, rect.height);
         ctx.restore();
       });
     }
@@ -186,8 +260,7 @@
     ctx.clip();
     ctx.globalAlpha = model.clamp(Number(element.opacity), 0, 1);
     const blur = Number(element.blur);
-    if (blur > 0) ctx.filter = 'blur(' + blur + 'px)';
-    ctx.drawImage(img, -width / 2, -height / 2, width, height);
+    drawImageWithBlur(ctx, element.assetId, img, blur, -width / 2, -height / 2, width, height);
     ctx.restore();
   }
 
@@ -514,6 +587,7 @@
     tableDividers: tableDividers,
     pageOverflow: pageOverflow,
     pageAssets: pageAssets,
-    allBackgroundAssets: allBackgroundAssets
+    allBackgroundAssets: allBackgroundAssets,
+    setBlurCacheFrozen: setBlurCacheFrozen
   };
 })();
