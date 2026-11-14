@@ -732,26 +732,86 @@
     };
   }
 
+  /* ---------- rotated handle cursors ---------- */
+
+  // 双向箭头字形与手柄类型无关，只随方向旋转；按 1° 归一化角度缓存光标串。
+  const rotatedCursorCache = new Map();
+  // 屏幕 y 向下、正角顺时针：0° 水平、45° “\”、90° 竖直、135° “/”。
+  const RESIZE_CURSOR_KEYWORDS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
+  const CURSOR_STANDARD_STEP = 45;
+  const CURSOR_SNAP_TOLERANCE = 0.5;
+
+  function normalizeCursorAngle(degrees) {
+    let angle = Number(degrees);
+    if (!Number.isFinite(angle)) angle = 0;
+    angle = angle % 180;
+    if (angle < 0) angle += 180;
+    return angle;
+  }
+
+  function resizeCursorKeyword(angle) {
+    const bucket = Math.round(angle / CURSOR_STANDARD_STEP) % RESIZE_CURSOR_KEYWORDS.length;
+    return RESIZE_CURSOR_KEYWORDS[bucket];
+  }
+
+  function rotatedCursorSvg(angle) {
+    // 32×32 是 Chrome/Edge 光标图上限；箭头画在中间约 20px 范围内。
+    const path = 'M6 16 L11 11.5 L11 14.5 L21 14.5 L21 11.5 L26 16 ' +
+      'L21 20.5 L21 17.5 L11 17.5 L11 20.5 Z';
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+      '<g transform="rotate(' + angle + ' 16 16)">' +
+      '<path d="' + path + '" fill="none" stroke="#ffffff" stroke-width="4" ' +
+      'stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<path d="' + path + '" fill="#111827" stroke="#111827" stroke-width="1" ' +
+      'stroke-linejoin="round" stroke-linecap="round"/>' +
+      '</g></svg>';
+  }
+
+  const HANDLE_CURSOR_OFFSETS = {
+    e: 0, w: 0,
+    n: 90, s: 90,
+    se: 45, nw: 45,
+    ne: 135, sw: 135
+  };
+
+  function handleCursor(handleName, rotationDegrees) {
+    const offset = HANDLE_CURSOR_OFFSETS[handleName] || 0;
+    const angle = normalizeCursorAngle((Number(rotationDegrees) || 0) + offset);
+    const snapped = Math.round(angle / CURSOR_STANDARD_STEP) * CURSOR_STANDARD_STEP;
+    const gap = Math.abs(angle - snapped);
+    if (Math.min(gap, 180 - gap) <= CURSOR_SNAP_TOLERANCE) return resizeCursorKeyword(angle);
+
+    const key = Math.round(angle) % 180;
+    let cursor = rotatedCursorCache.get(key);
+    if (!cursor) {
+      cursor = 'url("data:image/svg+xml;charset=utf-8,' +
+        encodeURIComponent(rotatedCursorSvg(key)) + '") 16 16, ' + resizeCursorKeyword(key);
+      rotatedCursorCache.set(key, cursor);
+    }
+    return cursor;
+  }
+
   function imageHandlePoints(element) {
     const width = element.width;
     const height = element.height;
     const centerX = element.x + width / 2;
     const centerY = element.y + height / 2;
     const radians = model.rotationRadians(element);
+    const degrees = radians * 180 / Math.PI;
     const defs = [
-      { name: 'nw', sx: -1, sy: -1, cursor: 'nwse-resize' },
-      { name: 'n', sx: 0, sy: -1, cursor: 'ns-resize' },
-      { name: 'ne', sx: 1, sy: -1, cursor: 'nesw-resize' },
-      { name: 'e', sx: 1, sy: 0, cursor: 'ew-resize' },
-      { name: 'se', sx: 1, sy: 1, cursor: 'nwse-resize' },
-      { name: 's', sx: 0, sy: 1, cursor: 'ns-resize' },
-      { name: 'sw', sx: -1, sy: 1, cursor: 'nesw-resize' },
-      { name: 'w', sx: -1, sy: 0, cursor: 'ew-resize' }
+      { name: 'nw', sx: -1, sy: -1 },
+      { name: 'n', sx: 0, sy: -1 },
+      { name: 'ne', sx: 1, sy: -1 },
+      { name: 'e', sx: 1, sy: 0 },
+      { name: 'se', sx: 1, sy: 1 },
+      { name: 's', sx: 0, sy: 1 },
+      { name: 'sw', sx: -1, sy: 1 },
+      { name: 'w', sx: -1, sy: 0 }
     ];
     return defs.map(function (def) {
       const offset = model.rotateVector(def.sx * width / 2, def.sy * height / 2, radians);
       const screen = screenFromPage(centerX + offset.x, centerY + offset.y);
-      return { name: def.name, x: screen.x, y: screen.y, cursor: def.cursor };
+      return { name: def.name, x: screen.x, y: screen.y, cursor: handleCursor(def.name, degrees) };
     });
   }
 
