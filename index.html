@@ -82,9 +82,13 @@
         </div>
         <div id="canvas-scroll" class="canvas-scroll">
           <div id="canvas-stage" class="canvas-stage">
-            <div id="leafer-view" class="leafer-view"></div>
+            <div id="leafer-view" class="leafer-view">
+              <canvas id="bg-canvas" class="surface-canvas surface-bg"></canvas>
+              <canvas id="content-canvas" class="surface-canvas surface-content"></canvas>
+            </div>
           </div>
         </div>
+        <canvas id="overlay-chrome" class="overlay overlay-chrome"></canvas>
         <canvas id="overlay" class="overlay"></canvas>
         <div id="empty-hint" class="empty-hint">
           <div class="empty-icon">♫</div>

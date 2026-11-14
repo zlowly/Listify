@@ -15,9 +15,72 @@
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');
 
+  let frameToken = 0;
+  let inputEpoch = 0;
+  const stats = { layoutRecomputes: 0, layoutHits: 0, measureCalls: 0 };
+
+  function beginFrame() {
+    frameToken += 1;
+  }
+
+  function invalidate() {
+    inputEpoch += 1;
+  }
+
+  function getStats() {
+    return {
+      layoutRecomputes: stats.layoutRecomputes,
+      layoutHits: stats.layoutHits,
+      measureCalls: stats.measureCalls
+    };
+  }
+
+  function resetStats() {
+    stats.layoutRecomputes = 0;
+    stats.layoutHits = 0;
+    stats.measureCalls = 0;
+  }
+
   function measureText(text, style) {
+    stats.measureCalls += 1;
     measureCtx.font = model.fontString(style);
     return measureCtx.measureText(String(text == null ? '' : text)).width;
+  }
+
+  function fontSignature(style) {
+    const source = style || {};
+    const families = Array.isArray(source.fontFamilies)
+      ? source.fontFamilies.join('\u0001')
+      : (source.fontFamily || '');
+    return [families, source.fontSize, source.fontWeight, source.fontStyle].join('\u0002');
+  }
+
+  function tablesSignature(element) {
+    return (element.tables || []).map(function (table) {
+      const margins = model.normalizeMargins(table.margins);
+      return [
+        table.columns,
+        table.rows,
+        table.fill,
+        table.align,
+        table.widthMode,
+        (table.widths || []).join(','),
+        margins.top,
+        margins.right,
+        margins.bottom,
+        margins.left
+      ].join('\u0003');
+    }).join('\u0004');
+  }
+
+  function cachedSignature(element, mode, build) {
+    const memo = element._layoutSignature;
+    if (memo && memo.token === frameToken && memo.epoch === inputEpoch && memo.mode === mode) {
+      return memo.value;
+    }
+    const value = build();
+    element._layoutSignature = { token: frameToken, epoch: inputEpoch, mode: mode, value: value };
+    return value;
   }
 
   function wrapText(text, maxWidth, style) {
@@ -262,6 +325,28 @@
     const editMode = !!(options && options.editMode);
     const songs = category ? category.songs : [];
     normalizeTables(element, songs.length);
+    const mode = editMode ? 'edit' : 'export';
+    const signature = cachedSignature(element, mode, function () {
+      return [
+        editMode ? '1' : '0',
+        element.width,
+        element.showTitle !== false ? '1' : '0',
+        category ? category.name : '',
+        (songs || []).join('\u0001'),
+        fontSignature(element.titleStyle),
+        fontSignature(element.songStyle),
+        Number(element.titleStyle.lineHeight),
+        Number(element.songStyle.lineHeight),
+        tablesSignature(element)
+      ].join('\u0005');
+    });
+    if (!element._layoutCache) element._layoutCache = {};
+    const cached = element._layoutCache[mode];
+    if (cached && cached.signature === signature) {
+      stats.layoutHits += 1;
+      return cached.layout;
+    }
+    stats.layoutRecomputes += 1;
     const sorted = sortSongs(songs);
     const showTitle = element.showTitle !== false;
     const titleWidth = Math.max(1, element.width - BLOCK_PADDING * 2);
@@ -316,18 +401,35 @@
       sorted: sorted
     };
     if (!element._layoutByMode) element._layoutByMode = {};
-    element._layoutByMode[editMode ? 'edit' : 'export'] = layout;
+    element._layoutByMode[mode] = layout;
+    element._layoutCache[mode] = { signature: signature, layout: layout };
     return layout;
   }
 
   function layoutText(element) {
+    const signature = cachedSignature(element, 'text', function () {
+      return [
+        element.text,
+        element.width,
+        fontSignature(element.style),
+        Number(element.style.lineHeight)
+      ].join('\u0005');
+    });
+    const cached = element._textLayoutCache;
+    if (cached && cached.signature === signature) {
+      stats.layoutHits += 1;
+      return cached.layout;
+    }
+    stats.layoutRecomputes += 1;
     const lines = wrapText(element.text, element.width, element.style);
     const lineHeight = element.style.fontSize * element.style.lineHeight;
-    return {
+    const layout = {
       lines: lines,
       lineHeight: lineHeight,
       height: Math.max(lineHeight, lines.length * lineHeight)
     };
+    element._textLayoutCache = { signature: signature, layout: layout };
+    return layout;
   }
 
   function elementHeight(element, category, options) {
@@ -737,6 +839,34 @@
       true
     );
 
+    beginFrame();
+    const cacheCategory = { name: '缓存', songs: ['a', 'b', 'c'] };
+    const cacheElement = model.createCategoryElement('缓存', 0, 0, pageProject(), 600);
+    const cacheFirst = layoutCategory(cacheCategory, cacheElement);
+    cacheElement.songStyle.color = '#ff0000';
+    beginFrame();
+    const cacheAfterColor = layoutCategory(cacheCategory, cacheElement);
+    check('布局缓存忽略纯颜色变化', cacheAfterColor === cacheFirst, true);
+    cacheElement.width = 500;
+    beginFrame();
+    const cacheAfterWidth = layoutCategory(cacheCategory, cacheElement);
+    check('布局缓存随宽度失效', cacheAfterWidth !== cacheAfterColor, true);
+
+    const cacheText = model.createTextElement(
+      { pageSize: { width: 800, height: 1200 }, margins: { top: 0, right: 0, bottom: 0, left: 0 } },
+      '缓存文字',
+      { elements: [] }
+    );
+    const textFirst = layoutText(cacheText);
+    cacheText.style.color = '#00ff00';
+    beginFrame();
+    const textAfterColor = layoutText(cacheText);
+    check('文字布局缓存忽略纯颜色变化', textAfterColor === textFirst, true);
+    cacheText.text = '缓存文字已修改';
+    beginFrame();
+    const textAfterChange = layoutText(cacheText);
+    check('文字布局缓存随内容失效', textAfterChange !== textAfterColor, true);
+
     const pass = checks.every(function (item) { return item.pass; });
     if (console && console.table) console.table(checks);
     return { pass: pass, checks: checks };
@@ -764,6 +894,10 @@
     resetAuto: resetAuto,
     scaleManualWidths: scaleManualWidths,
     setManualWidths: setManualWidths,
+    beginFrame: beginFrame,
+    invalidate: invalidate,
+    getStats: getStats,
+    resetStats: resetStats,
     devChecks: devChecks
   };
 })();

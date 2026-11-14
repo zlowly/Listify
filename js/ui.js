@@ -969,7 +969,7 @@
     bind('prop-bg-name', 'change', function () { L.app.renameBackgroundSet(set.id, valueOf('prop-bg-name')); });
     bind('prop-bg-set-color', 'input', function () {
       set.color = valueOf('prop-bg-set-color');
-      L.app.changed({ property: false });
+      L.app.changed({ property: false, layers: ['bg', 'overlay'] });
     });
     bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', { setId: set.id }); });
     bind('prop-bg-duplicate', 'click', function () { L.app.duplicateBackgroundSet(set.id); });
@@ -1033,19 +1033,19 @@
     bind('prop-bg-ratio', 'change', function () {
       const input = document.getElementById('prop-bg-ratio');
       image.keepRatio = input ? input.checked : true;
-      L.app.changed({ property: false });
+      L.app.changed({ property: false, layers: ['bg', 'overlay'] });
     });
     bind('prop-bg-opacity', 'input', function () {
       image.opacity = Number(valueOf('prop-bg-opacity'));
       const label = document.getElementById('prop-bg-opacity-value');
       if (label) label.textContent = image.opacity.toFixed(2);
-      L.app.changed({ property: false });
+      L.app.changed({ property: false, layers: ['bg', 'overlay'] });
     });
     bind('prop-bg-blur', 'input', function () {
       image.blur = Number(valueOf('prop-bg-blur'));
       const label = document.getElementById('prop-bg-blur-value');
       if (label) label.textContent = image.blur;
-      L.app.changed({ property: false });
+      L.app.changed({ property: false, layers: ['bg', 'overlay'] });
     });
     bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(set.id, image.id); });
     bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, 1); });

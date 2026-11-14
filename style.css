@@ -966,13 +966,27 @@ button { cursor: pointer; }
   z-index: 1;
 }
 
+.surface-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+.surface-bg { z-index: 1; }
+.surface-content { z-index: 2; }
+
 .overlay {
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 3;
+  z-index: 4;
   touch-action: none;
   outline: none;
+}
+
+.overlay-chrome {
+  z-index: 3;
+  pointer-events: none;
 }
 
 .empty-hint {

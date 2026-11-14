@@ -22,9 +22,12 @@
   let viewEl = null;
   let overlay = null;
   let overlayCtx = null;
-  let leafer = null;
-  let surface = null;
-  let surfaceIsLeafer = false;
+  let overlayChrome = null;
+  let overlayChromeCtx = null;
+  let bgCanvas = null;
+  let bgCtx = null;
+  let contentCanvas = null;
+  let contentCtx = null;
   let drag = null;
   let inlineEditor = null;
   let pendingImageElementId = null;
@@ -32,6 +35,15 @@
   let pendingBackgroundImageId = null;
   let pendingBackgroundWhole = false;
   let uiRenderDepth = 0;
+
+  const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
+  const dirty = { bg: false, content: false, chrome: false, overlay: false, draft: false };
+  const drawStats = { redraws: 0, bg: 0, content: 0, chrome: 0, overlay: 0, geometry: 0 };
+  let redrawRaf = 0;
+  let geometryDirty = false;
+  let overflowCache = null;
+  let syncedPageW = 0;
+  let syncedPageH = 0;
 
   const draft = {
     enabled: false,
@@ -157,35 +169,43 @@
     return model.findElement(state.project, id);
   }
 
+  function surfaceRatio(pageW, pageH) {
+    const requested = Math.min(2, window.devicePixelRatio || 1);
+    const budget = Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, pageW * pageH));
+    return Math.max(0.1, Math.min(requested, budget));
+  }
+
   function syncSurface() {
     const width = Math.max(1, Math.round(state.project.pageSize.width));
     const height = Math.max(1, Math.round(state.project.pageSize.height));
-    if (!surface) return;
-    if (surfaceIsLeafer) {
-      if (surface.width !== width || surface.height !== height) {
-        surface.width = width;
-        surface.height = height;
-        if (typeof surface.__updateSize === 'function') surface.__updateSize();
+    if (!bgCanvas || !contentCanvas) return false;
+    const ratio = surfaceRatio(width, height);
+    const pixelWidth = Math.max(1, Math.round(width * ratio));
+    const pixelHeight = Math.max(1, Math.round(height * ratio));
+    let changed = false;
+    [bgCanvas, contentCanvas].forEach(function (canvas) {
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+        changed = true;
       }
-    } else {
-      if (surface.width !== width || surface.height !== height) {
-        surface.width = width;
-        surface.height = height;
-        surface.style.width = width + 'px';
-        surface.style.height = height + 'px';
+      if (canvas.style.width !== width + 'px' || canvas.style.height !== height + 'px') {
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
       }
-    }
-  }
-
-  function surfaceContext() {
-    if (!surface) return null;
-    if (surfaceIsLeafer) return surface.context;
-    return surface.getContext('2d');
+    });
+    return changed;
   }
 
   function setupSurface() {
     pane = document.getElementById('canvas-pane');
     viewEl = document.getElementById('leafer-view');
+    bgCanvas = document.getElementById('bg-canvas');
+    contentCanvas = document.getElementById('content-canvas');
+    bgCtx = bgCanvas.getContext('2d');
+    contentCtx = contentCanvas.getContext('2d');
+    overlayChrome = document.getElementById('overlay-chrome');
+    overlayChromeCtx = overlayChrome.getContext('2d');
     overlay = document.getElementById('overlay');
     overlayCtx = overlay.getContext('2d');
     scrollEl = document.getElementById('canvas-scroll');
@@ -194,32 +214,7 @@
     zoomOutBtn = document.getElementById('btn-zoom-out');
     zoomInBtn = document.getElementById('btn-zoom-in');
 
-    try {
-      if (window.LeaferUI && window.LeaferUI.Leafer && window.LeaferUI.Canvas) {
-        leafer = new window.LeaferUI.Leafer({ view: viewEl, type: 'design' });
-        surface = new window.LeaferUI.Canvas({
-          width: state.project.pageSize.width,
-          height: state.project.pageSize.height,
-          pixelRatio: Math.min(2, window.devicePixelRatio || 1),
-          fill: '#ffffff'
-        });
-        leafer.add(surface);
-        surfaceIsLeafer = true;
-        return;
-      }
-    } catch (err) {
-      console.warn('LeaferJS 初始化失败，改用普通 canvas。', err);
-      viewEl.innerHTML = '';
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = state.project.pageSize.width;
-    canvas.height = state.project.pageSize.height;
-    canvas.style.width = state.project.pageSize.width + 'px';
-    canvas.style.height = state.project.pageSize.height + 'px';
-    viewEl.appendChild(canvas);
-    surface = canvas;
-    surfaceIsLeafer = false;
+    syncSurface();
   }
 
   function toolbarChromeLeft() {
@@ -250,6 +245,7 @@
 
   function syncGeometry() {
     if (!scrollEl || !stageEl) return;
+    drawStats.geometry += 1;
     const pageW = Math.max(1, state.project.pageSize.width);
     const pageH = Math.max(1, state.project.pageSize.height);
     let previousSize = '';
@@ -284,25 +280,86 @@
     if (scrollEl.scrollTop !== viewport.scrollY) scrollEl.scrollTop = viewport.scrollY;
     viewport.offsetX = viewport.originX - viewport.scrollX;
     viewport.offsetY = viewport.originY - viewport.scrollY;
+    syncedPageW = pageW;
+    syncedPageH = pageH;
     updateZoomUI();
   }
 
-  let reflowPending = false;
-  function scheduleGeometryReflow() {
-    if (reflowPending) return;
-    reflowPending = true;
-    requestAnimationFrame(function () {
-      reflowPending = false;
-      const before = viewport.width + 'x' + viewport.height + ':' + viewport.scale + ':' +
-        viewport.stageWidth + 'x' + viewport.stageHeight;
-      syncGeometry();
-      const after = viewport.width + 'x' + viewport.height + ':' + viewport.scale + ':' +
-        viewport.stageWidth + 'x' + viewport.stageHeight;
-      if (before !== after) {
-        applyViewTransform();
-        drawOverlay();
+  function scheduleRedraw(layers) {
+    const list = layers && layers.length ? layers : ['content', 'overlay'];
+    list.forEach(function (layer) {
+      if (layer === 'bg') {
+        dirty.bg = true;
+      } else if (layer === 'content') {
+        dirty.content = true;
+        dirty.chrome = true;
+        overflowCache = null;
+      } else if (layer === 'chrome') {
+        dirty.chrome = true;
+      } else if (layer === 'overlay') {
+        dirty.overlay = true;
+      } else if (layer === 'all') {
+        dirty.bg = dirty.content = dirty.chrome = dirty.overlay = true;
+        overflowCache = null;
       }
     });
+    if (dirty.bg || dirty.content) dirty.draft = true;
+    requestRedrawFrame();
+  }
+
+  function requestGeometry() {
+    geometryDirty = true;
+    requestRedrawFrame();
+  }
+
+  function requestRedrawFrame() {
+    if (!redrawRaf) redrawRaf = requestAnimationFrame(flushRedraw);
+  }
+
+  function flushRedraw() {
+    redrawRaf = 0;
+    const page = currentPage();
+    if (!page) return;
+    const pageW = state.project.pageSize.width;
+    const pageH = state.project.pageSize.height;
+    if (pageW !== syncedPageW || pageH !== syncedPageH) geometryDirty = true;
+    if (geometryDirty) {
+      geometryDirty = false;
+      syncGeometry();
+      applyViewTransform();
+      syncedPageW = pageW;
+      syncedPageH = pageH;
+    }
+    if (syncSurface()) {
+      dirty.bg = true;
+      dirty.content = true;
+    }
+    if (dirty.bg || dirty.content) layout.beginFrame();
+    drawStats.redraws += 1;
+    if (dirty.bg) {
+      dirty.bg = false;
+      drawBackgroundLayer(page);
+      drawStats.bg += 1;
+    }
+    if (dirty.content) {
+      dirty.content = false;
+      drawContentLayer(page);
+      drawStats.content += 1;
+    }
+    if (dirty.chrome) {
+      dirty.chrome = false;
+      drawChrome(page);
+      drawStats.chrome += 1;
+    }
+    if (dirty.overlay) {
+      dirty.overlay = false;
+      drawOverlayLayer(page);
+      drawStats.overlay += 1;
+    }
+    if (dirty.draft) {
+      dirty.draft = false;
+      scheduleDraftSave();
+    }
   }
 
   function applyViewTransform() {
@@ -314,15 +371,21 @@
     viewEl.style.transformOrigin = '0 0';
     viewEl.style.transform = 'translate(' + viewport.originX + 'px,' + viewport.originY + 'px) scale(' + viewport.scale + ')';
 
-    if (overlay) {
-      const pixelWidth = Math.max(1, Math.round(viewport.width * viewport.dpr));
-      const pixelHeight = Math.max(1, Math.round(viewport.height * viewport.dpr));
-      if (overlay.width !== pixelWidth || overlay.height !== pixelHeight) {
-        overlay.width = pixelWidth;
-        overlay.height = pixelHeight;
-      }
-      overlay.style.width = viewport.width + 'px';
-      overlay.style.height = viewport.height + 'px';
+    sizeViewportCanvas(overlay);
+    sizeViewportCanvas(overlayChrome);
+  }
+
+  function sizeViewportCanvas(canvas) {
+    if (!canvas) return;
+    const pixelWidth = Math.max(1, Math.round(viewport.width * viewport.dpr));
+    const pixelHeight = Math.max(1, Math.round(viewport.height * viewport.dpr));
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    if (canvas.style.width !== viewport.width + 'px' || canvas.style.height !== viewport.height + 'px') {
+      canvas.style.width = viewport.width + 'px';
+      canvas.style.height = viewport.height + 'px';
     }
   }
 
@@ -350,28 +413,35 @@
   }
 
   function redraw() {
-    if (!surface) return;
-    syncGeometry();
-    applyViewTransform();
-    syncSurface();
-    const page = currentPage();
-    if (!page) return;
-    const ctx = surfaceContext();
-    if (!ctx) return;
+    scheduleRedraw(['all']);
+  }
+
+  function preparePageContext(ctx) {
+    const pageW = Math.max(1, state.project.pageSize.width);
+    const pageH = Math.max(1, state.project.pageSize.height);
+    ctx.setTransform(ctx.canvas.width / pageW, 0, 0, ctx.canvas.height / pageH, 0, 0);
+  }
+
+  function drawBackgroundLayer(page) {
+    if (!bgCtx) return;
     const pageW = state.project.pageSize.width;
     const pageH = state.project.pageSize.height;
-    // Leafer backs the logical page with a pixel-ratio-scaled bitmap; draw in
-    // page coordinates so content fills that bitmap instead of its top-left 1/dpr.
-    ctx.setTransform(ctx.canvas.width / pageW, 0, 0, ctx.canvas.height / pageH, 0, 0);
-    ctx.clearRect(0, 0, pageW, pageH);
-    renderer.drawPage(ctx, state.project, page, {
+    preparePageContext(bgCtx);
+    bgCtx.clearRect(0, 0, pageW, pageH);
+    renderer.drawBackground(bgCtx, state.project, page);
+  }
+
+  function drawContentLayer(page) {
+    if (!contentCtx) return;
+    const pageW = state.project.pageSize.width;
+    const pageH = state.project.pageSize.height;
+    preparePageContext(contentCtx);
+    contentCtx.clearRect(0, 0, pageW, pageH);
+    renderer.drawPage(contentCtx, state.project, page, {
       editMode: true,
-      selectedId: state.selection.type === 'element' ? state.selection.id : null
+      selectedId: state.selection.type === 'element' ? state.selection.id : null,
+      includeBackground: false
     });
-    if (surfaceIsLeafer && typeof surface.paint === 'function') surface.paint();
-    drawOverlay();
-    scheduleGeometryReflow();
-    scheduleDraftSave();
   }
 
   function fit() {
@@ -382,8 +452,7 @@
     }
     syncGeometry();
     applyViewTransform();
-    drawOverlay();
-    scheduleGeometryReflow();
+    scheduleRedraw(['chrome', 'overlay']);
   }
 
   function updateZoomUI() {
@@ -424,8 +493,7 @@
     scrollEl.scrollTop = clamp(viewport.originY + pageY * viewport.scale - point.y, 0, maxY);
     syncGeometry();
     applyViewTransform();
-    drawOverlay();
-    scheduleGeometryReflow();
+    scheduleRedraw(['chrome', 'overlay']);
   }
 
   function setZoomPercent(percent) {
@@ -463,7 +531,7 @@
     scrollRaf = requestAnimationFrame(function () {
       scrollRaf = 0;
       syncScrollOffsets();
-      drawOverlay();
+      scheduleRedraw(['chrome', 'overlay']);
     });
   }
 
@@ -504,17 +572,14 @@
     }
     syncGeometry();
     applyViewTransform();
-    drawOverlay();
-    scheduleGeometryReflow();
+    scheduleRedraw(['chrome', 'overlay']);
   }
 
-  function drawOverlay() {
-    if (!overlayCtx) return;
-    const ctx = overlayCtx;
+  function drawChrome(page) {
+    if (!overlayChromeCtx) return;
+    const ctx = overlayChromeCtx;
     ctx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
     ctx.clearRect(0, 0, viewport.width, viewport.height);
-    const page = currentPage();
-    if (!page) return;
     const rect = pageScreenRect();
 
     // Page shadow and border live outside the page container and never export.
@@ -531,8 +596,14 @@
 
     drawMarginGuides(ctx, rect);
     drawOverflow(ctx, page, rect);
-    drawSelection(ctx, page);
     if (!editingBackground()) drawPageSizeHandle(ctx, rect);
+  }
+
+  function drawOverlayLayer(page) {
+    if (!overlayCtx) return;
+    overlayCtx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
+    overlayCtx.clearRect(0, 0, viewport.width, viewport.height);
+    drawSelection(overlayCtx, page);
   }
 
   function drawMarginGuides(ctx, rect) {
@@ -576,8 +647,13 @@
     ];
   }
 
+  function cachedOverflow(page) {
+    if (!overflowCache) overflowCache = renderer.pageOverflow(state.project, page);
+    return overflowCache;
+  }
+
   function drawOverflow(ctx, page, rect) {
-    const overflow = renderer.pageOverflow(state.project, page);
+    const overflow = cachedOverflow(page);
     if (!overflow.length) return;
     ctx.save();
     ctx.strokeStyle = '#dc2626';
@@ -1031,26 +1107,26 @@
     if (drag.type === 'move-background') {
       drag.image.x = Math.round(drag.startX + dx);
       drag.image.y = Math.round(drag.startY + dy);
-      redraw();
+      scheduleRedraw(['bg', 'overlay']);
       return;
     }
 
     if (drag.type === 'move') {
       drag.element.x = Math.round(drag.startX + dx);
       drag.element.y = Math.round(drag.startY + dy);
-      redraw();
+      scheduleRedraw(['content', 'overlay']);
       return;
     }
 
     if (drag.type === 'resize') {
       resizeDrag(dx, dy);
-      redraw();
+      scheduleRedraw(drag.background ? ['bg', 'overlay'] : ['content', 'overlay']);
       return;
     }
 
     if (drag.type === 'divider') {
       dividerDrag(dx);
-      redraw();
+      scheduleRedraw(['content', 'overlay']);
       return;
     }
 
@@ -1059,7 +1135,8 @@
       const height = clamp(drag.startHeight + dy, 320, 5000);
       state.project.pageSize.width = Math.round(width);
       state.project.pageSize.height = Math.round(height);
-      redraw();
+      requestGeometry();
+      scheduleRedraw(['bg', 'content', 'chrome', 'overlay']);
       return;
     }
 
@@ -1069,7 +1146,7 @@
       let delta = horizontal ? dx : dy;
       if (drag.side === 'right' || drag.side === 'bottom') delta = -delta;
       state.project.margins[drag.side] = Math.round(clamp(drag.startValue + delta, 0, max));
-      redraw();
+      scheduleRedraw(['chrome', 'overlay']);
     }
   }
 
@@ -1607,7 +1684,8 @@
   function changed(options) {
     const opts = options || {};
     if (opts.property === false) {
-      redraw();
+      if (layout.invalidate) layout.invalidate();
+      scheduleRedraw(opts.layers || ['content', 'overlay']);
       return;
     }
     ui.renderAll();
@@ -2189,7 +2267,17 @@
     const image = (set.images || []).find(function (item) { return item.id === imageId; });
     if (!image) return;
     image[key] = value;
-    ui.renderAll();
+    const inputIds = {
+      x: 'prop-bg-x',
+      y: 'prop-bg-y',
+      width: 'prop-bg-w',
+      height: 'prop-bg-h',
+      rotation: 'prop-bg-rotation'
+    };
+    const input = inputIds[key] ? document.getElementById(inputIds[key]) : null;
+    if (input) input.value = image[key];
+    if (layout.invalidate) layout.invalidate();
+    scheduleRedraw(['bg', 'overlay']);
   }
 
   function toggleUnifiedBackground(value) {
@@ -2818,6 +2906,30 @@
 
   L.devChecks = function () {
     return layout.devChecks();
+  };
+
+  L.debugStats = function () {
+    return {
+      draws: {
+        redraws: drawStats.redraws,
+        bg: drawStats.bg,
+        content: drawStats.content,
+        chrome: drawStats.chrome,
+        overlay: drawStats.overlay,
+        geometry: drawStats.geometry
+      },
+      layout: layout.getStats ? layout.getStats() : null
+    };
+  };
+
+  L.resetDebugStats = function () {
+    drawStats.redraws = 0;
+    drawStats.bg = 0;
+    drawStats.content = 0;
+    drawStats.chrome = 0;
+    drawStats.overlay = 0;
+    drawStats.geometry = 0;
+    if (layout.resetStats) layout.resetStats();
   };
 
   init().catch(function (err) {
