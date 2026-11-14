@@ -29,6 +29,7 @@ Playlist ("歌单") layout generator — a static web app. **Greenfield**: the r
 - Release build: `./build.sh` rebuilds `dist/` from the single version source `VERSION` and injects `?v=<version>` into every local asset reference in the `dist/index.html` copy. Add `--zip` for `dist/listify-<version>.zip`, and `--pages [--dry-run]` to publish `dist/` (minus the zip) to `origin/gh-pages` after a TTY confirmation. `dist/` is git-ignored and the build never modifies source files.
 - Prefer splitting into a few plain files (e.g. `index.html`, `app.js`, `style.css`) over one giant inline script as the app grows, but keep zero-build semantics. Use classic `<script>`/`<link>` tags: `type="module"` imports are blocked by CORS on `file://`.
 - File imports must go through user-gesture `<input type="file">` / drag-drop; there is no backend and no filesystem access beyond what the browser grants.
+- Preset library is generated, not hand-edited: categories/names/display names live in `presets/manifest.json`, images in `presets/<category>/`; run `./scripts/build-presets.sh` to regenerate `js/presets-data/` (index + one chunk per category). The runtime never reads the config (`file://` forbids it), so a config change without a rebuild never reaches the UI. Script roles are documented in `scripts/README.md`.
 - If the spec is ambiguous (units, DPI, print output, save/export format), ask rather than inventing a convention — none of these are decided yet.
 
 ## graphify

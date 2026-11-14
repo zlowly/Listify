@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "showAll": true,
+  "categories": [
+    {
+      "id": "texture",
+      "name": "纸张纹理",
+      "dir": "texture",
+      "kind": "background",
+      "source": "Pexels",
+      "license": "Pexels License",
+      "images": {
+        "beige-paper.webp": "米色纸",
+        "black-paper.webp": "墨黑纸",
+        "blue-cloth.webp": "蓝布",
+        "clouds.webp": "云绢",
+        "dark-old-paper.webp": "深色旧纸",
+        "parchment.webp": "羊皮纸"
+      }
+    },
+    {
+      "id": "solid",
+      "name": "纯色渐变",
+      "dir": "solid",
+      "kind": "background",
+      "source": "Listify",
+      "license": "CC0",
+      "images": {
+        "paper-light.webp": "浅色纸",
+        "night-dark.webp": "深色夜",
+        "mist-blue.webp": "雾蓝",
+        "dusk-warm.webp": "暖霞"
+      }
+    },
+    {
+      "id": "landscape",
+      "name": "山水风景",
+      "dir": "landscape",
+      "kind": "background",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "images": {
+        "cliffs.webp": "山崖晨雾",
+        "mountains.webp": "青灰群山",
+        "water.webp": "湖光倒影",
+        "night-mountain.webp": "星夜山峦",
+        "crescent-moon.webp": "月下草原",
+        "ink-landscape.webp": "水墨小景"
+      }
+    },
+    {
+      "id": "floral",
+      "name": "花卉植物",
+      "dir": "floral",
+      "kind": "background",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "images": {
+        "white-flower.webp": "白花特写",
+        "botanical.webp": "植物插画",
+        "daffodils.webp": "水仙",
+        "green-leaves.webp": "绿叶",
+        "maple.webp": "秋枫",
+        "tulip-line-art.webp": "粉线郁金香"
+      }
+    },
+    {
+      "id": "pattern",
+      "name": "图案插画",
+      "dir": "pattern",
+      "kind": "background",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "images": {
+        "hearts-pattern.webp": "紫心纹",
+        "hearts-bokeh.webp": "紫心散景",
+        "newsprint.webp": "报纸字纹",
+        "paint-splatter.webp": "彩色泼溅",
+        "watercolor-wash.webp": "水彩晕染",
+        "doodle-icons.webp": "涂鸦图标",
+        "castle.webp": "城堡插画"
+      }
+    },
+    {
+      "id": "overlay",
+      "name": "透明叠层",
+      "dir": "overlay",
+      "kind": "overlay",
+      "source": "Pixabay",
+      "license": "Pixabay Content License",
+      "images": {
+        "rose.webp": "水彩玫瑰",
+        "floral-bunch.webp": "花束",
+        "floral-garland.webp": "花串",
+        "floral-wreath.webp": "花环",
+        "watercolor-bouquet.webp": "水彩花束",
+        "stars.webp": "星点",
+        "vintage-frame.webp": "复古边框",
+        "watercolor-texture.webp": "水彩纹理",
+        "grain-overlay.webp": {
+          "name": "颗粒叠层",
+          "source": "Listify",
+          "license": "CC0"
+        }
+      }
+    }
+  ]
+}

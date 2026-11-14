@@ -1,0 +1,224 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="984" viewBox="0 0 1440 984">
+  <title>预置背景素材库 · 布局稿 v2（最终稿）</title>
+  <style>
+    text { font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; }
+    .t16 { font-size: 16px; font-weight: 700; fill: #1f2937; }
+    .t11b { font-size: 11px; font-weight: 700; fill: #6b7280; letter-spacing: 0.03em; }
+    .lab { font-size: 11px; fill: #6b7280; }
+    .hint { font-size: 10px; fill: #6b7280; }
+    .anno-t { font-size: 12px; font-weight: 700; fill: #1f2937; }
+    .anno { font-size: 11px; fill: #6b7280; }
+    .input { fill: #ffffff; stroke: #cbd2dc; stroke-width: 1; }
+    .divider { stroke: #e2e6ec; stroke-width: 1; stroke-dasharray: 4 3; }
+    .panel { fill: #ffffff; stroke: #e2e6ec; stroke-width: 1; }
+    .thumb { stroke: #d5dae2; stroke-width: 1; }
+    .thumb-sel { stroke: #2563eb; stroke-width: 2; }
+    .tname { font-size: 10px; fill: #6b7280; }
+    .tname-sel { font-size: 10px; fill: #2563eb; font-weight: 700; }
+    .tab { font-size: 11px; fill: #6b7280; }
+    .tab-on { font-size: 11px; fill: #1d4ed8; font-weight: 700; }
+    .mhead { font-size: 12px; font-weight: 700; fill: #1f2937; }
+    .tbl { font-size: 10px; fill: #6b7280; }
+    .tbl-h { font-size: 10px; font-weight: 700; fill: #374151; }
+  </style>
+  <defs>
+    <linearGradient id="gPaper" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8f4ee"/><stop offset="1" stop-color="#efe8dc"/></linearGradient>
+    <linearGradient id="gNight" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#262a45"/><stop offset="1" stop-color="#0d0e18"/></linearGradient>
+    <linearGradient id="gMist" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e2eaf1"/><stop offset="1" stop-color="#c8d6e3"/></linearGradient>
+    <linearGradient id="gBeige" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eadfc9"/><stop offset="1" stop-color="#d8c7a9"/></linearGradient>
+    <linearGradient id="gCloud" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8edf2"/><stop offset="1" stop-color="#ccd9e6"/></linearGradient>
+    <linearGradient id="gBlue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b3c7da"/><stop offset="1" stop-color="#8fa9c4"/></linearGradient>
+    <linearGradient id="gParch" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e7d7b2"/><stop offset="1" stop-color="#d2bb8c"/></linearGradient>
+    <linearGradient id="gDusk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2e0cd"/><stop offset="1" stop-color="#dcc9d0"/></linearGradient>
+    <linearGradient id="gBlack" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2c31"/><stop offset="1" stop-color="#121215"/></linearGradient>
+    <pattern id="checker" width="12" height="12" patternUnits="userSpaceOnUse">
+      <rect width="12" height="12" fill="#ffffff"/>
+      <rect width="6" height="6" fill="#e5e9ef"/>
+      <rect x="6" y="6" width="6" height="6" fill="#e5e9ef"/>
+    </pattern>
+  </defs>
+
+  <rect width="1440" height="984" fill="#e9edf2"/>
+
+  <!-- 标题 -->
+  <text class="t16" x="40" y="48">预置背景素材库 · 布局稿 v2（最终稿）</text>
+  <text x="40" y="70" font-size="11" fill="#6b7280">统一入口：预置 + 本地同一弹窗 · 分类：背景图/透明图 · 点击即应用 · 清单懒加载 · 2026-11-13</text>
+  <rect x="40" y="86" width="80" height="20" rx="999" fill="#dbeafe"/>
+  <text x="80" y="100" font-size="11" fill="#1d4ed8" text-anchor="middle" font-weight="700">最终稿</text>
+
+  <!-- ================= 统一弹窗：选择背景图（640px @ 0.875） ================= -->
+  <rect class="panel" x="40" y="112" width="560" height="780" rx="10"/>
+  <text class="mhead" x="56" y="140">选择背景图</text>
+  <text x="584" y="142" font-size="14" fill="#9ca3af" text-anchor="end">×</text>
+
+  <rect x="56" y="156" width="44" height="24" rx="12" fill="#dbeafe"/>
+  <text class="tab-on" x="78" y="172" text-anchor="middle">全部</text>
+  <rect x="108" y="156" width="58" height="24" rx="12" fill="none" stroke="#e2e6ec" stroke-width="1"/>
+  <text class="tab" x="137" y="172" text-anchor="middle">背景图</text>
+  <rect x="174" y="156" width="58" height="24" rx="12" fill="none" stroke="#e2e6ec" stroke-width="1"/>
+  <text class="tab" x="203" y="172" text-anchor="middle">透明图</text>
+
+  <!-- 网格 3×4：9 背景图 + 2 透明图 + 1 本地瓦片 -->
+  <rect class="thumb" x="68" y="196" width="160" height="132" rx="6" fill="url(#gPaper)"/>
+  <text class="tname" x="148" y="340" text-anchor="middle">浅色纸</text>
+  <rect class="thumb-sel" x="240" y="196" width="160" height="132" rx="6" fill="url(#gNight)"/>
+  <text class="tname-sel" x="320" y="340" text-anchor="middle">深色夜</text>
+  <rect class="thumb" x="412" y="196" width="160" height="132" rx="6" fill="url(#gMist)"/>
+  <text class="tname" x="492" y="340" text-anchor="middle">雾蓝</text>
+
+  <rect class="thumb" x="68" y="348" width="160" height="132" rx="6" fill="url(#gBeige)"/>
+  <text class="tname" x="148" y="492" text-anchor="middle">米色纸</text>
+  <rect class="thumb" x="240" y="348" width="160" height="132" rx="6" fill="url(#gCloud)"/>
+  <text class="tname" x="320" y="492" text-anchor="middle">云纹</text>
+  <rect class="thumb" x="412" y="348" width="160" height="132" rx="6" fill="url(#gBlue)"/>
+  <text class="tname" x="492" y="492" text-anchor="middle">蓝布</text>
+
+  <rect class="thumb" x="68" y="500" width="160" height="132" rx="6" fill="url(#gParch)"/>
+  <text class="tname" x="148" y="644" text-anchor="middle">羊皮纸</text>
+  <rect class="thumb" x="240" y="500" width="160" height="132" rx="6" fill="url(#gDusk)"/>
+  <text class="tname" x="320" y="644" text-anchor="middle">暖霞</text>
+  <rect class="thumb" x="412" y="500" width="160" height="132" rx="6" fill="url(#gBlack)"/>
+  <text class="tname" x="492" y="644" text-anchor="middle">黑纸</text>
+
+  <!-- 透明图：棋盘格衬底示意 alpha -->
+  <rect class="thumb" x="68" y="652" width="160" height="132" rx="6" fill="url(#checker)"/>
+  <g fill="#94a3b8" opacity="0.55">
+    <circle cx="92" cy="684" r="2.5"/><circle cx="120" cy="700" r="2"/><circle cx="150" cy="676" r="3"/>
+    <circle cx="184" cy="704" r="2.5"/><circle cx="206" cy="682" r="2"/><circle cx="104" cy="730" r="3"/>
+    <circle cx="142" cy="742" r="2"/><circle cx="178" cy="752" r="2.5"/><circle cx="204" cy="736" r="2"/>
+    <circle cx="90" cy="762" r="2"/><circle cx="160" cy="774" r="3"/><circle cx="210" cy="766" r="2.5"/>
+  </g>
+  <text class="tname" x="148" y="796" text-anchor="middle">颗粒叠层 · 透明</text>
+
+  <rect class="thumb" x="240" y="652" width="160" height="132" rx="6" fill="url(#checker)"/>
+  <path d="M 252 772 C 280 748, 300 728, 330 700" stroke="#7c9a6d" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M 268 756 C 276 748, 282 744, 292 742" stroke="#7c9a6d" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+  <path d="M 292 730 C 300 724, 308 722, 316 724" stroke="#7c9a6d" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+  <ellipse cx="258" cy="764" rx="8" ry="4" fill="#8fae7f" transform="rotate(-38 258 764)"/>
+  <ellipse cx="284" cy="746" rx="8" ry="4" fill="#8fae7f" transform="rotate(-38 284 746)"/>
+  <ellipse cx="308" cy="722" rx="8" ry="4" fill="#8fae7f" transform="rotate(-38 308 722)"/>
+  <text class="tname" x="320" y="796" text-anchor="middle">花枝角饰 · 透明</text>
+
+  <!-- 本地图片：虚线瓦片 -->
+  <rect x="412" y="652" width="160" height="132" rx="6" fill="#f8fafc" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <circle cx="492" cy="702" r="14" fill="none" stroke="#9ca3af" stroke-width="1.5"/>
+  <path d="M 492 694 L 492 710 M 484 702 L 500 702" stroke="#6b7280" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="492" y="740" font-size="11" fill="#6b7280" text-anchor="middle" font-weight="700">本地图片</text>
+  <text x="492" y="756" font-size="9" fill="#9ca3af" text-anchor="middle">点击选文件 / 支持拖入</text>
+
+  <line class="divider" x1="56" y1="808" x2="584" y2="808"/>
+  <text class="hint" x="56" y="826">点击即应用 · 背景图 → 建/复用「预置·X」集（cover + 建议填充色）· 透明图 → original + 默认不透明度</text>
+  <text class="hint" x="56" y="842">还有 5 个（深色旧纸、光斑角饰、细边框…）随清单加载 · 纯色不入弹窗（填充色在背景集属性编辑）</text>
+
+  <!-- 素材指引链接（中国大陆可直连，GreatFire 2026-11 实测） -->
+  <text x="56" y="870" font-size="10" fill="#6b7280">更多免费素材:</text>
+  <rect x="136" y="856" width="58" height="20" rx="10" fill="#eef2f7" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="165" y="870" font-size="10" fill="#374151" text-anchor="middle">Pixabay</text>
+  <rect x="202" y="856" width="64" height="20" rx="10" fill="#eef2f7" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="234" y="870" font-size="10" fill="#374151" text-anchor="middle">Unsplash</text>
+  <rect x="274" y="856" width="52" height="20" rx="10" fill="#eef2f7" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="300" y="870" font-size="10" fill="#374151" text-anchor="middle">Pexels</text>
+  <rect x="334" y="856" width="80" height="20" rx="10" fill="#eef2f7" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="374" y="870" font-size="10" fill="#374151" text-anchor="middle">OpenGameArt</text>
+
+  <!-- ================= 右栏：三个入口 ================= -->
+  <rect class="panel" x="640" y="112" width="760" height="248" rx="10"/>
+  <text class="t11b" x="656" y="140">三个入口 · 同一弹窗</text>
+
+  <text class="lab" x="656" y="180">页面属性（整套）</text>
+  <rect class="input" x="840" y="162" width="110" height="26" rx="5"/>
+  <text x="848" y="179" font-size="11" fill="#1f2937">背景 A</text>
+  <path d="M 930 172 L 934 176 L 938 172" stroke="#6b7280" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+  <rect x="964" y="162" width="96" height="26" rx="6" fill="#2563eb"/>
+  <text x="1012" y="179" font-size="11" fill="#ffffff" text-anchor="middle" font-weight="700">选择背景图</text>
+
+  <text class="lab" x="656" y="232">图层面板（加图）</text>
+  <rect x="840" y="214" width="150" height="26" rx="5" fill="#f3f6fa" stroke="#e2e6ec" stroke-width="1"/>
+  <text x="848" y="231" font-size="10" fill="#6b7280">▦ 背景 A · 3 页使用</text>
+  <rect x="1000" y="214" width="32" height="26" rx="6" fill="none" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="1016" y="232" font-size="12" fill="#6b7280" text-anchor="middle">＋</text>
+
+  <text class="lab" x="656" y="284">图片属性（替换）</text>
+  <rect x="840" y="266" width="150" height="26" rx="5" fill="#f3f6fa" stroke="#e2e6ec" stroke-width="1"/>
+  <text x="848" y="283" font-size="10" fill="#6b7280">▧ 背景图片 1 · 最适合</text>
+  <rect x="992" y="266" width="64" height="26" rx="6" fill="none" stroke="#cbd2dc" stroke-width="1"/>
+  <text x="1024" y="283" font-size="10" fill="#6b7280" text-anchor="middle">替换图片</text>
+
+  <text class="hint" x="656" y="336">入口决定模式（整套 / 加图 / 替换），内容决定来源（背景图 / 透明图 / 本地）</text>
+
+  <!-- ================= 右栏：行为矩阵 ================= -->
+  <rect class="panel" x="640" y="376" width="760" height="248" rx="10"/>
+  <text class="t11b" x="656" y="404">应用行为（入口 × 内容）</text>
+
+  <text class="tbl-h" x="656" y="432">入口</text>
+  <text class="tbl-h" x="810" y="432">背景图</text>
+  <text class="tbl-h" x="1000" y="432">透明图</text>
+  <text class="tbl-h" x="1180" y="432">本地图片</text>
+  <line class="divider" x1="656" y1="440" x2="1384" y2="440"/>
+
+  <text class="tbl" x="656" y="462">整套（页面属性）</text>
+  <text class="tbl" x="810" y="462">建/复用「预置X」集 cover</text>
+  <text class="tbl" x="810" y="476">+ 建议填充色 → 指派当前页</text>
+  <text class="tbl" x="1000" y="462">建/复用集 = 建议填充色</text>
+  <text class="tbl" x="1000" y="476">+ 该图 original → 指派</text>
+  <text class="tbl" x="1180" y="462">新建集（cover）</text>
+  <text class="tbl" x="1180" y="476">→ 指派当前页</text>
+
+  <text class="tbl" x="656" y="502">加图（图层面板＋）</text>
+  <text class="tbl" x="810" y="502">追加（空集 cover /</text>
+  <text class="tbl" x="810" y="516">非空 original 居中）</text>
+  <text class="tbl" x="1000" y="502">追加（original +</text>
+  <text class="tbl" x="1000" y="516">默认不透明度）</text>
+  <text class="tbl" x="1180" y="502">追加（= 现状行为）</text>
+
+  <text class="tbl" x="656" y="542">替换（图片属性）</text>
+  <text class="tbl" x="810" y="542">替换，保留 fit/不透明度/模糊</text>
+  <text class="tbl" x="1000" y="542">替换，保留参数</text>
+  <text class="tbl" x="1180" y="542">替换（= 现状行为）</text>
+
+  <text class="hint" x="656" y="580">全局模式开启时，整套指派给 unifiedBackgroundId，不覆写各页 backgroundId；</text>
+  <text class="hint" x="656" y="596">应用后所选图片自动选中，可直接进画布微调</text>
+
+  <!-- ================= 右栏：标注 ================= -->
+  <circle cx="656" cy="668" r="9" fill="#2563eb"/>
+  <text x="656" y="672" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+  <text class="anno-t" x="674" y="672">点击即应用 + toast</text>
+  <text class="anno" x="674" y="690">建议填充色为深色时提示调亮歌名颜色，不改数据</text>
+
+  <circle cx="656" cy="740" r="9" fill="#2563eb"/>
+  <text x="656" y="744" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+  <text class="anno-t" x="674" y="744">背景集去重</text>
+  <text class="anno" x="674" y="762">自动命名「预置·X」：同名直接指派，异名新建</text>
+
+  <circle cx="656" cy="812" r="9" fill="#2563eb"/>
+  <text x="656" y="816" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+  <text class="anno-t" x="674" y="816">透明图 = 带 alpha 的 PNG 叠层</text>
+  <text class="anno" x="674" y="834">默认 original 放置 + 清单默认不透明度；缩略图棋盘格示意</text>
+
+  <circle cx="1000" cy="668" r="9" fill="#2563eb"/>
+  <text x="1000" y="672" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+  <text class="anno-t" x="1018" y="672">清单懒加载（约 3.5MB）</text>
+  <text class="anno" x="1018" y="690">首次开弹窗才注入 js/presets-data.js；file:// 下 script 标签</text>
+  <text class="anno" x="1018" y="706">不受 CORS 限制，不进首屏</text>
+
+  <circle cx="1000" cy="740" r="9" fill="#2563eb"/>
+  <text x="1000" y="744" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+  <text class="anno-t" x="1018" y="744">物化进现有资产管线</text>
+  <text class="anno" x="1018" y="762">base64→blob 走 addFile（hash 去重）；项目 JSON 自包含，</text>
+  <text class="anno" x="1018" y="778">模型/持久化零改动</text>
+
+  <circle cx="1000" cy="812" r="9" fill="#2563eb"/>
+  <text x="1000" y="816" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+  <text class="anno-t" x="1018" y="816">本地图片入口</text>
+  <text class="anno" x="1018" y="834">网格末尾虚线瓦片：点击选文件 / 支持拖入，沿用现有读取链路</text>
+
+  <circle cx="656" cy="878" r="9" fill="#2563eb"/>
+  <text x="656" y="882" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+  <text class="anno-t" x="674" y="874">素材指引（弹窗底部）</text>
+  <text class="anno" x="674" y="890">新标签页打开  应用零请求  必须大陆可直连（GreatFire 2026-11 实测）</text>
+
+  <!-- 已排除 -->
+  <rect x="40" y="900" width="1360" height="64" rx="8" fill="#fef2f2" stroke="#fecaca" stroke-width="1"/>
+  <text x="56" y="924" font-size="11" fill="#b91c1c">✗ 已排除：file:// 直接引盘上文件 —— 本地图画进 canvas 会污染画布，toBlob 回调永不触发，PNG 导出无限挂起（HeadlessChrome 157 实测）；预置素材内嵌 base64（data: URL），经现有 addBlob 链路转 blob: 后使用</text>
+  <text x="56" y="948" font-size="11" fill="#b91c1c">✗ 已排除：弹窗内纯色选项（填充色在背景集属性编辑）· 每个入口拆「预置/本地」双按钮（统一为「选择背景图」单一入口）</text>
+</svg>

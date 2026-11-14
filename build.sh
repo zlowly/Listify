@@ -101,9 +101,27 @@ read_version() {
 }
 
 copy_file() {
+  # 目录按递归处理，便于调用方直接传入 js/ 这类目录
+  if [[ -d "$1" ]]; then
+    local f
+    while IFS= read -r -d '' f; do
+      copy_file "$f"
+    done < <(find "$1" -type f -print0)
+    return 0
+  fi
   [[ -f "$1" ]] || die "缺少源文件: $1"
   mkdir -p "$DIST_DIR/$(dirname "$1")"
   cp -p "$1" "$DIST_DIR/$1"
+}
+
+copy_tree() {
+  local root="$1" f count=0
+  [[ -d "$root" ]] || die "缺少源目录: $root"
+  while IFS= read -r -d '' f; do
+    copy_file "$f"
+    count=$((count + 1))
+  done < <(find "$root" -type f -print0)
+  ((count > 0)) || die "$root/ 目录未枚举到任何文件"
 }
 
 inject_version() {
@@ -134,6 +152,66 @@ inject_version() {
   echo "版本注入: $after 处本地资源引用 -> ?v=$VER"
 }
 
+inject_presets_version() {
+  local file="$DIST_DIR/js/presets.js"
+  [[ -f "$file" ]] || die "缺少产物文件: js/presets.js"
+  grep -qE "DATA_VER[[:space:]]*=[[:space:]]*['\"]" "$file" ||
+    die "js/presets.js 未找到 DATA_VER 常量，版本注入中止"
+  # 索引与分类块共用该常量，只改写值，保留原有引号风格
+  sed -i -E \
+    "s#(DATA_VER[[:space:]]*=[[:space:]]*['\"])[^'\"]*(['\"])#\1?v=${VER}\2#g" \
+    "$file"
+  grep -qE "DATA_VER[[:space:]]*=[[:space:]]*['\"]\?v=${VER}['\"]" "$file" ||
+    die "js/presets.js 版本注入失败（DATA_VER 应为 ?v=$VER）"
+  echo "版本注入: js/presets.js DATA_VER -> ?v=$VER"
+}
+
+check_preset_chunks() {
+  local index="js/presets-data/index.js"
+  [[ -f "$index" ]] || die "缺少预置索引: $index"
+  [[ -f "$DIST_DIR/js/presets-data/index.js" ]] ||
+    die "产物缺少预置索引: js/presets-data/index.js"
+
+  local raw
+  raw=$(tr '\n\r' '  ' <"$index" |
+    grep -oE 'chunks"?[[:space:]]*:[[:space:]]*\[[^]]*\]' | head -n 1 || true)
+  [[ -n "$raw" ]] || die "预置索引未声明 chunks 数组，无法校验分类块完整性"
+
+  local list="${raw#*[}"
+  list="${list%]*}"
+
+  local ids=() id
+  while IFS= read -r id; do
+    id=$(printf '%s' "$id" | sed -E 's/[^A-Za-z0-9_-]//g')
+    if [[ -n "$id" ]]; then
+      ids+=("$id")
+    fi
+  done < <(printf '%s\n' "$list" | tr ',' '\n')
+  ((${#ids[@]} > 0)) || die "预置索引的 chunks 为空，无法校验分类块完整性"
+
+  local missing=()
+  for id in "${ids[@]}"; do
+    [[ -f "$DIST_DIR/js/presets-data/$id.js" ]] || missing+=("$id")
+  done
+  if ((${#missing[@]} > 0)); then
+    die "预置分类块缺失: ${missing[*]}（索引 chunks 已声明，应在 js/presets-data/<分类>.js 提供）"
+  fi
+  echo "分类块校验: ${#ids[@]} 个（${ids[*]}）均存在于产物"
+}
+
+assert_dist_clean() {
+  local bad=() p
+  for p in scripts presets js/presets-data.js; do
+    if [[ -e "$DIST_DIR/$p" ]]; then
+      bad+=("$p")
+    fi
+  done
+  if ((${#bad[@]} > 0)); then
+    die "产物包含不应发布的开发期文件: ${bad[*]}（scripts/、presets/ 与旧预置单文件不得进入产物）"
+  fi
+  echo "产物清洁检查: 不含 scripts/、presets/ 与 js/presets-data.js"
+}
+
 build_dist() {
   BUILD_STARTED=1
   rm -rf "$DIST_DIR"
@@ -146,19 +224,14 @@ build_dist() {
     copy_file "$f"
   done
 
-  shopt -s nullglob
-  local js_files=(js/*)
-  local vendor_files=(vendor/*)
-  shopt -u nullglob
-
-  ((${#js_files[@]} > 0)) || die "js/ 目录未枚举到任何文件"
-  ((${#vendor_files[@]} > 0)) || die "vendor/ 目录未枚举到任何文件"
-
-  for f in "${js_files[@]}" "${vendor_files[@]}"; do
-    copy_file "$f"
-  done
+  # 递归拷贝运行时脚本与第三方库，保留子目录结构（如 js/presets-data/）
+  copy_tree js
+  copy_tree vendor
 
   inject_version
+  inject_presets_version
+  check_preset_chunks
+  assert_dist_clean
 
   BUILD_STARTED=0
   echo "产物目录: $DIST_DIR/"

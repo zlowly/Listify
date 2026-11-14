@@ -12,6 +12,7 @@
 - **分类块**：标题与歌名两个子分区可分别设置字体列表、字号、粗细、颜色、行距、对齐、阴影与轮廓；新建块继承同页最近同类型块的文字样式快照。
 - **多页画布**：页面增删切换、页面尺寸与四边边距（数值输入或画布拖拽）、10%–400% 缩放、适应窗口。
 - **背景层**：项目级背景库，每套背景由有序图片叠加 + 填充色组成；单图支持原大小/横向占满/竖向占满/最适合/自定义、透明度、模糊、旋转；支持项目级全局背景（非破坏性覆盖、固化到所有页、本页独立副本）。
+- **预置背景库**：背景选择弹窗内置 38 个免费素材，按 6 个分类组织（纸张纹理、纯色渐变、山水风景、花卉植物、图案插画、透明叠层），点击即可应用/加图/替换；分类与显示名由 `presets/manifest.json` 配置；素材来源与许可见 `presets/SOURCES.md`。
 - **自由文字与自由图片**：自由图片可从文件添加或 `Ctrl/Cmd + V` 粘贴剪贴板图片，支持位置/尺寸数值编辑、旋转、透明度、模糊与等比缩放开关。
 - **导出**：PNG 支持当前页/所有页、完整页面/仅歌单层透明底，多页自动打包为 ZIP。
 - **本地草稿**：项目结构存 `localStorage`，图片资产存 `IndexedDB`，刷新或重新打开自动恢复；项目可导出/导入 JSON（含旧版文件迁移）用于备份与跨浏览器迁移。
@@ -71,8 +72,11 @@ Listify/
 │   ├── export.js       # PNG / ZIP 导出
 │   ├── zip.js          # 纯 JS ZIP 打包
 │   ├── fontpicker.js   # 本机字体选择
-│   └── clipboard-image.js
+│   ├── clipboard-image.js
+│   └── presets-data/   # 预置索引与分类数据块（打包生成文件，勿手改）
 ├── vendor/             # 随仓库分发的 LeaferJS UMD（唯一运行时依赖）
+├── presets/            # 预置素材（6 个分类目录）、manifest.json 配置与 SOURCES.md
+├── scripts/            # 开发期脚本：预置打包与自产素材生成（见 scripts/README.md）
 ├── samples/            # 示例歌单与测试素材
 ├── docs/               # 原始需求文档
 ├── openspec/           # 能力规范（specs）与已归档变更
@@ -114,6 +118,23 @@ Listify/
 - 自动草稿依赖当前浏览器的本地存储，可能因清除浏览数据、更换浏览器配置或存储压力而丢失；重要项目请使用「导出项目」生成本地 JSON 备份。
 - 仅保证 Chrome 下的使用体验，不做跨浏览器兼容承诺。
 
+## 预置素材与推荐素材库
+
+「选择背景图」弹窗内置 38 个免费预置素材，按 6 个分类组织：纸张纹理 6、纯色渐变 4、山水风景 6、花卉植物 6、图案插画 7、透明叠层 9。整版背景图应用后自动新建/复用同名预置背景集并指派当前页；透明叠层默认以原大小加入当前背景集，作为覆盖装饰；本地图片仍走原有文件选择流程。打开弹窗只加载索引（缩略图与元数据），各分类素材按需加载，`file://` 下离线可用。
+
+分类、分类名与每张图的显示名由 `presets/manifest.json` 决定；改完必须运行 `scripts/build-presets.sh` 重新打包才生效（弹窗运行时不读配置文件，这是 `file://` 的限制）。
+
+- 素材来源与许可：`presets/SOURCES.md`（Pexels 照片遵循 Pexels License；Pixabay 素材遵循 Pixabay Content License；Listify 自产 5 张为 CC0）
+- 新增/替换素材、改分类名、改自产素材外观、发版分别用哪个脚本：`scripts/README.md`
+- 推荐补充素材库（免费可商用，中国大陆可直连）：
+  - [Pexels](https://www.pexels.com/) — 照片，Pexels License
+  - [Pixabay](https://pixabay.com/) — 照片与插画，Pixabay Content License
+  - [Unsplash](https://unsplash.com/) — 照片，Unsplash License
+  - [OpenGameArt](https://opengameart.org/) — 游戏美术素材，单件许可需逐一确认（优先选 CC0）
+- 在线生成纹理（免费、免登录；导出 PNG 后直接拖入弹窗，建议 1080×1920，2 倍图 2160×3840）：
+  - [Creatica](https://creatica.app/backgrounds) — 59 种无缝纹理 / 图案 / 渐变生成器，SVG 与 PNG 导出
+  - [Haikei](https://app.haikei.app/) — 波形、渐变、低多边形等参数化背景，可自定义画布尺寸与配色
+
 ## 文档
 
 - 原始需求：`docs/歌单生成器需求.md`
@@ -127,5 +148,7 @@ Listify/
 本项目采用 [MIT License](LICENSE) 发布。
 
 `vendor/` 目录中的 LeaferJS 属于第三方依赖，遵循其自身许可，不在本项目的 MIT 许可范围内；再分发时请保留其原始许可声明。
+
+`presets/` 目录内嵌的免费照片与插画遵循各自许可（详见 `presets/SOURCES.md`）：Pexels 素材遵循 Pexels License，Pixabay 素材遵循 Pixabay Content License，均不在本项目 MIT 许可范围内；再分发时请保留其原始许可声明。
 
 当前版本：`1.0.0`

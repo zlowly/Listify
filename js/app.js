@@ -30,6 +30,7 @@
   let pendingImageElementId = null;
   let pendingBackgroundSetId = null;
   let pendingBackgroundImageId = null;
+  let pendingBackgroundWhole = false;
   let uiRenderDepth = 0;
 
   const draft = {
@@ -1929,8 +1930,10 @@
     if (!file) return;
     const setId = pendingBackgroundSetId;
     const imageId = pendingBackgroundImageId;
+    const whole = pendingBackgroundWhole;
     pendingBackgroundSetId = null;
     pendingBackgroundImageId = null;
+    pendingBackgroundWhole = false;
     const set = model.findBackground(state.project, setId) ||
       model.effectiveBackground(state.project, currentPage());
     if (!set) return;
@@ -1960,10 +1963,181 @@
         state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
       }
       ui.renderAll();
-      ui.toast('背景图片已更新。');
+      if (whole) {
+        const page = currentPage();
+        if (page) page.backgroundId = set.id;
+        state.selection = { type: 'page' };
+        ui.toast('已创建背景“' + set.name + '”并应用到当前页。');
+      } else {
+        ui.toast('背景图片已更新。');
+      }
     } catch (err) {
       if (assetId) L.assets.remove(assetId);
       ui.toast('背景图片读取失败：' + err.message, 'error');
+    }
+  }
+
+  // 整套模式本地链路：先新建背景集，再选图；选图后 handleBackgroundFile 加图并把该集指派当前页。
+  function pickBackgroundImageWhole() {
+    const set = addBackgroundSet();
+    pendingBackgroundSetId = set.id;
+    pendingBackgroundImageId = null;
+    pendingBackgroundWhole = true;
+    const input = document.getElementById('bg-file');
+    input.value = '';
+    input.click();
+  }
+
+  // 预置弹窗拖入的图片文件：按模式直接处理（不走文件选择框）。
+  async function handleDroppedBackgroundFile(mode, context, file) {
+    if (!file) return;
+    const ctx = context || {};
+    if (mode === 'whole') {
+      const set = addBackgroundSet();
+      pendingBackgroundSetId = set.id;
+      pendingBackgroundImageId = null;
+      pendingBackgroundWhole = true;
+    } else {
+      pendingBackgroundSetId = ctx.setId || null;
+      pendingBackgroundImageId = mode === 'replace' ? (ctx.imageId || null) : null;
+    }
+    await handleBackgroundFile(file);
+  }
+
+  // 预置素材应用处理器：base64 物化进现有资产管线（addFile 内容哈希去重），再按模式写入。
+  async function applyPreset(preset, mode, context) {
+    if (!preset) return;
+    // 索引项只有缩略图：应用前先补齐完整图数据；失败时提示并保持背景库/页面背景不变。
+    if (!preset.data) {
+      try {
+        await L.presets.hydrate(preset);
+      } catch (err) {
+        ui.toast('预置素材加载失败：' + (err && err.message ? err.message : '未知错误') + '，请重试。', 'error');
+        return;
+      }
+    }
+    if (!preset.data) return;
+    const ctx = context || {};
+    let assetId;
+    let loaded = null;
+    try {
+      const raw = String(preset.data);
+      const comma = raw.indexOf(',');
+      const match = /^data:(image\/[a-z0-9.+-]+)/i.exec(raw);
+      const mime = match ? match[1] : 'image/png';
+      const blob = model.base64ToBlob(raw.slice(comma + 1), mime);
+      assetId = await L.assets.addFile(new File([blob], preset.name, { type: mime }));
+      loaded = await L.assets.loadImage(assetId);
+      model.ensureAssetMeta(state.project, assetId, preset.name, mime);
+      await persistDraftAssetQuietly(assetId);
+    } catch (err) {
+      ui.toast('预置素材应用失败：' + err.message, 'error');
+      return;
+    }
+    try {
+      if (mode === 'whole') applyPresetWhole(preset, assetId);
+      else if (mode === 'add') applyPresetAdd(preset, ctx, assetId);
+      else if (mode === 'replace') applyPresetReplace(preset, ctx, assetId, loaded);
+    } catch (err) {
+      ui.toast('预置素材应用失败：' + err.message, 'error');
+    }
+  }
+
+  // 预置图片加入背景集：同内容哈希复用已有层，避免重复。
+  function addPresetImage(set, preset, assetId, mode) {
+    let image = (set.images || []).find(function (img) { return img.assetId === assetId; }) || null;
+    if (!image) {
+      let fit;
+      if (preset.kind === 'overlay') fit = 'original';
+      else if (mode === 'add' && (set.images || []).length > 0) fit = 'original';
+      else fit = 'cover';
+      image = model.createBackgroundImage(assetId, fit);
+      image.opacity = preset.opacity == null ? 1 : preset.opacity;
+      set.images.push(image);
+    }
+    return image;
+  }
+
+  // 整套模式：建/复用「预置 · X」背景集（同名指派、异名新建，新建时取建议填充色），
+  // 全局开启 → 指派 unifiedBackgroundId（不覆写各页 backgroundId），关闭 → 指派当前页。
+  function applyPresetWhole(preset, assetId) {
+    const name = '预置 · ' + preset.name;
+    let set = (state.project.backgrounds || []).find(function (item) { return item.name === name; }) || null;
+    const isNew = !set;
+    if (isNew) {
+      set = model.createBackgroundSet(name);
+      set.color = preset.color || '#ffffff';
+      state.project.backgrounds.push(set);
+    }
+    const image = addPresetImage(set, preset, assetId, 'whole');
+    if (state.project.unifiedBackground) {
+      state.project.unifiedBackgroundId = set.id;
+    } else {
+      const page = currentPage();
+      if (page) page.backgroundId = set.id;
+    }
+    state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
+    ui.renderAll();
+    ui.toast(isNew ? '已创建背景“' + name + '”并应用到当前页。' : '已应用背景“' + name + '”。');
+    notifyDarkPreset(preset);
+  }
+
+  // 加图模式：追加到入口指定的背景集（缺失时回退当前页生效背景）。
+  function applyPresetAdd(preset, ctx, assetId) {
+    const set = model.findBackground(state.project, ctx.setId) ||
+      model.effectiveBackground(state.project, currentPage());
+    if (!set) {
+      ui.toast('没有可添加图片的背景。', 'error');
+      return;
+    }
+    const image = addPresetImage(set, preset, assetId, 'add');
+    state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
+    ui.renderAll();
+    ui.toast('已添加预置图片“' + preset.name + '”。');
+    notifyDarkPreset(preset);
+  }
+
+  // 替换模式：换 assetId，保留 fit/自定义矩形/不透明度/模糊/顺序。
+  function applyPresetReplace(preset, ctx, assetId, loaded) {
+    const set = model.findBackground(state.project, ctx.setId);
+    const target = set && (set.images || []).find(function (img) { return img.id === ctx.imageId; }) || null;
+    if (!set || !target) {
+      ui.toast('找不到要替换的背景图片。', 'error');
+      return;
+    }
+    const oldAssetId = target.assetId;
+    target.assetId = assetId;
+    if (target.fit === 'none' && loaded) {
+      const rect = renderer.backgroundImageRect(state.project.pageSize, target, loaded);
+      target.width = target.width > 0 ? target.width : rect.width;
+      target.height = target.height > 0 ? target.height : rect.height;
+    }
+    if (oldAssetId && oldAssetId !== assetId) releaseUnusedAsset(oldAssetId);
+    state.selection = { type: 'backgroundImage', setId: set.id, imageId: target.id };
+    ui.renderAll();
+    ui.toast('已替换为“' + preset.name + '”。');
+    notifyDarkPreset(preset);
+  }
+
+  // 建议填充色相对亮度（sRGB → 线性）；深色预置应用后仅提示，不改数据。
+  function relativeLuminance(hex) {
+    const match = /^#?([0-9a-fA-F]{6})$/.exec(String(hex == null ? '' : hex).trim());
+    if (!match) return 1;
+    const value = parseInt(match[1], 16);
+    const channels = [
+      (value >> 16) & 255,
+      (value >> 8) & 255,
+      value & 255
+    ].map(function (channel) {
+      channel /= 255;
+      return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  }
+
+  function notifyDarkPreset(preset) {
+    if (relativeLuminance(preset.color) < 0.35) {
+      ui.toast('当前预置偏暗，建议调亮歌名文字颜色以保证可读性。');
     }
   }
 
@@ -2613,7 +2787,10 @@
     deleteBackgroundSet: deleteBackgroundSet,
     setPageBackground: setPageBackground,
     pickBackgroundImage: pickBackgroundImage,
+    pickBackgroundImageWhole: pickBackgroundImageWhole,
     handleBackgroundFile: handleBackgroundFile,
+    handleDroppedBackgroundFile: handleDroppedBackgroundFile,
+    applyPreset: applyPreset,
     deleteBackgroundImage: deleteBackgroundImage,
     moveBackgroundImage: moveBackgroundImage,
     setBackgroundImageFit: setBackgroundImageFit,
