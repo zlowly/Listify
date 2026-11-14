@@ -8,7 +8,9 @@
   const ui = {
     activePanel: 'categories',
     els: {},
-    initialized: false
+    initialized: false,
+    /* 分组折叠状态：<selectionKey>::<groupKey> → 是否收起，仅本页会话内记忆 */
+    groupCollapse: Object.create(null)
   };
 
   function esc(value) {
@@ -30,15 +32,82 @@
       helpTip(tip) + '</div>';
   }
 
-  function fieldPair(labelA, controlA, labelB, controlB) {
+  function fieldPair(labelA, controlA, labelB, controlB, extraClass) {
     const half = function (cls, label, control) {
       const match = / id="([^"]+)"/.exec(control);
       const forAttr = match ? ' for="' + match[1] + '"' : '';
       return '<div class="field ' + cls + '"><label' + forAttr + '>' + esc(label) + '</label><div class="control">' + control + '</div></div>';
     };
-    return '<div class="field-row">' +
+    return '<div class="field-row' + (extraClass ? ' ' + extraClass : '') + '">' +
       half('field-a', labelA, controlA) + half('field-b', labelB, controlB) +
       '</div>';
+  }
+
+  /* 当前选中对象的稳定键，用于按对象隔离折叠记忆 */
+  function selectionKey() {
+    const state = L.app && L.app.state;
+    if (!state || !state.selection) return 'none';
+    const selection = state.selection;
+    if (selection.type === 'element') return 'el:' + selection.id;
+    if (selection.type === 'backgroundSet') return 'bgset:' + selection.setId;
+    if (selection.type === 'backgroundImage') return 'bgimg:' + selection.setId + ':' + selection.imageId;
+    return 'page:' + (state.currentPageId || '');
+  }
+
+  /* 无记忆时：仅分类名子分区在分类名隐藏时默认收起 */
+  function defaultCollapsed(groupKey) {
+    if (groupKey !== 'title') return false;
+    const state = L.app && L.app.state;
+    if (!state || !state.selection || state.selection.type !== 'element') return false;
+    const page = L.app.currentPage();
+    if (!page) return false;
+    const element = page.elements.find(function (item) { return item.id === state.selection.id; });
+    return !!element && element.type === 'category' && element.showTitle === false;
+  }
+
+  function isCollapsed(groupKey) {
+    const key = selectionKey() + '::' + groupKey;
+    if (key in ui.groupCollapse) return ui.groupCollapse[key];
+    return defaultCollapsed(groupKey);
+  }
+
+  function syncGroupDom(groupKey, collapsed) {
+    const section = ui.els.propertyPanel.querySelector('.prop-group[data-group="' + groupKey + '"]');
+    if (!section) return;
+    section.classList.toggle('is-collapsed', collapsed);
+    const toggle = section.querySelector('.prop-group-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    const body = section.querySelector('.prop-group-body');
+    if (body) body.hidden = collapsed;
+  }
+
+  /* 写状态表并就地同步 DOM，不整块重渲染；供折叠按钮与显示开关共用 */
+  function setGroupCollapsed(groupKey, collapsed) {
+    collapsed = !!collapsed;
+    ui.groupCollapse[selectionKey() + '::' + groupKey] = collapsed;
+    syncGroupDom(groupKey, collapsed);
+  }
+
+  /* 统一分组卡片：标题条内是折叠按钮（名称 + 箭头），右侧状态内容留在按钮外，
+     避免帮助图标等交互控件嵌套进按钮 */
+  function propGroup(key, titleHtml, bodyHtml, options) {
+    const opts = options || {};
+    if (opts.plain) {
+      return '<section class="prop-group prop-group-plain" data-group="' + esc(key) + '">' + bodyHtml + '</section>';
+    }
+    const collapsed = isCollapsed(key);
+    const bodyId = 'prop-group-body-' + key;
+    return '<section class="prop-group' + (collapsed ? ' is-collapsed' : '') + '" data-group="' + esc(key) + '">' +
+      '<div class="prop-group-title">' +
+        '<button type="button" class="prop-group-toggle" aria-expanded="' + (collapsed ? 'false' : 'true') +
+          '" aria-controls="' + bodyId + '">' +
+          '<span class="prop-group-name">' + titleHtml + '</span>' +
+        '</button>' +
+        (opts.right ? '<span class="title-right">' + opts.right + '</span>' : '') +
+        '<span class="prop-group-chevron" aria-hidden="true"></span>' +
+      '</div>' +
+      '<div class="prop-group-body" id="' + bodyId + '"' + (collapsed ? ' hidden' : '') + '>' + bodyHtml + '</div>' +
+      '</section>';
   }
 
   function helpTip(text) {
@@ -85,8 +154,9 @@
       (disabled ? ' disabled' : '') + '>';
   }
 
-  function selectInput(id, options, value, disabled) {
-    return '<select id="' + id + '" class="select"' + (disabled ? ' disabled' : '') + '>' + options.map(function (option) {
+  function selectInput(id, options, value, disabled, extraClass) {
+    return '<select id="' + id + '" class="select' + (extraClass ? ' ' + extraClass : '') + '"' +
+      (disabled ? ' disabled' : '') + '>' + options.map(function (option) {
       const val = typeof option === 'string' ? option : option.value;
       const label = typeof option === 'string' ? option : option.label;
       return '<option value="' + esc(val) + '"' + (String(val) === String(value) ? ' selected' : '') + '>' +
@@ -102,13 +172,13 @@
 
   function weightOptions() {
     return [
-      { value: '300', label: '细体 300' },
-      { value: '400', label: '常规 400' },
-      { value: '500', label: '中等 500' },
-      { value: '600', label: '半粗 600' },
-      { value: '700', label: '粗体 700' },
-      { value: '800', label: '特粗 800' },
-      { value: '900', label: '黑体 900' }
+      { value: '300', label: '细体' },
+      { value: '400', label: '常规' },
+      { value: '500', label: '中等' },
+      { value: '600', label: '半粗' },
+      { value: '700', label: '粗体' },
+      { value: '800', label: '特粗' },
+      { value: '900', label: '黑体' }
     ];
   }
 
@@ -326,6 +396,16 @@
       if (!target || !target.matches || !target.matches('input[type=number][data-ctrl-step]')) return;
       event.preventDefault();
       ctrlStepNumber(target, event.key === 'ArrowUp' ? 1 : -1);
+    });
+    /* 分组折叠：委托到面板容器，跨 innerHTML 重建存活；按钮原生支持 Enter/Space */
+    ui.els.propertyPanel.addEventListener('click', function (event) {
+      const toggle = event.target.closest && event.target.closest('.prop-group-toggle');
+      if (!toggle) return;
+      const section = toggle.closest('.prop-group');
+      if (!section) return;
+      const groupKey = section.getAttribute('data-group');
+      if (!groupKey) return;
+      setGroupCollapsed(groupKey, toggle.getAttribute('aria-expanded') === 'true');
     });
     ui.els.selectionLabel = document.getElementById('selection-label');
     ui.els.emptyHint = document.getElementById('empty-hint');
@@ -773,27 +853,20 @@
     const project = L.app.state.project;
     const pageIndex = project.pages.indexOf(page);
     ui.els.propertyPanel.innerHTML =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">当前页' + helpTip('页面尺寸与边距为全局设置。') + '</div>' +
-        '<p class="hint">第 ' + (pageIndex + 1) + ' 页 / 共 ' + project.pages.length + ' 页。</p>' +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">页面尺寸</div>' +
+      propGroup('page', '当前页',
+        '<p class="hint">第 ' + (pageIndex + 1) + ' 页 / 共 ' + project.pages.length + ' 页。</p>',
+        { right: helpTip('页面尺寸与边距为全局设置。') }) +
+      propGroup('size', '页面尺寸',
         fieldPair(
-          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1, false, 10) + '<span class="unit">px</span>',
-          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1, false, 10) + '<span class="unit">px</span>'
+          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1, false, 10),
+          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1, false, 10)
         ) +
         '<div class="inline-actions"><button id="prop-orient-portrait" class="btn btn-sm">纵向 1080×1920</button>' +
-        '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>' +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">页面边距' + helpTip('仅参考线') + '</div>' +
-        marginCross(project.margins, 'prop-margin-') +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">页面背景' + helpTip(project.unifiedBackground
-          ? '全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。'
-          : '背景位于内容下方，可在图层中选中后编辑。') + '</div>' +
+        '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>') +
+      propGroup('margins', '页面边距',
+        marginCross(project.margins, 'prop-margin-'),
+        { right: helpTip('仅参考线') }) +
+      propGroup('background', '页面背景',
         field('当前页背景', selectInput('prop-page-bg', backgroundOptions(project), page.backgroundId, project.unifiedBackground)) +
         field('', '<label class="check-row"><input id="prop-unified" type="checkbox"' +
           (project.unifiedBackground ? ' checked' : '') + '> 所有页面使用同一背景</label>') +
@@ -801,12 +874,13 @@
         '<div class="inline-actions">' +
           '<button id="prop-bg-pick" class="btn btn-sm">选择背景图</button>' +
           '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
-        '</div>' +
-      '</div>' +
-      '<div class="prop-group">' +
+        '</div>',
+        { right: helpTip(project.unifiedBackground
+          ? '全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。'
+          : '背景位于内容下方，可在图层中选中后编辑。') }) +
+      propGroup('actions', '',
         '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
-          helpTip('在画布或图层面板中选择内容后可删除。') + '</div>' +
-      '</div>';
+          helpTip('在画布或图层面板中选择内容后可删除。') + '</div>', { plain: true });
 
     bind('prop-page-w', 'change', function () {
       L.app.setPageSize(Number(valueOf('prop-page-w')), project.pageSize.height);
@@ -868,31 +942,28 @@
         ? '第 ' + (pageIndex + 1) + ' 页正在使用；另有 ' + Math.max(0, referenceCount - 1) + ' 页使用同一背景。'
         : '当前没有页面使用该背景。');
     ui.els.propertyPanel.innerHTML =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">背景组' + (isGlobal ? ' <span class="pill pill-blue">全局</span>' : '') + '</div>' +
+      propGroup('set', '背景组',
         '<p class="hint">' + esc(usage) + '</p>' +
         field('名称', textInput('prop-bg-name', set.name, '背景名称')) +
-        field('填充色', colorInput('prop-bg-set-color', set.color || '#ffffff')) +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">图片<span class="title-right"><span class="hint">' + (set.images || []).length + ' 张</span>' +
-          helpTip('图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。') + '</span></div>' +
+        field('填充色', colorInput('prop-bg-set-color', set.color || '#ffffff')),
+        { right: isGlobal ? '<span class="pill pill-blue">全局</span>' : '' }) +
+      propGroup('images', '图片',
         '<div class="inline-actions">' +
           '<button id="prop-bg-add-image" class="btn btn-sm">添加图片</button>' +
           '<button id="prop-bg-duplicate" class="btn btn-sm">复制背景</button>' +
           '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
           '<button id="prop-bg-delete" class="btn btn-sm btn-danger"' + (check.ok ? '' : ' disabled title="' + esc(check.reason) + '"') + '>删除背景</button>' +
         '</div>' +
-        (check.ok ? '' : '<p class="hint">' + esc(check.reason) + '</p>') +
-      '</div>' +
+        (check.ok ? '' : '<p class="hint">' + esc(check.reason) + '</p>'),
+        { right: '<span class="hint">' + (set.images || []).length + ' 张</span>' +
+          helpTip('图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。') }) +
       (project.unifiedBackground
-        ? '<div class="prop-group">' +
-            '<div class="prop-group-title">全局背景' + helpTip('取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。') + '</div>' +
+        ? propGroup('global', '全局背景',
             '<div class="inline-actions">' +
               '<button id="prop-bg-bake" class="btn btn-sm">固化到所有页</button>' +
               '<button id="prop-bg-copy" class="btn btn-sm">本页独立副本</button>' +
-            '</div>' +
-          '</div>'
+            '</div>',
+            { right: helpTip('取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。') })
         : '');
 
     bind('prop-bg-name', 'change', function () { L.app.renameBackgroundSet(set.id, valueOf('prop-bg-name')); });
@@ -917,13 +988,10 @@
     })) : null;
     const custom = image.fit === 'none';
     ui.els.propertyPanel.innerHTML =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">背景图片 ' + (index + 1) + ' / ' + set.images.length + '</div>' +
+      propGroup('info', '背景图片 ' + (index + 1) + ' / ' + set.images.length,
         '<p class="hint">所属背景：' + esc(set.name) + (isGlobal ? '（全局，修改会影响所有页面）' : '') + '</p>' +
-        '<p class="hint">' + (meta ? '当前图片：' + esc(meta.name) : '图片缺失或未选择。') + '</p>' +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">定位</div>' +
+        '<p class="hint">' + (meta ? '当前图片：' + esc(meta.name) : '图片缺失或未选择。') + '</p>') +
+      propGroup('position', '定位',
         (custom ? field : fieldHelp)('尺寸', selectInput('prop-bg-fit', [
           { value: 'original', label: '原大小' },
           { value: 'fill-width', label: '横向占满' },
@@ -944,21 +1012,17 @@
             field('', '<label class="check-row"><input id="prop-bg-ratio" type="checkbox"' +
               (image.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>') +
             '<div class="inline-actions"><button id="prop-bg-restore" class="btn btn-sm">恢复为最适合</button></div>'
-          : '') +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">显示</div>' +
+          : '')) +
+      propGroup('display', '显示',
         field('透明度', rangeInput('prop-bg-opacity', image.opacity == null ? 1 : image.opacity, 0, 1, 0.01)) +
-        field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
-      '</div>' +
-      '<div class="prop-group">' +
+        field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>')) +
+      propGroup('actions', '',
         '<div class="inline-actions">' +
           '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= set.images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
           '<button id="prop-bg-move-down" class="btn btn-sm"' + (index <= 0 ? ' disabled' : '') + '>下移一层</button>' +
           '<button id="prop-bg-replace" class="btn btn-sm">替换图片</button>' +
           '<button id="prop-bg-image-delete" class="btn btn-sm btn-danger">删除图片</button>' +
-        '</div>' +
-      '</div>';
+        '</div>', { plain: true });
 
     bind('prop-bg-fit', 'change', function () { L.app.setBackgroundImageFit(set.id, image.id, valueOf('prop-bg-fit')); });
     bind('prop-bg-x', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'x', Number(valueOf('prop-bg-x')) || 0); });
@@ -1188,8 +1252,11 @@
 
   function categoryStyleFields(prefix, style) {
     return fontListField(prefix, style) +
-      field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
-      field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
+      fieldPair(
+        '字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>',
+        '粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight), false, 'select-compact'),
+        'field-row-weight'
+      ) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
       field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05)) +
       shadowOutlineFields(prefix, style);
@@ -1266,35 +1333,28 @@
     }).join('');
 
     ui.els.propertyPanel.innerHTML =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">分类块 <span class="pill pill-green">' + (category ? category.songs.length : 0) + ' 首</span></div>' +
+      propGroup('block', '分类块',
         fieldPair(
           '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1, false, 10),
           '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1, false, 10)
         ) +
-        field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1, false, 10) + '<span class="unit">px</span>') +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">分类名子分区</div>' +
+        field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1, false, 10) + '<span class="unit">px</span>'),
+        { right: '<span class="pill pill-green">' + (category ? category.songs.length : 0) + ' 首</span>' }) +
+      propGroup('title', '分类名子分区',
         fieldHelp('', '<label class="check-row"><input id="prop-title-visible" type="checkbox"' +
           (element.showTitle !== false ? ' checked' : '') + '> 显示分类名</label>',
           '隐藏时样式保留，重新显示后生效。') +
-        categoryStyleFields('prop-title', element.titleStyle) +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">歌名子分区</div>' +
-        categoryStyleFields('prop-song', element.songStyle) +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">表格<span class="title-right"><span class="hint">' + tables.length + ' 个</span>' +
-          helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。') + '</span></div>' +
+        categoryStyleFields('prop-title', element.titleStyle)) +
+      propGroup('song', '歌名子分区',
+        categoryStyleFields('prop-song', element.songStyle)) +
+      propGroup('tables', '表格',
         tableCards +
-        '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>' +
-      '</div>' +
-      '<div class="prop-group">' +
+        '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>',
+        { right: '<span class="hint">' + tables.length + ' 个</span>' +
+          helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。') }) +
+      propGroup('actions', '',
         '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除分类块</button>' +
-          helpTip('删除后分类回到左侧未放置状态，歌单数据保留。') + '</div>' +
-      '</div>';
+          helpTip('删除后分类回到左侧未放置状态，歌单数据保留。') + '</div>', { plain: true });
 
     bind('prop-el-x', 'input', function () {
       element.x = Number(valueOf('prop-el-x')) || 0;
@@ -1312,6 +1372,7 @@
     bind('prop-title-visible', 'change', function () {
       const input = document.getElementById('prop-title-visible');
       element.showTitle = input ? input.checked : true;
+      setGroupCollapsed('title', !element.showTitle);
       L.app.changed({ property: false });
     });
     bindCategoryStyle('prop-title', element.titleStyle);
@@ -1369,8 +1430,11 @@
 
   function textStyleFields(prefix, style) {
     return fontListField(prefix, style) +
-      field('字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>') +
-      field('粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight))) +
+      fieldPair(
+        '字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>',
+        '粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight), false, 'select-compact'),
+        'field-row-weight'
+      ) +
       field('颜色', colorInput(prefix + '-color', style.color)) +
       field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05)) +
       field('对齐', selectInput(prefix + '-align', alignOptions(), style.align || 'left')) +
@@ -1379,25 +1443,19 @@
 
   function renderTextProperties(element) {
     ui.els.propertyPanel.innerHTML =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">自由文字</div>' +
+      propGroup('content', '自由文字',
         fieldHelp('内容', '<textarea id="prop-text-content" class="input" rows="3" style="height:auto;padding:6px 7px;resize:vertical">' +
-          esc(element.text) + '</textarea>', '也可以双击画布上的文字直接编辑。') +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">位置与尺寸</div>' +
+          esc(element.text) + '</textarea>', '也可以双击画布上的文字直接编辑。')) +
+      propGroup('layout', '位置与尺寸',
         fieldPair(
           '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1, false, 10),
           '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1, false, 10)
         ) +
         fieldHelp('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1, false, 10) + '<span class="unit">px</span>',
-          '高度随文字自动增长。') +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">文字样式</div>' +
-        textStyleFields('prop-text', element.style) +
-      '</div>' +
-      '<div class="prop-group"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除文字</button></div>';
+          '高度随文字自动增长。')) +
+      propGroup('style', '文字样式',
+        textStyleFields('prop-text', element.style)) +
+      propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除文字</button>', { plain: true });
 
     bind('prop-text-content', 'input', function () {
       element.text = valueOf('prop-text-content');
@@ -1445,13 +1503,10 @@
       return asset.id === element.assetId;
     });
     ui.els.propertyPanel.innerHTML =
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">自由图片</div>' +
+      propGroup('info', '自由图片',
         '<p class="hint">当前图片：' + esc(meta ? meta.name : (element.assetId || '未选择')) + '</p>' +
-        '<div class="inline-actions"><button id="prop-img-replace" class="btn btn-sm">替换图片</button></div>' +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">位置与尺寸</div>' +
+        '<div class="inline-actions"><button id="prop-img-replace" class="btn btn-sm">替换图片</button></div>') +
+      propGroup('layout', '位置与尺寸',
         fieldPair(
           '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1, false, 10),
           '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1, false, 10)
@@ -1459,10 +1514,8 @@
         fieldPair(
           '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1, false, 10),
           '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1, false, 10)
-        ) +
-      '</div>' +
-      '<div class="prop-group">' +
-        '<div class="prop-group-title">外观</div>' +
+        )) +
+      propGroup('appearance', '外观',
         '<div class="field field-compact"><label>比例</label><div class="control">' +
           '<label class="check-row"><input id="prop-img-ratio" type="checkbox"' +
           (element.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>' +
@@ -1470,9 +1523,8 @@
         field('旋转', numberInput('prop-img-rotation', Math.round(element.rotation || 0), -180, 180, 1, false, 45) +
           '<span class="unit">°</span>') +
         field('透明度', rangeInput('prop-img-opacity', element.opacity == null ? 1 : element.opacity, 0, 1, 0.01)) +
-        field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
-      '</div>' +
-      '<div class="prop-group"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除图片</button></div>';
+        field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>')) +
+      propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除图片</button>', { plain: true });
 
     bind('prop-img-replace', 'click', function () { L.app.pickFreeImage(element.id); });
     bind('prop-img-x', 'input', function () {

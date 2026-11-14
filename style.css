@@ -439,23 +439,68 @@ button { cursor: pointer; }
   flex: 1 1 auto;
 }
 
+/* 属性分区卡片：1px 实线框 + 标题条，字段始终被所属卡片包围 */
 .prop-group {
-  border-bottom: 1px dashed var(--line);
-  padding-bottom: 9px;
-  margin-bottom: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 10px 9px;
+  margin-bottom: 8px;
 }
-.prop-group:last-child { border-bottom: none; margin-bottom: 0; }
+.prop-group-plain {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-bottom: 7px;
+}
 
 .prop-group-title {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
+  gap: 6px;
+  margin: 0 -10px 8px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--muted);
-  margin: 2px 0 8px;
+  color: var(--text);
   letter-spacing: 0.03em;
 }
+.prop-group-toggle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.prop-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prop-group-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+.prop-group-chevron {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted);
+  transition: transform 0.15s ease;
+}
+.prop-group.is-collapsed .prop-group-chevron { transform: rotate(-90deg); }
+.prop-group-body[hidden] { display: none; }
 
 .field {
   display: grid;
@@ -488,6 +533,8 @@ button { cursor: pointer; }
 }
 .input:focus, .select:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12); }
 .input[type="number"] { font-variant-numeric: tabular-nums; }
+/* 粗细下拉按内容收窄，与字号同处一行 */
+.select.select-compact { width: auto; flex: 0 0 auto; min-width: 64px; }
 
 /* 数值输入按位数定宽：3 位 56px / 2 位·小数 64px / 4 位及带符号坐标 72px，右对齐配原生箭头 */
 .input.num-mid,
@@ -654,7 +701,7 @@ button { cursor: pointer; }
   border-radius: 6px;
   padding: 7px 7px 2px;
   margin-bottom: 7px;
-  background: #fff;
+  background: var(--panel-2);
 }
 .table-card-head {
   display: flex;
@@ -754,7 +801,7 @@ button { cursor: pointer; }
 .table-card .field-help { grid-template-columns: 52px minmax(0, 1fr) auto; }
 .font-list-field { align-items: start; }
 .font-list-field > .help-tip { margin-top: 8px; }
-.prop-group-title .title-right { display: inline-flex; align-items: center; gap: 10px; }
+.prop-group-title .title-right { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 10px; font-weight: 400; letter-spacing: 0; }
 .title-tip-row { display: flex; align-items: center; }
 .bg-library-tiprow { display: flex; margin-bottom: 8px; }
 
@@ -1433,6 +1480,22 @@ button { cursor: pointer; }
 
 @media (max-width: 1180px) {
   :root { --sidebar-w: 280px; --inspector-w: 300px; }
+  /* 300px 检查栏：含宽数值输入的配对行改为上下两行，避免横向滚动 */
+  .field-row:has(.input.num-wide) { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+  .field-row:has(.input.num-wide) .field-a,
+  .field-row:has(.input.num-wide) .field-b { grid-template-columns: 72px minmax(0, 1fr); justify-content: start; }
+  /* 页面宽高仍保持同行，输入按窄栏收窄 */
+  .prop-group[data-group="size"] .field-row { grid-template-columns: auto minmax(0, 1fr); }
+  .prop-group[data-group="size"] .field-row .field-a { grid-template-columns: 72px minmax(0, 1fr); }
+  .prop-group[data-group="size"] .field-row .field-b { grid-template-columns: auto auto; justify-content: end; }
+  .prop-group[data-group="size"] .field-row .input { width: 60px; }
+  /* 字号/粗细保持同行：窄栏收起“粗细”文字标签（保留标签关联） */
+  .field-row-weight { grid-template-columns: auto minmax(0, 1fr); }
+  .field-row-weight .field-b { position: relative; grid-template-columns: minmax(0, 1fr); }
+  .field-row-weight .field-b > label {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
   .topbar-actions { gap: 4px; }
   .btn { padding: 6px 8px; }
   .canvas-toolbar { width: 48px; gap: 4px; padding: 6px 4px; }
