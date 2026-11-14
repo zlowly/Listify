@@ -29,6 +29,9 @@
   let contentCanvas = null;
   let contentCtx = null;
   let drag = null;
+  let hoverPoint = null;
+  let lastAppliedCursor = '';
+
   let inlineEditor = null;
   let pendingImageElementId = null;
   let pendingBackgroundSetId = null;
@@ -59,6 +62,9 @@
   };
   let lastExternalDraftNotice = 0;
 
+  // 方向键微调的撤销合并会话：同选择、同方向的连续微调只产生一条撤销记录
+  let nudgeSession = { key: null, direction: null };
+
   const undo = {
     stack: [],
     max: 20
@@ -80,6 +86,9 @@
       ui.toast('没有可撤销的操作。');
       return;
     }
+    // 撤销会替换项目状态，微调会话的旧快照随之失效
+    nudgeSession.key = null;
+    nudgeSession.direction = null;
     state.project = entry.project;
     state.currentPageId = model.getPage(state.project, entry.currentPageId)
       ? entry.currentPageId
@@ -149,6 +158,21 @@
   function selectedBackgroundSet() {
     if (!editingBackground()) return null;
     return model.findBackground(state.project, state.selection.setId);
+  }
+
+  // 选中者优先：指针位于当前选中元素范围内（图片用旋转后矩形）时返回该元素
+  function selectedElementAt(page, x, y) {
+    if (state.selection.type !== 'element') return null;
+    const element = page.elements.find(function (item) { return item.id === state.selection.id; });
+    if (!element) return null;
+    const bounds = renderer.elementBounds(state.project, page, element);
+    if (element.type === 'image') {
+      const local = renderer.imageLocalPoint(element, x, y);
+      if (Math.abs(local.x) > bounds.width / 2 || Math.abs(local.y) > bounds.height / 2) return null;
+      return { element: element, bounds: bounds };
+    }
+    if (x < bounds.x || y < bounds.y || x > bounds.x + bounds.width || y > bounds.y + bounds.height) return null;
+    return { element: element, bounds: bounds };
   }
 
   function selectedBackgroundImage() {
@@ -360,6 +384,7 @@
       dirty.draft = false;
       scheduleDraftSave();
     }
+    refreshHoverCursor();
   }
 
   function applyViewTransform() {
@@ -947,7 +972,15 @@
       const margin = marginAt(screenX, screenY);
       if (margin) cursor = margin.side === 'left' || margin.side === 'right' ? 'ew-resize' : 'ns-resize';
     }
-    overlay.style.cursor = cursor;
+    if (cursor !== lastAppliedCursor) {
+      lastAppliedCursor = cursor;
+      overlay.style.cursor = cursor;
+    }
+  }
+
+  function refreshHoverCursor() {
+    if (!hoverPoint || drag || inlineEditor) return;
+    updateCursor(hoverPoint.x, hoverPoint.y);
   }
 
   function overlayPoint(event) {
@@ -959,6 +992,9 @@
 
   function onPointerDown(event) {
     if (event.button !== 0) return;
+    // 任何拖拽开始都终结微调会话，避免微调快照吞掉后续拖拽的撤销
+    nudgeSession.key = null;
+    nudgeSession.direction = null;
     const point = overlayPoint(event);
     const page = currentPage();
     if (!page) return;
@@ -1028,6 +1064,42 @@
     }
 
     const pt = toPage(point.x, point.y);
+
+    // 选中者优先（内容元素）：指针在选中元素范围内时直接抓取，无视上层覆盖
+    const selectedHit = selectedElementAt(page, pt.x, pt.y);
+    if (selectedHit) {
+      drag = {
+        type: 'move',
+        element: selectedHit.element,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: selectedHit.element.x,
+        startY: selectedHit.element.y
+      };
+      pushUndo('移动元素');
+      beginPointer(event);
+      return;
+    }
+
+    // 选中者优先（背景图）：选中具体背景图时，其可见范围内优先于内容元素
+    if (state.selection.type === 'backgroundImage') {
+      const backgroundPriority = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
+      if (backgroundPriority && backgroundPriority.image.id === state.selection.imageId) {
+        ensureCustomBackgroundImage(backgroundPriority.image);
+        drag = {
+          type: 'move-background',
+          image: backgroundPriority.image,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startX: backgroundPriority.image.x,
+          startY: backgroundPriority.image.y
+        };
+        pushUndo('移动背景图片');
+        beginPointer(event);
+        return;
+      }
+    }
+
     const hit = renderer.hitTest(state.project, page, pt.x, pt.y);
     if (hit) {
       if (state.selection.type !== 'element' || state.selection.id !== hit.element.id) {
@@ -1098,6 +1170,7 @@
   function onPointerMove(event) {
     if (!drag) {
       const point = overlayPoint(event);
+      hoverPoint = point;
       updateCursor(point.x, point.y);
       return;
     }
@@ -1215,6 +1288,10 @@
     layout.setManualWidths(element, drag.tableIndex, widths);
   }
 
+  function onPointerLeave() {
+    hoverPoint = null;
+  }
+
   function onPointerUp(event) {
     if (!drag) return;
     const finished = drag;
@@ -1254,6 +1331,7 @@
     if (overlay.releasePointerCapture && event && event.pointerId != null) {
       try { overlay.releasePointerCapture(event.pointerId); } catch (err) { /* ignore */ }
     }
+    if (event) hoverPoint = overlayPoint(event);
     ui.renderAll();
   }
 
@@ -1458,6 +1536,42 @@
     if (!element) return;
     state.selection = { type: 'element', id: id };
     ui.renderAll();
+  }
+
+  // 方向键微调：返回是否移动了对象（true 时调用方应 preventDefault）
+  function nudgeSelection(dx, dy) {
+    const page = currentPage();
+    if (!page) return false;
+    let target = null;
+    let key = null;
+    let label = '';
+    let layers = ['content', 'overlay'];
+    if (state.selection.type === 'element') {
+      target = page.elements.find(function (item) { return item.id === state.selection.id; });
+      if (target) {
+        key = 'el:' + target.id;
+        label = '微调元素';
+      }
+    } else if (state.selection.type === 'backgroundImage') {
+      const set = model.findBackground(state.project, state.selection.setId);
+      target = set ? (set.images || []).find(function (img) { return img && img.id === state.selection.imageId; }) : null;
+      if (target) {
+        key = 'bg:' + target.id;
+        label = '微调背景图片';
+        layers = ['bg', 'overlay'];
+      }
+    }
+    if (!target) return false;
+    const direction = (dx < 0 ? 'l' : dx > 0 ? 'r' : '') + (dy < 0 ? 'u' : dy > 0 ? 'd' : '');
+    if (nudgeSession.key !== key || nudgeSession.direction !== direction) {
+      nudgeSession = { key: key, direction: direction };
+      pushUndo(label);
+    }
+    target.x = Math.round((target.x || 0) + dx);
+    target.y = Math.round((target.y || 0) + dy);
+    changed({ property: false, layers: layers });
+    ui.renderAll();
+    return true;
   }
 
   function switchPage(pageId) {
@@ -2782,6 +2896,7 @@
 
     overlay.addEventListener('pointerdown', onPointerDown);
     overlay.addEventListener('pointermove', onPointerMove);
+    overlay.addEventListener('pointerleave', onPointerLeave);
     overlay.addEventListener('pointerup', onPointerUp);
     overlay.addEventListener('pointercancel', onPointerUp);
     overlay.addEventListener('dblclick', onDoubleClick);
@@ -2843,6 +2958,7 @@
     selectBackgroundSet: selectBackgroundSet,
     selectBackgroundImage: selectBackgroundImage,
     selectElement: selectElement,
+    nudgeSelection: nudgeSelection,
     switchPage: switchPage,
     addPageDialog: addPageDialog,
     addPage: addPageDialog,

@@ -542,6 +542,13 @@
         if (L.app.undo) L.app.undo();
         return;
       }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const step = event.shiftKey ? 10 : 1;
+        const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+        const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+        if (L.app.nudgeSelection(dx, dy)) event.preventDefault();
+        return;
+      }
       if (event.key === 'Delete' || event.key === 'Backspace') {
         if (L.app.state.selection.type === 'element') {
           event.preventDefault();
