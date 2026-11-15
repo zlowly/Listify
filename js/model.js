@@ -715,6 +715,36 @@
     return width;
   }
 
+  // 定位歌曲：跨分类部分匹配歌名（大小写不敏感），命中区间为原歌名坐标。
+  // 逐字符小写化并记录每个小写字符对应的原串起点，
+  // 避免 toLocaleLowerCase 变长（如 'İ'→'i̇'）导致 start/end 错位。
+  function findSongMatches(categories, query) {
+    const q = String(query == null ? '' : query).trim().toLocaleLowerCase();
+    if (!q || !Array.isArray(categories)) return [];
+    const matches = [];
+    categories.forEach(function (category, categoryIndex) {
+      const songs = category && Array.isArray(category.songs) ? category.songs : [];
+      songs.forEach(function (rawSong, songIndex) {
+        const song = String(rawSong == null ? '' : rawSong);
+        let lowered = '';
+        const starts = [];
+        for (let i = 0; i < song.length; i += 1) {
+          const charLower = song.charAt(i).toLocaleLowerCase();
+          for (const ch of charLower) {
+            lowered += ch;
+            starts.push(i);
+          }
+        }
+        const pos = lowered.indexOf(q);
+        if (pos < 0) return;
+        const start = starts[pos];
+        const end = pos + q.length < starts.length ? starts[pos + q.length] : song.length;
+        matches.push({ categoryIndex: categoryIndex, songIndex: songIndex, start: start, end: end });
+      });
+    });
+    return matches;
+  }
+
   function fontString(style) {
     const weight = style && style.fontWeight ? style.fontWeight : 400;
     const size = style && style.fontSize ? style.fontSize : 16;
@@ -781,6 +811,7 @@
     ensureAssetMeta: ensureAssetMeta,
     pageIndexOf: pageIndexOf,
     virtualWidth: virtualWidth,
+    findSongMatches: findSongMatches,
     isCjkCodePoint: isCjkCodePoint,
     fontString: fontString
   };

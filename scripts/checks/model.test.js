@@ -214,3 +214,64 @@ test('clone：保留 JSON 可序列化类型', function () {
   const source = { s: '文', n: 1.5, b: true, z: null, list: [0, 1] };
   assert.deepEqual(plain(model.clone(source)), source);
 });
+
+/* ---------- findSongMatches：跨分类歌名部分匹配（定位歌曲） ---------- */
+
+test('findSongMatches：空查询、空白查询或非法输入返回空数组', function () {
+  const categories = [{ name: 'A', songs: ['晴天'] }];
+  assert.deepEqual(plain(model.findSongMatches(categories, '')), []);
+  assert.deepEqual(plain(model.findSongMatches(categories, '   ')), []);
+  assert.deepEqual(plain(model.findSongMatches(null, '晴')), []);
+  assert.deepEqual(plain(model.findSongMatches('不是数组', '晴')), []);
+});
+
+test('findSongMatches：部分匹配且大小写不敏感，区间为原歌名坐标', function () {
+  const categories = [
+    { name: '摇滚', songs: ['Hotel California', '加州旅馆'] },
+    { name: '民谣', songs: ['送别', 'Goodbye Yesterday'] }
+  ];
+  const m1 = plain(model.findSongMatches(categories, 'Hotel'));
+  assert.equal(m1.length, 1);
+  assert.deepEqual(m1[0], { categoryIndex: 0, songIndex: 0, start: 0, end: 5 });
+  // 仅大小写不同仍命中，且坐标与大小写敏感搜索一致
+  assert.deepEqual(plain(model.findSongMatches(categories, 'hOTEL')), m1);
+  const m3 = plain(model.findSongMatches(categories, '旅馆'));
+  assert.deepEqual(m3, [{ categoryIndex: 0, songIndex: 1, start: 2, end: 4 }]);
+});
+
+test('findSongMatches：跨多分类多条命中，重名歌各出一条', function () {
+  const categories = [
+    { name: 'A', songs: ['夜曲', '晴天'] },
+    { name: 'B', songs: ['夜曲', '星晴'] },
+    { name: 'C', songs: ['夜的钢琴曲'] }
+  ];
+  const matches = plain(model.findSongMatches(categories, '夜'));
+  assert.equal(matches.length, 3);
+  assert.deepEqual(
+    matches.map(function (m) { return [m.categoryIndex, m.songIndex]; }),
+    [[0, 0], [1, 0], [2, 0]]
+  );
+});
+
+test('findSongMatches：无匹配返回空数组', function () {
+  const categories = [{ name: 'A', songs: ['晴天'] }];
+  assert.deepEqual(plain(model.findSongMatches(categories, '不存在的歌')), []);
+});
+
+test('findSongMatches：空歌名不参与匹配，查询被 trim', function () {
+  const categories = [{ name: 'A', songs: ['', '   ', ' 夜曲 '] }];
+  assert.deepEqual(plain(model.findSongMatches(categories, ' 夜 ')), [
+    { categoryIndex: 0, songIndex: 2, start: 1, end: 2 }
+  ]);
+});
+
+test('findSongMatches：小写化变长字符（İ）命中坐标仍在原歌名上', function () {
+  // 'İ'(U+0130) 小写化为 'i̇'（i + 组合点，2 个码元），原串仅 1 个码元。
+  const categories = [{ name: 'A', songs: ['\u0130stanbul Blues', 'Blue \u0130stanbul'] }];
+  const matches = plain(model.findSongMatches(categories, 'i\u0307stanbul'));
+  assert.equal(matches.length, 2);
+  // 首字符变长：原串 'İstanbul' 占 0..8
+  assert.deepEqual(matches[0], { categoryIndex: 0, songIndex: 0, start: 0, end: 8 });
+  // 中间变长：'Blue İstanbul' 中命中占 5..13
+  assert.deepEqual(matches[1], { categoryIndex: 0, songIndex: 1, start: 5, end: 13 });
+});

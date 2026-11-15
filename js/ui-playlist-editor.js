@@ -43,6 +43,8 @@
       let dragPayload = null;
       let gridRenderToken = 0;
       let modal = null;
+      let searchQuery = '';
+      let selectedMatch = 0;
 
       function currentCategory() {
         return working.categories[activeIndex];
@@ -105,6 +107,9 @@
       body.innerHTML =
         '<div class="playlist-editor-rail">' +
           '<div class="playlist-editor-rail-title">分类</div>' +
+          '<input class="input playlist-editor-search" type="search"' +
+            ' placeholder="定位歌名…" autocomplete="off"' +
+            ' aria-label="定位歌名" title="按歌名部分匹配，点击结果跳转；Enter 跳转，Esc 清空">' +
           '<div class="playlist-editor-category-list" role="tablist" aria-label="歌单分类"></div>' +
         '</div>' +
         '<div class="playlist-editor-main">' +
@@ -126,6 +131,7 @@
         '</div>';
 
       const railList = body.querySelector('.playlist-editor-category-list');
+      const searchInput = body.querySelector('.playlist-editor-search');
       const nameInput = body.querySelector('#playlist-editor-category-name');
       const grid = body.querySelector('.playlist-editor-grid');
       const countEl = body.querySelector('.playlist-editor-songcount');
@@ -200,6 +206,38 @@
         sortCurrentCategory();
       });
 
+      searchInput.addEventListener('input', function () {
+        searchQuery = searchInput.value;
+        selectedMatch = 0;
+        renderMatchList();
+      });
+      searchInput.addEventListener('keydown', function (event) {
+        if (ui.isComposingEvent(event)) return;
+        const matches = currentMatches();
+        if (event.key === 'ArrowDown') {
+          if (!matches.length || selectedMatch >= matches.length - 1) return;
+          event.preventDefault();
+          selectedMatch += 1;
+          renderMatchList();
+        } else if (event.key === 'ArrowUp') {
+          if (!matches.length || selectedMatch <= 0) return;
+          event.preventDefault();
+          selectedMatch -= 1;
+          renderMatchList();
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          jumpToMatch(selectedMatch);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          searchQuery = '';
+          searchInput.value = '';
+          selectedMatch = 0;
+          renderRail();
+          searchInput.focus();
+        }
+      });
+
       function categoryHasError(categoryIndex) {
         return Object.keys(errors).some(function (key) {
           return key === 'cat:' + categoryIndex ||
@@ -207,8 +245,72 @@
         });
       }
 
+      function highlightMatch(song, start, end) {
+        return esc(song.slice(0, start)) +
+          '<mark class="playlist-editor-match-hit">' + esc(song.slice(start, end)) + '</mark>' +
+          esc(song.slice(end));
+      }
+
+      function currentMatches() {
+        return L.model.findSongMatches(working.categories, searchQuery);
+      }
+
+      function renderMatchList() {
+        if (!searchQuery.trim()) {
+          renderRail();
+          return;
+        }
+        const matches = currentMatches();
+        if (selectedMatch >= matches.length) selectedMatch = matches.length - 1;
+        if (selectedMatch < 0) selectedMatch = 0;
+        railList.setAttribute('role', 'listbox');
+        railList.setAttribute('aria-label', '歌名匹配');
+        let html = '<div class="playlist-editor-search-meta hint" role="presentation">' +
+          (matches.length ? matches.length + ' 个匹配' : '没有匹配的歌名') + '</div>';
+        html += matches.map(function (match, index) {
+          const category = working.categories[match.categoryIndex];
+          const song = String(category.songs[match.songIndex] == null ? '' : category.songs[match.songIndex]);
+          return '<button type="button" role="option" class="playlist-editor-match-row' +
+            (index === selectedMatch ? ' selected' : '') +
+            '" data-match-index="' + index + '" aria-selected="' + (index === selectedMatch) + '"' +
+            ' title="' + esc(song) + '">' +
+            '<span class="playlist-editor-match-song">' + highlightMatch(song, match.start, match.end) + '</span>' +
+            '<span class="playlist-editor-match-cat">' + esc(category.name.trim() || '未命名') + '</span>' +
+            '</button>';
+        }).join('');
+        railList.innerHTML = html;
+        railList.querySelectorAll('[data-match-index]').forEach(function (row) {
+          const index = Number(row.getAttribute('data-match-index'));
+          row.addEventListener('click', function () { jumpToMatch(index); });
+        });
+      }
+
+      function jumpToMatch(index) {
+        const match = currentMatches()[index];
+        if (!match) return;
+        selectedMatch = index;
+        selectCategory(match.categoryIndex);
+        // 复核目标格当前值仍包含查询：切分类前的提交可能 trim 掉编辑中的值，使匹配失效
+        const target = working.categories[match.categoryIndex];
+        const songNow = String(target.songs[match.songIndex] == null ? '' : target.songs[match.songIndex]);
+        if (songNow.toLocaleLowerCase().indexOf(searchQuery.trim().toLocaleLowerCase()) < 0) {
+          renderMatchList();
+          searchInput.focus();
+          return;
+        }
+        focusCell(match.songIndex);
+        const input = grid.querySelector('[data-song-index="' + match.songIndex + '"] .playlist-editor-input');
+        if (input && input.scrollIntoView) input.scrollIntoView({ block: 'nearest' });
+      }
+
       function renderRail() {
         errors = validate();
+        if (searchQuery.trim()) {
+          renderMatchList();
+          return;
+        }
+        railList.setAttribute('role', 'tablist');
+        railList.setAttribute('aria-label', '歌单分类');
         railList.innerHTML = working.categories.map(function (category, index) {
           const name = category.name.trim();
           const hasError = categoryHasError(index);
@@ -572,6 +674,9 @@
           const railCount = activeRow.querySelector('.playlist-editor-rail-count');
           if (railCount) railCount.textContent = category.songs.length;
         }
+
+        // 查询非空时同步刷新匹配列表（工作副本的所有变更都汇聚到这里）
+        if (searchQuery.trim()) renderMatchList();
       }
 
       nameInput.addEventListener('input', function () {
