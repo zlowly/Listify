@@ -15,6 +15,7 @@
       const viewport = appCtx.viewport;
       const surface = appCtx.surface;
       const actions = appCtx.actions;
+      const categoryDropPosition = layout.categoryDropPosition;
 
       function selectedElementAt(page, x, y) {
         if (state.selection.type !== 'element') return null;
@@ -496,25 +497,6 @@
       function onDragOver(event) {
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-      }
-    
-      function categoryDropPosition(page, project, cursorY) {
-        const margins = project.margins;
-        let lowestBottom = null;
-    
-        page.elements.forEach(function (element) {
-          if (!(element.y <= cursorY)) return;
-          const category = element.type === 'category'
-            ? model.getCategory(project, element.category)
-            : null;
-          const bottom = element.y + layout.elementHeight(element, category, { editMode: true });
-          if (lowestBottom === null || bottom > lowestBottom) lowestBottom = bottom;
-        });
-    
-        return {
-          x: margins.left,
-          y: Math.max(0, Math.round(lowestBottom === null ? margins.top : lowestBottom))
-        };
       }
     
       function onDrop(event) {

@@ -450,6 +450,32 @@
     return element.height || 0;
   }
 
+  // 新分类块的落点：只参照分类块，自由文字与自由图片不参与。
+  // x 固定为左边距；y 取鼠标上方最低分类块底边，没有分类块时回退上边距。
+  function categoryDropPosition(page, project, cursorY) {
+    const margins = (project && project.margins) || {};
+    const left = Number.isFinite(margins.left) ? margins.left : 0;
+    const top = Number.isFinite(margins.top) ? margins.top : 0;
+    const limit = typeof cursorY === 'number' ? cursorY : Infinity;
+    const elements = page && Array.isArray(page.elements) ? page.elements : [];
+    let lowestBottom = null;
+
+    elements.forEach(function (element) {
+      if (!element || element.type !== 'category') return;
+      if (!(element.y <= limit)) return;
+      const category = project && project.playlist
+        ? model.getCategory(project, element.category)
+        : null;
+      const bottom = element.y + elementHeight(element, category, { editMode: true });
+      if (lowestBottom === null || bottom > lowestBottom) lowestBottom = bottom;
+    });
+
+    return {
+      x: left,
+      y: Math.max(0, Math.round(lowestBottom === null ? top : lowestBottom))
+    };
+  }
+
   function setColumns(element, tableIndex, columns, songCount) {
     const table = element.tables[tableIndex];
     if (!table) return;
@@ -555,6 +581,7 @@
     layoutCategory: layoutCategory,
     layoutText: layoutText,
     elementHeight: elementHeight,
+    categoryDropPosition: categoryDropPosition,
     setColumns: setColumns,
     setRows: setRows,
     addTable: addTable,

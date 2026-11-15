@@ -423,3 +423,105 @@ test('syncTableStructure：连续调用不重复追加', function () {
   assert.equal(fixed.tables.length, 2);
   assert.equal(fixed.tables[1].rows, 0);
 });
+
+/* ---------- 分类块落点：只参照分类块 ---------- */
+
+function dropProject() {
+  return {
+    pageSize: { width: 800, height: 1200 },
+    margins: { top: 40, right: 0, bottom: 0, left: 30 },
+    playlist: {
+      categories: [
+        { name: '流行', songs: songs('流行歌', 4) },
+        { name: '摇滚', songs: songs('摇滚歌', 3) }
+      ]
+    }
+  };
+}
+
+function dropCategory(projectRef, name, y) {
+  return model.createCategoryElement(name, projectRef.margins.left, y, projectRef, 600);
+}
+
+test('落点：只有自由图片时不参照图片，落到上边距', function () {
+  const projectRef = dropProject();
+  const page = {
+    elements: [
+      { type: 'image', x: 0, y: 120, width: 400, height: 300, assetId: 'a' },
+      { type: 'image', x: 0, y: 700, width: 400, height: 400, assetId: 'b' }
+    ]
+  };
+
+  const position = layout.categoryDropPosition(page, projectRef, Infinity);
+  assert.deepEqual(plain(position), { x: 30, y: 40 });
+});
+
+test('落点：自由文字同样不参与', function () {
+  const projectRef = dropProject();
+  const page = { elements: [{ type: 'text', x: 0, y: 500, width: 200, text: '自由文字', style: {} }] };
+
+  assert.equal(layout.categoryDropPosition(page, projectRef, Infinity).y, 40);
+});
+
+test('落点：分类块下方有更低自由图片时只贴分类块底边', function () {
+  const projectRef = dropProject();
+  const category = model.getCategory(projectRef, '流行');
+  const block = dropCategory(projectRef, '流行', 100);
+  const bottom = 100 + layout.elementHeight(block, category, { editMode: true });
+  const page = {
+    elements: [
+      block,
+      { type: 'image', x: 0, y: 600, width: 400, height: 500, assetId: 'a' }
+    ]
+  };
+
+  const position = layout.categoryDropPosition(page, projectRef, Infinity);
+  assert.equal(position.y, Math.round(bottom));
+  assert.ok(position.y < 600, '不得被更靠下的自由图片下推');
+});
+
+test('落点：鼠标在所有分类块上方时回到上边距', function () {
+  const projectRef = dropProject();
+  const page = {
+    elements: [
+      dropCategory(projectRef, '流行', 200),
+      { type: 'image', x: 0, y: 100, width: 400, height: 200, assetId: 'a' }
+    ]
+  };
+
+  assert.equal(layout.categoryDropPosition(page, projectRef, 150).y, 40);
+});
+
+test('落点：鼠标位于分类块内部时贴该块底边', function () {
+  const projectRef = dropProject();
+  const category = model.getCategory(projectRef, '摇滚');
+  const block = dropCategory(projectRef, '摇滚', 300);
+  const bottom = 300 + layout.elementHeight(block, category, { editMode: true });
+  const page = { elements: [block] };
+
+  assert.equal(layout.categoryDropPosition(page, projectRef, 320).y, Math.round(bottom));
+});
+
+test('落点：Infinity 取全部分类块的最低下边缘', function () {
+  const projectRef = dropProject();
+  const first = dropCategory(projectRef, '流行', 0);
+  const secondCategory = model.getCategory(projectRef, '摇滚');
+  const second = dropCategory(projectRef, '摇滚', 400);
+  const expected = 400 + layout.elementHeight(second, secondCategory, { editMode: true });
+  const page = {
+    elements: [
+      second,
+      { type: 'image', x: 0, y: 200, width: 400, height: 900, assetId: 'a' },
+      first
+    ]
+  };
+
+  assert.equal(layout.categoryDropPosition(page, projectRef, Infinity).y, Math.round(expected));
+});
+
+test('落点：空页回退上边距，缺失参数不抛错', function () {
+  const projectRef = dropProject();
+  assert.deepEqual(plain(layout.categoryDropPosition({ elements: [] }, projectRef, Infinity)), { x: 30, y: 40 });
+  assert.deepEqual(plain(layout.categoryDropPosition(null, projectRef, Infinity)), { x: 30, y: 40 });
+  assert.deepEqual(plain(layout.categoryDropPosition({ elements: [] }, null, Infinity)), { x: 0, y: 0 });
+});

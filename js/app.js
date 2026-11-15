@@ -242,7 +242,7 @@ const viewport = {
       120,
       state.project.pageSize.width - state.project.margins.left - state.project.margins.right
     );
-    const position = ctx.interactions.categoryDropPosition(page, state.project, Infinity);
+    const position = layout.categoryDropPosition(page, state.project, Infinity);
     pushUndo('放置分类');
     const element = model.createCategoryElement(name, position.x, position.y, state.project, width, page);
     page.elements.push(element);
