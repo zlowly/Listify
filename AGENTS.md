@@ -7,7 +7,7 @@ Playlist ("歌单") layout generator — a static web app. **Greenfield**: the r
 - Plain `html + js`, runnable by opening the HTML file locally (`file://`). Runtime stays zero-build: no bundler, package manager, or transpile step may be introduced. The only exception is the release packaging script `build.sh` (pure copy + version injection + optional zip/Pages), which must not change runtime semantics.
 - **Zero build + vendored LeaferJS UMD**: the only runtime dependency is the pinned `vendor/leafer-editor.min.js` (plus the small filter registration plugin), loaded with classic `<script>` tags. No CDN, package manager, `package.json`, or network access is required at runtime. Don't add frameworks or build tooling reflexively.
 - UI text and code comments should match the spec's language (Chinese) for user-facing copy; keep identifiers in English.
-- There is no test suite, lint, or CI. Verify by opening the page in a browser and exercising the flow manually (file import, add/remove pages, drag a category into the page, edit properties). `agent-browser` is available for automated checks.
+- A zero-dependency Node regression suite covers pure logic: `node --test scripts/checks/*.test.js` (loader + model/layout/io/zip; no canvas drawing, interaction, or IndexedDB). There is no lint or CI. Also verify by opening the page in a browser and exercising the flow manually (file import, add/remove pages, drag a category into the page, edit properties); `agent-browser` is available for automated checks.
 
 ## Domain rules that are easy to get wrong
 
@@ -27,7 +27,12 @@ Playlist ("歌单") layout generator — a static web app. **Greenfield**: the r
 ## Working notes
 
 - Release build: `./build.sh` rebuilds `dist/` from the single version source `VERSION` and injects `?v=<version>` into every local asset reference in the `dist/index.html` copy. Add `--zip` for `dist/listify-<version>.zip`, and `--pages [--dry-run]` to publish `dist/` (minus the zip) to `origin/gh-pages` after a TTY confirmation. `dist/` is git-ignored and the build never modifies source files.
+- Dev-only files never ship: `js/dev-checks.js` (browser-console self checks, `L.devChecks`) is excluded during copy and asserted absent from `dist/`; `index.html` must not load it.
+- Utility functions have exactly one implementation: use `model.clamp` / `model.clone` / `model.downloadBlob` and `ui.esc` instead of local copies.
+- The build identifier is injected, not hand-edited: `js/app.js` keeps `const BUILD = '…'` as a placeholder and `./build.sh` rewrites it in `dist/js/app.js` to `VERSION`, so it always matches `?v=`.
 - Prefer splitting into a few plain files (e.g. `index.html`, `app.js`, `style.css`) over one giant inline script as the app grows, but keep zero-build semantics. Use classic `<script>`/`<link>` tags: `type="module"` imports are blocked by CORS on `file://`.
+- Module layout and dependency direction are one-way: `assets`/`model`/`layout`/`render` → `project-schema`/`project-io`/`draft-store` → `ui-fields`/`ui-modal`/`ui-pickers`/`ui-playlist-editor`/`ui-property-panel`/`ui` → `app-chrome`/`app-viewport`/`app-interactions`/`app-presets`/`app-backgrounds`/`app-draft`/`app-import-export` → `app.js`. `index.html` order is the dependency declaration; keep it in sync when adding files.
+- UI must not mutate model objects directly: property fields call `L.app.setElementField` / `setElementStyleField` / `setBackgroundColor` / `setBackgroundImageField` (or existing intent methods such as `setPageSize`, `setMargins`, `resizeElementWidth`, `setImageKeepRatio`, `setBackgroundImageValue`) and let the action schedule redraw.
 - File imports must go through user-gesture `<input type="file">` / drag-drop; there is no backend and no filesystem access beyond what the browser grants.
 - Preset library is generated, not hand-edited: categories/names/display names live in `presets/manifest.json`, images in `presets/<category>/`; run `./scripts/build-presets.sh` to regenerate `js/presets-data/` (index + one chunk per category). The runtime never reads the config (`file://` forbids it), so a config change without a rebuild never reaches the UI. Script roles are documented in `scripts/README.md`.
 - If the spec is ambiguous (units, DPI, print output, save/export format), ask rather than inventing a convention — none of these are decided yet.

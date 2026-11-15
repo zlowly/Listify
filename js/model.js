@@ -35,6 +35,13 @@
     outline: { enabled: false, color: '#000000', width: 2 }
   };
   const BACKGROUND_FITS = ['original', 'fill-width', 'fill-height', 'cover', 'none'];
+  // 校验与编辑共用的数值边界，避免 validateProject 再写一份字面量。
+  const OPACITY_MIN = 0;
+  const OPACITY_MAX = 1;
+  const BLUR_MIN = 0;
+  const MARGIN_MIN = 0;
+  // 需要“大于该值”的尺寸下限（页面尺寸、元素宽高、图片尺寸、表格列宽）。
+  const IMAGE_MIN_SIZE = 0;
   const DEFAULT_BACKGROUND_COLOR = '#ffffff';
   const DEFAULT_BACKGROUND_IMAGE = {
     assetId: null,
@@ -708,173 +715,6 @@
     return width;
   }
 
-  /* ---------- image assets ---------- */
-  const assets = {
-    blobs: new Map(),
-    meta: new Map(),
-    urls: new Map(),
-    images: new Map(),
-    pending: new Map(),
-
-    has: function (id) {
-      return this.blobs.has(id);
-    },
-
-    getMeta: function (id) {
-      return this.meta.get(id) || null;
-    },
-
-    getBlob: function (id) {
-      return this.blobs.get(id) || null;
-    },
-
-    getUrl: function (id) {
-      return this.urls.get(id) || null;
-    },
-
-    getCachedImage: function (id) {
-      return this.images.get(id) || null;
-    },
-
-    addBlob: function (id, blob, name, mime) {
-      if (!id) throw new Error('资产 ID 不能为空');
-      if (!this.blobs.has(id)) {
-        this.blobs.set(id, blob);
-        this.meta.set(id, {
-          id: id,
-          name: name || 'image',
-          mime: mime || blob.type || 'image/png'
-        });
-        this.urls.set(id, URL.createObjectURL(blob));
-      }
-      return id;
-    },
-
-    addFile: async function (file) {
-      const buffer = await file.arrayBuffer();
-      const id = await hashBytes(buffer);
-      if (!this.blobs.has(id)) {
-        const type = file.type || 'application/octet-stream';
-        this.addBlob(id, new Blob([buffer], { type: type }), file.name || 'image', type);
-      }
-      return id;
-    },
-
-    addFromBase64: function (id, name, mime, base64) {
-      const blob = base64ToBlob(base64, mime || 'image/png');
-      this.addBlob(id, blob, name, mime);
-      return id;
-    },
-
-    loadImage: function (id) {
-      const self = this;
-      if (this.images.has(id)) return Promise.resolve(this.images.get(id));
-      if (this.pending.has(id)) return this.pending.get(id);
-      const url = this.urls.get(id);
-      if (!url) return Promise.reject(new Error('资产不存在：' + id));
-      const promise = new Promise(function (resolve, reject) {
-        const img = new Image();
-        img.onload = function () {
-          self.images.set(id, img);
-          resolve(img);
-        };
-        img.onerror = function () {
-          reject(new Error('图片无法解码：' + id));
-        };
-        img.src = url;
-      });
-      this.pending.set(id, promise);
-      return promise.finally(function () {
-        self.pending.delete(id);
-      });
-    },
-
-    remove: function (id) {
-      const url = this.urls.get(id);
-      if (url) URL.revokeObjectURL(url);
-      this.urls.delete(id);
-      this.images.delete(id);
-      this.pending.delete(id);
-      this.meta.delete(id);
-      this.blobs.delete(id);
-    },
-
-    clear: function () {
-      const self = this;
-      this.urls.forEach(function (url) { URL.revokeObjectURL(url); });
-      this.blobs.clear();
-      this.meta.clear();
-      this.urls.clear();
-      this.images.clear();
-      this.pending.clear();
-      return self;
-    },
-
-    list: function () {
-      const self = this;
-      return Array.from(this.blobs.keys()).map(function (id) {
-        return Object.assign({ id: id }, self.meta.get(id) || {});
-      });
-    }
-  };
-
-  /* ---------- hashing / base64 ---------- */
-  async function hashBytes(buffer) {
-    const subtle = window.crypto && window.crypto.subtle;
-    if (subtle) {
-      try {
-        const digest = await subtle.digest('SHA-256', buffer);
-        const bytes = new Uint8Array(digest);
-        let out = '';
-        for (let i = 0; i < bytes.length; i += 1) {
-          out += bytes[i].toString(16).padStart(2, '0');
-        }
-        return 'sha-' + out;
-      } catch (err) {
-        /* file:// can expose crypto but reject digest; fall through */
-      }
-    }
-    let hash = 0xcbf29ce484222325n;
-    const prime = 0x100000001b3n;
-    const mask = 0xffffffffffffffffn;
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.length; i += 1) {
-      hash ^= BigInt(bytes[i]);
-      hash = (hash * prime) & mask;
-    }
-    return 'fnv-' + hash.toString(16).padStart(16, '0') + '-' + bytes.length;
-  }
-
-  function blobToBase64(blob) {
-    return new Promise(function (resolve, reject) {
-      const reader = new FileReader();
-      reader.onload = function () {
-        const result = String(reader.result || '');
-        const comma = result.indexOf(',');
-        resolve(comma >= 0 ? result.slice(comma + 1) : result);
-      };
-      reader.onerror = function () {
-        reject(new Error('图片读取失败'));
-      };
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  function base64ToBlob(base64, mime) {
-    const clean = String(base64 || '').replace(/\s+/g, '');
-    if (!clean) throw new Error('图片数据为空');
-    let binary;
-    try {
-      binary = atob(clean);
-    } catch (err) {
-      throw new Error('图片数据不是合法 base64');
-    }
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: mime || 'image/png' });
-  }
-
   function fontString(style) {
     const weight = style && style.fontWeight ? style.fontWeight : 400;
     const size = style && style.fontSize ? style.fontSize : 16;
@@ -883,23 +723,17 @@
     return italic + weight + ' ' + size + 'px ' + family;
   }
 
-  function downloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
-  }
-
   L.model = {
     DEFAULT_FONT: DEFAULT_FONT,
     DEFAULT_TITLE_STYLE: DEFAULT_TITLE_STYLE,
     DEFAULT_SONG_STYLE: DEFAULT_SONG_STYLE,
     DEFAULT_TEXT_STYLE: DEFAULT_TEXT_STYLE,
     BACKGROUND_FITS: BACKGROUND_FITS,
+    OPACITY_MIN: OPACITY_MIN,
+    OPACITY_MAX: OPACITY_MAX,
+    BLUR_MIN: BLUR_MIN,
+    MARGIN_MIN: MARGIN_MIN,
+    IMAGE_MIN_SIZE: IMAGE_MIN_SIZE,
     DEFAULT_BACKGROUND_COLOR: DEFAULT_BACKGROUND_COLOR,
     DEFAULT_BACKGROUND_IMAGE: DEFAULT_BACKGROUND_IMAGE,
     DEFAULT_TABLE_MARGINS: DEFAULT_TABLE_MARGINS,
@@ -948,12 +782,6 @@
     pageIndexOf: pageIndexOf,
     virtualWidth: virtualWidth,
     isCjkCodePoint: isCjkCodePoint,
-    hashBytes: hashBytes,
-    blobToBase64: blobToBase64,
-    base64ToBlob: base64ToBlob,
-    fontString: fontString,
-    downloadBlob: downloadBlob
+    fontString: fontString
   };
-
-  L.assets = assets;
 })();

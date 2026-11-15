@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 构建产物文件清单
-构建产物必须完整包含全部运行时文件：`index.html`、`style.css`、`index.html` 引用的全部 `js/` 脚本（含子目录，数量以 `index.html` 实际引用与 `js/presets-data/` 实际内容为准，不得硬编码）、`vendor/` 下全部文件以及 `VERSION` 文件，目录结构与仓库一致。任一被引用源文件缺失时构建必须失败退出并指明缺失文件，不得产出半截产物。产物必须只含运行时文件：`scripts/`、`presets/` 素材源图与开发期自检脚本 `js/dev-checks.js` MUST NOT 进入产物，命中即构建失败。
+构建产物必须完整包含全部运行时文件：`index.html`、`style.css`、`index.html` 引用的全部 `js/` 脚本（含子目录，数量以 `index.html` 实际引用与 `js/presets-data/` 实际内容为准，不得硬编码）、`vendor/` 下全部文件以及 `VERSION` 文件，目录结构与仓库一致。任一被引用源文件缺失时构建必须失败退出并指明缺失文件，不得产出半截产物。产物必须只含运行时文件：`scripts/`、`presets/` 素材源图与开发期自检脚本 `js/dev-checks.js` MUST NOT 进入产物。开发期文件 MUST 在拷贝阶段即被排除，源码中存在 `js/dev-checks.js` 不得导致构建失败；产物清洁检查作为兜底断言，命中即构建失败。
 
 #### Scenario: 递归拷贝 js 子目录
 - **WHEN** 构建成功
@@ -24,6 +24,10 @@
 #### Scenario: 自检文件误入产物
 - **WHEN** 构建产物检测到 `js/dev-checks.js`
 - **THEN** 构建失败退出并指明该违规文件
+
+#### Scenario: 源码含自检文件时正常构建
+- **WHEN** 仓库存在 `js/dev-checks.js` 并执行 `./build.sh`
+- **THEN** 构建成功，产物中不存在该文件（拷贝阶段已排除）
 
 ### Requirement: 版本管理
 版本号的唯一来源必须是仓库根 `VERSION` 文件（单行语义化版本号）。构建必须把形如 `?v=<版本号>` 的缓存参数注入产物 `index.html` 中的每个本地资源引用：已有参数则替换，缺失则添加，注入数量必须与 `index.html` 实际本地引用数量一致，不一致即构建失败。构建还必须把 `?v=<版本号>` 注入产物 `js/presets.js` 中预置资源的版本常量，该常量 SHALL 同时用于索引与全部分类块的地址；构建必须校验预置索引列出的每个分类块都存在于产物中，缺失即失败。构建还必须把 `<版本号>` 注入产物 `js/app.js` 的构建标识，使发布产物中的构建标识与 `index.html` 的 `?v=` 一致。构建必须校验 `VERSION` 格式，缺失或非法即失败；构建不得修改仓库中的源文件。

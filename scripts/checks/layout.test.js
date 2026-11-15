@@ -1,0 +1,340 @@
+'use strict';
+
+/*
+ * js/layout.js 的布局回归。
+ * 运行：node --test scripts/checks/layout.test.js
+ *
+ * 基线来自 scripts/checks/loader.js 的确定性 measureText：
+ *   measureText(text) = virtualWidth(text) * fontSize * 0.6
+ * 不要覆盖 L.layout.measureText —— layout.js 内部按闭包调用它，覆盖导出无效。
+ *
+ * 期望值均按当前实现记录（拆分前基线）。以后改动 layout 若与这些值不符，
+ * 应先确认是有意改行为，再同步更新这里的基线。
+ */
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { load } = require('./loader.js');
+
+const L = load();
+const model = L.model;
+const layout = L.layout;
+const plain = require('./loader.js').toPlain;
+
+const PADDING = 16; // BLOCK_PADDING
+const TITLE_GAP = 10;
+const CELL_PAD_X = 8;
+const CELL_PAD_Y = 4;
+const SAFETY = 2;
+
+function near(actual, expected, message) {
+  assert.ok(
+    Math.abs(actual - expected) < 1e-9,
+    (message || '数值不接近') + '：实际 ' + actual + '，期望 ' + expected
+  );
+}
+
+function project() {
+  return {
+    pageSize: { width: 800, height: 1200 },
+    margins: { top: 0, right: 0, bottom: 0, left: 0 }
+  };
+}
+
+function categoryElement(name, width, tables) {
+  const element = model.createCategoryElement(name, 0, 0, project(), width);
+  element.tables = tables;
+  return element;
+}
+
+function songs(prefix, count) {
+  const list = [];
+  for (let i = 1; i <= count; i += 1) list.push(prefix + i);
+  return list;
+}
+
+const SONG_STYLE = { fontSize: 28, fontWeight: 400, fontFamily: 'sans-serif', lineHeight: 1.35 };
+
+/* ---------- 基线：确定性文本度量 ---------- */
+
+test('measureText 基线：宽度只由虚拟宽度与字号决定', function () {
+  near(layout.measureText('歌曲1', SONG_STYLE), 5 * 28 * 0.6); // 2 + 2 + 1 = 5
+  near(layout.measureText('A', SONG_STYLE), 1 * 28 * 0.6);
+  near(layout.measureText('好', SONG_STYLE), 2 * 28 * 0.6);
+  near(layout.measureText('', SONG_STYLE), 0);
+});
+
+test('wrapText：按测量宽度折行，空串保留一行', function () {
+  const style = { fontSize: 16, fontWeight: 400, fontFamily: 'sans-serif', lineHeight: 1.2 };
+  // 每字符 16 * 0.6 = 9.6px，48px 恰好容纳 5 个 ASCII 或 2 个 CJK。
+  assert.deepEqual(plain(layout.wrapText('abcdefghij', 48, style)), ['abcde', 'fghij']);
+  assert.deepEqual(plain(layout.wrapText('一二三四五', 48, style)), ['一二', '三四', '五']);
+  assert.deepEqual(plain(layout.wrapText('', 100, style)), ['']);
+});
+
+/* ---------- 列宽 ---------- */
+
+test('列宽：动态行 + 自动列宽按内容宽度分配空隙', function () {
+  const element = categoryElement('测试', 600, [model.createTable({ columns: 5, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '测试', songs: songs('歌曲', 21) }, element);
+  const table = result.tables[0];
+
+  // 21 首歌按宽度稳定排序后列优先填充，5 列 → 5 行。
+  assert.equal(table.rows, 5);
+  assert.equal(table.columns, 5);
+  assert.equal(table.cells.length, 25);
+  assert.equal(table.cells.filter(function (cell) { return !cell; }).length, 4);
+  assert.equal(table.take, 21);
+  assert.equal(table.startIndex, 0);
+
+  // 原始列宽 = 该列最宽文本 + 左右单元格内边距 + 2px 安全量。
+  assert.deepEqual(plain(table.rawWidths), [102, 118.8, 118.8, 118.8, 118.8]);
+  assert.equal(table.fallback, false);
+  near(table.gap, 5.7);
+  near(table.widths[0], 107.7);
+  near(table.widths[1], 124.5);
+  near(table.widths[2], 124.5);
+  near(table.widths[3], 124.5);
+  near(table.widths[4], 118.8);
+  assert.deepEqual(plain(table.contentWidths), [102, 118.8, 118.8, 118.8, 118.8]);
+  near(table.widths.reduce(function (a, b) { return a + b; }, 0), 600);
+
+  // 单元格几何：x/y/宽/高与内宽。
+  const first = table.cells[0];
+  assert.deepEqual(
+    { text: first.text, row: first.row, col: first.col, x: first.x, y: first.y },
+    { text: '歌曲1', row: 0, col: 0, x: 0, y: 0 }
+  );
+  near(first.width, 107.7);
+  near(first.height, 28 * 1.35 + CELL_PAD_Y * 2); // 45.8
+  near(first.innerWidth, 102 - CELL_PAD_X * 2); // 86
+  near(first.textWidth, 84);
+  assert.equal(first.overflow, false);
+});
+
+test('列宽：单列占满表格宽度', function () {
+  const element = categoryElement('单列', 600, [model.createTable({ columns: 1, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '单列', songs: ['短', '很长很长的歌名'] }, element);
+  const table = result.tables[0];
+  assert.deepEqual(plain(table.widths), [600]);
+  assert.deepEqual(plain(table.contentWidths), [600]);
+  assert.equal(table.gap, 0);
+  near(table.cells[0].contentWidth, 600);
+});
+
+test('列宽：手动列宽按总宽等比适配且 gap 为 0', function () {
+  const element = categoryElement('手动', 600, [
+    model.createTable({ columns: 2, rows: 0, widthMode: 'manual', widths: [100, 200] })
+  ]);
+  const result = layout.layoutCategory({ name: '手动', songs: ['短', '很长很长的歌名'] }, element);
+  const table = result.tables[0];
+
+  assert.equal(table.widthMode, 'manual');
+  assert.equal(table.gap, 0);
+  near(table.widths[0], 190.47619047619048);
+  near(table.widths[1], 409.5238095238095);
+  assert.deepEqual(plain(table.contentWidths), plain(table.widths));
+  near(table.widths[0] + table.widths[1], 600);
+  // 手动模式下 rawWidths 仍是内容测量值，供属性面板参考。
+  near(table.rawWidths[0], 2 * 28 * 0.6 + CELL_PAD_X * 2 + SAFETY); // 短（CJK 记 2）
+  near(table.rawWidths[1], 14 * 28 * 0.6 + CELL_PAD_X * 2 + SAFETY); // 7 个 CJK 字，各记 2
+});
+
+test('列宽：内容放不下时回退为等宽并标记 fallback', function () {
+  const element = categoryElement('窄', 100, [model.createTable({ columns: 5, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '窄', songs: songs('歌曲', 5) }, element);
+  const table = result.tables[0];
+
+  assert.equal(table.tableWidth, 100);
+  assert.equal(table.fallback, true);
+  assert.equal(table.gap, 0);
+  assert.deepEqual(plain(table.widths), [20, 20, 20, 20, 20]);
+  assert.deepEqual(plain(table.contentWidths), plain(table.widths));
+});
+
+/* ---------- assignTableSongs：填充顺序 ---------- */
+
+test('填充顺序：列优先（column）先填满一列再换列', function () {
+  // 排序后：a(1), cc(2), bbbb(4), dddddd(6)，2 列 → 2 行。
+  const element = categoryElement('列优先', 600, [
+    model.createTable({ columns: 2, rows: 0, fill: 'column' })
+  ]);
+  const result = layout.layoutCategory({ name: '列优先', songs: ['a', 'bbbb', 'cc', 'dddddd'] }, element);
+  const table = result.tables[0];
+
+  assert.equal(table.rows, 2);
+  assert.deepEqual(
+    plain(table.cells.map(function (cell) { return cell ? cell.text + ':' + cell.row + ',' + cell.col : null; })),
+    ['a:0,0', 'bbbb:0,1', 'cc:1,0', 'dddddd:1,1']
+  );
+  near(table.widths[0], 481.20000000000005);
+  near(table.widths[1], 118.79999999999995);
+});
+
+test('填充顺序：行优先（row）先填满一行再换行', function () {
+  const element = categoryElement('行优先', 600, [
+    model.createTable({ columns: 2, rows: 0, fill: 'row' })
+  ]);
+  const result = layout.layoutCategory({ name: '行优先', songs: ['a', 'bbbb', 'cc', 'dddddd'] }, element);
+  const table = result.tables[0];
+
+  assert.equal(table.rows, 2);
+  assert.deepEqual(
+    plain(table.cells.map(function (cell) { return cell ? cell.text + ':' + cell.row + ',' + cell.col : null; })),
+    ['a:0,0', 'cc:0,1', 'bbbb:1,0', 'dddddd:1,1']
+  );
+  assert.deepEqual(plain(table.contentWidths), [85.2, 118.8]);
+  near(table.widths[0], 481.2);
+  near(table.widths[1], 118.8);
+});
+
+test('填充顺序：多列列优先时单元格按列存储', function () {
+  // 5 列、21 首歌：歌曲1..5 落在第 0 列，索引 0/5/10/15/20。
+  const element = categoryElement('测试', 600, [model.createTable({ columns: 5, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '测试', songs: songs('歌曲', 21) }, element);
+  const cells = result.tables[0].cells;
+
+  // cells 下标 = row * columns + col；列优先意味着第 0 行横跨 5 列。
+  assert.deepEqual(
+    plain([cells[0], cells[1], cells[2], cells[3], cells[4]].map(function (cell) {
+      return cell.text;
+    })),
+    ['歌曲1', '歌曲6', '歌曲11', '歌曲16', '歌曲21']
+  );
+  assert.equal(cells[5].text, '歌曲2'); // row 1, col 0
+  assert.equal(cells[20].text, '歌曲5'); // row 4, col 0
+});
+
+/* ---------- 动态行数 ---------- */
+
+test('动态行：rows = 0 时行数由 ceil(歌数 / 列数) 决定', function () {
+  const element = categoryElement('测试', 600, [model.createTable({ columns: 5, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '测试', songs: songs('歌曲', 21) }, element);
+
+  assert.equal(result.tables[0].rows, Math.ceil(21 / 5));
+  assert.equal(result.tables[0].height, Math.ceil(21 / 5) * (28 * 1.35 + CELL_PAD_Y * 2));
+});
+
+test('动态行：空分类在导出视图不占行', function () {
+  const element = categoryElement('空表', 600, [model.createTable({ columns: 3, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '空表', songs: [] }, element);
+  const table = result.tables[0];
+
+  assert.equal(table.placeholder, false);
+  assert.equal(table.rows, 0);
+  assert.equal(table.cells.length, 0);
+  assert.equal(table.height, 0);
+  // 标题仍在：16 + 52.8（44 * 1.2）+ 10 = 78.8；无表格行时再加 16 的底部内边距。
+  near(table.y, 78.8);
+  near(result.blockHeight, 94.8);
+});
+
+test('动态行：编辑视图为空动态表补一个占位行', function () {
+  const element = categoryElement('空表', 600, [model.createTable({ columns: 3, rows: 0 })]);
+  const result = layout.layoutCategory({ name: '空表', songs: [] }, element, { editMode: true });
+  const table = result.tables[0];
+
+  assert.equal(table.placeholder, true);
+  assert.equal(table.rows, 1);
+  assert.equal(table.cells.length, 3);
+  assert.equal(table.cells.every(function (cell) { return cell === null; }), true);
+  near(table.height, 28 * 1.35 + CELL_PAD_Y * 2);
+  near(result.blockHeight, 124.6);
+});
+
+/* ---------- 满页续表 ---------- */
+
+test('满页续表：固定行表格装不下时追加动态表并持久化', function () {
+  const element = categoryElement('固定', 600, [model.createTable({ columns: 2, rows: 2 })]);
+  const result = layout.layoutCategory(
+    { name: '固定', songs: ['a', 'b', 'c', 'd', 'e', 'f'] },
+    element
+  );
+
+  // 容量 2 * 2 = 4，剩余 2 首进入追加的动态表。
+  assert.equal(result.tables.length, 2);
+  assert.equal(element.tables.length, 2);
+  assert.deepEqual(plain(result.tables.map(function (table) { return table.rows; })), [2, 1]);
+  assert.deepEqual(plain(result.tables.map(function (table) { return table.take; })), [4, 2]);
+  assert.deepEqual(plain(result.tables.map(function (table) { return table.startIndex; })), [0, 4]);
+  near(result.tables[0].y, 78.8);
+  near(result.tables[1].y, 170.4);
+  near(result.tables[1].height, 45.8);
+  near(result.blockHeight, 216.2);
+
+  // 追加的表继承列设置，持久化后的 rows 仍为 0（保持动态）。
+  assert.equal(element.tables[1].rows, 0);
+  assert.equal(element.tables[1].columns, 2);
+  assert.equal(element.tables[1].fill, 'column');
+  assert.deepEqual(
+    plain(result.tables[1].cells
+      .filter(function (cell) { return cell; })
+      .map(function (cell) { return cell.text; })),
+    ['e', 'f']
+  );
+});
+
+test('满页续表：固定表格未装满时不追加新表', function () {
+  const element = categoryElement('固定', 600, [model.createTable({ columns: 2, rows: 2 })]);
+  const result = layout.layoutCategory({ name: '固定', songs: ['a', 'b', 'c', 'd'] }, element);
+
+  assert.equal(result.tables.length, 1);
+  assert.equal(element.tables.length, 1);
+  assert.equal(result.tables[0].rows, 2);
+  assert.equal(result.tables[0].take, 4);
+  assert.equal(result.tables[0].cells.filter(function (cell) { return !cell; }).length, 0);
+});
+
+test('满页续表：只有最后一个表格允许动态行', function () {
+  // normalizeTables 会把非末尾的动态表强制成 1 行，避免续接语义歧义。
+  const element = categoryElement('双表', 600, [
+    model.createTable({ columns: 2, rows: 0 }),
+    model.createTable({ columns: 2, rows: 0 })
+  ]);
+  layout.layoutCategory({ name: '双表', songs: ['a', 'b', 'c'] }, element);
+  assert.equal(element.tables[0].rows, 1);
+  assert.equal(element.tables[1].rows, 0);
+});
+
+/* ---------- 块几何 ---------- */
+
+test('块几何：表格边距影响 x、宽度与纵向堆叠', function () {
+  const element = categoryElement('边距', 600, [
+    model.createTable({ columns: 2, rows: 1, margins: { top: 10, right: 60, bottom: 20, left: 40 } }),
+    model.createTable({ columns: 2, rows: 1, margins: { top: 30, right: 0, bottom: 32, left: 0 } })
+  ]);
+  const result = layout.layoutCategory({ name: '边距', songs: ['a', 'b', 'c', 'd'] }, element);
+  const first = result.tables[0];
+  const second = result.tables[1];
+
+  assert.equal(first.x, 40);
+  assert.equal(first.tableWidth, 500);
+  near(first.x + first.widths[0] + first.widths[1], 540);
+  near(first.y, 78.8 + 10); // 标题底 + 上边距
+  near(second.y, first.y + first.height + 20 + 30); // 前表底 + 下边距 + 本表上边距
+  near(result.blockHeight, second.y + second.height + 32);
+});
+
+test('块几何：超大边距把表格压到最小宽度并留在块内', function () {
+  const element = categoryElement('超宽边距', 600, [
+    model.createTable({ columns: 2, rows: 1, margins: { left: 1000, right: 1000 } })
+  ]);
+  const result = layout.layoutCategory({ name: '超宽边距', songs: ['a'] }, element);
+  const table = result.tables[0];
+
+  assert.equal(table.tableWidth, 40);
+  assert.ok(table.x >= 0);
+  assert.ok(table.x + table.tableWidth <= element.width);
+});
+
+test('块几何：隐藏标题时表格从顶部内边距开始', function () {
+  const element = categoryElement('无标题', 600, [model.createTable({ columns: 2, rows: 1 })]);
+  element.showTitle = false;
+  const result = layout.layoutCategory({ name: '无标题', songs: ['a', 'b'] }, element);
+
+  assert.equal(result.showTitle, false);
+  assert.equal(result.titleHeight, 0);
+  near(result.tables[0].y, PADDING);
+  near(result.tables[0].y, 16);
+});

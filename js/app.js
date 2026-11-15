@@ -7,6 +7,8 @@
   const renderer = L.render;
   const ui = L.ui;
 
+  const clamp = model.clamp;
+
   const BUILD = '20261110b';
   L.BUILD = BUILD;
   console.info('[Listify] build ' + BUILD);
@@ -18,52 +20,13 @@
   };
   state.currentPageId = state.project.pages[0].id;
 
-  let pane = null;
-  let viewEl = null;
-  let overlay = null;
-  let overlayCtx = null;
-  let overlayChrome = null;
-  let overlayChromeCtx = null;
-  let bgCanvas = null;
-  let bgCtx = null;
-  let contentCanvas = null;
-  let contentCtx = null;
-  let drag = null;
-  let hoverPoint = null;
-  let lastAppliedCursor = '';
-
-  let inlineEditor = null;
   let pendingImageElementId = null;
-  let pendingBackgroundSetId = null;
-  let pendingBackgroundImageId = null;
-  let pendingBackgroundWhole = false;
   let uiRenderDepth = 0;
 
-  const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
-  const dirty = { bg: false, content: false, chrome: false, overlay: false, draft: false };
-  const drawStats = { redraws: 0, bg: 0, content: 0, chrome: 0, overlay: 0, geometry: 0 };
-  let redrawRaf = 0;
-  let geometryDirty = false;
-  let overflowCache = null;
-  let syncedPageW = 0;
-  let syncedPageH = 0;
-
-  const draft = {
-    enabled: false,
-    restoring: true,
-    timer: 0,
-    lastKey: '',
-    lastSavedAt: 0,
-    status: 'idle',
-    lastError: '',
-    saving: false,
-    queued: false,
-    memoryOnly: false
-  };
   let lastExternalDraftNotice = 0;
 
   // 方向键微调的撤销合并会话：同选择、同方向的连续微调只产生一条撤销记录
-  let nudgeSession = { key: null, direction: null };
+  const nudgeSession = { key: null, direction: null };
 
   const undo = {
     stack: [],
@@ -71,24 +34,24 @@
   };
 
   function pushUndo(label) {
-    undo.stack.push({
+    ctx.undo.stack.push({
       label: label,
-      project: JSON.parse(JSON.stringify(state.project)),
+      project: model.clone(state.project),
       currentPageId: state.currentPageId,
-      selection: JSON.parse(JSON.stringify(state.selection))
+      selection: model.clone(state.selection)
     });
-    if (undo.stack.length > undo.max) undo.stack.shift();
+    if (ctx.undo.stack.length > ctx.undo.max) ctx.undo.stack.shift();
   }
 
   function performUndo() {
-    const entry = undo.stack.pop();
+    const entry = ctx.undo.stack.pop();
     if (!entry) {
       ui.toast('没有可撤销的操作。');
       return;
     }
     // 撤销会替换项目状态，微调会话的旧快照随之失效
-    nudgeSession.key = null;
-    nudgeSession.direction = null;
+    ctx.nudgeSession.key = null;
+    ctx.nudgeSession.direction = null;
     state.project = entry.project;
     state.currentPageId = model.getPage(state.project, entry.currentPageId)
       ? entry.currentPageId
@@ -97,11 +60,34 @@
       ? entry.selection
       : { type: 'page' };
     ui.renderAll();
-    scheduleDraftSave();
+    ctx.draft.scheduleDraftSave();
     ui.toast('已撤销：' + entry.label + '。');
   }
 
-  const viewport = {
+    const surface = {
+    pane: null,
+    viewEl: null,
+    overlay: null,
+    overlayCtx: null,
+    overlayChrome: null,
+    overlayChromeCtx: null,
+    bgCanvas: null,
+    bgCtx: null,
+    contentCanvas: null,
+    contentCtx: null,
+    scrollEl: null,
+    stageEl: null,
+    zoomInput: null,
+    zoomOutBtn: null,
+    zoomInBtn: null,
+    scrollRaf: 0,
+    drag: null,
+    hoverPoint: null,
+    inlineEditor: null,
+    overflowCache: null
+  };
+
+const viewport = {
     scale: 1,
     offsetX: 0,
     offsetY: 0,
@@ -119,20 +105,22 @@
     scrollX: 0,
     scrollY: 0
   };
-  const ZOOM_MIN = 0.1;
-  const ZOOM_MAX = 4;
-  const ZOOM_STEP = 10;
 
-  let scrollEl = null;
-  let stageEl = null;
-  let zoomInput = null;
-  let zoomOutBtn = null;
-  let zoomInBtn = null;
-  let scrollRaf = 0;
+  const ctx = {
+    state: state,
+    surface: surface,
+    viewport: viewport,
+    actions: {},
+    chrome: null,
+    interactions: null,
+    backgrounds: null,
+    presets: null,
+    importExport: null,
+    draft: null,
+    undo: undo,
+    nudgeSession: nudgeSession
+  };
 
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-  }
 
   function currentPage() {
     return model.getPage(state.project, state.currentPageId);
@@ -161,19 +149,6 @@
   }
 
   // 选中者优先：指针位于当前选中元素范围内（图片用旋转后矩形）时返回该元素
-  function selectedElementAt(page, x, y) {
-    if (state.selection.type !== 'element') return null;
-    const element = page.elements.find(function (item) { return item.id === state.selection.id; });
-    if (!element) return null;
-    const bounds = renderer.elementBounds(state.project, page, element);
-    if (element.type === 'image') {
-      const local = renderer.imageLocalPoint(element, x, y);
-      if (Math.abs(local.x) > bounds.width / 2 || Math.abs(local.y) > bounds.height / 2) return null;
-      return { element: element, bounds: bounds };
-    }
-    if (x < bounds.x || y < bounds.y || x > bounds.x + bounds.width || y > bounds.y + bounds.height) return null;
-    return { element: element, bounds: bounds };
-  }
 
   function selectedBackgroundImage() {
     if (state.selection.type !== 'backgroundImage') return null;
@@ -193,1346 +168,62 @@
     return model.findElement(state.project, id);
   }
 
-  function surfaceRatio(pageW, pageH) {
-    const requested = Math.min(2, window.devicePixelRatio || 1);
-    const budget = Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, pageW * pageH));
-    return Math.max(0.1, Math.min(requested, budget));
-  }
 
-  function syncSurface() {
-    const width = Math.max(1, Math.round(state.project.pageSize.width));
-    const height = Math.max(1, Math.round(state.project.pageSize.height));
-    if (!bgCanvas || !contentCanvas) return false;
-    const ratio = surfaceRatio(width, height);
-    const pixelWidth = Math.max(1, Math.round(width * ratio));
-    const pixelHeight = Math.max(1, Math.round(height * ratio));
-    let changed = false;
-    [bgCanvas, contentCanvas].forEach(function (canvas) {
-      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-        canvas.width = pixelWidth;
-        canvas.height = pixelHeight;
-        changed = true;
-      }
-      if (canvas.style.width !== width + 'px' || canvas.style.height !== height + 'px') {
-        canvas.style.width = width + 'px';
-        canvas.style.height = height + 'px';
-      }
-    });
-    return changed;
-  }
 
-  function setupSurface() {
-    pane = document.getElementById('canvas-pane');
-    viewEl = document.getElementById('leafer-view');
-    bgCanvas = document.getElementById('bg-canvas');
-    contentCanvas = document.getElementById('content-canvas');
-    bgCtx = bgCanvas.getContext('2d');
-    contentCtx = contentCanvas.getContext('2d');
-    overlayChrome = document.getElementById('overlay-chrome');
-    overlayChromeCtx = overlayChrome.getContext('2d');
-    overlay = document.getElementById('overlay');
-    overlayCtx = overlay.getContext('2d');
-    scrollEl = document.getElementById('canvas-scroll');
-    stageEl = document.getElementById('canvas-stage');
-    zoomInput = document.getElementById('zoom-input');
-    zoomOutBtn = document.getElementById('btn-zoom-out');
-    zoomInBtn = document.getElementById('btn-zoom-in');
 
-    syncSurface();
-  }
 
-  function toolbarChromeLeft() {
-    const toolbar = document.getElementById('canvas-toolbar');
-    return toolbar ? Math.round(toolbar.getBoundingClientRect().width) + 24 : 0;
-  }
 
-  function measureCanvas() {
-    if (!scrollEl) return false;
-    viewport.width = Math.max(1, scrollEl.clientWidth || 1);
-    viewport.height = Math.max(1, scrollEl.clientHeight || 1);
-    viewport.dpr = window.devicePixelRatio || 1;
-    viewport.padding = Math.min(72, Math.max(24, Math.min(viewport.width, viewport.height) * 0.08));
-    const chromeLeft = toolbarChromeLeft();
-    const availableWidth = Math.max(1, viewport.width - chromeLeft);
-    const pageW = Math.max(1, state.project.pageSize.width);
-    const pageH = Math.max(1, state.project.pageSize.height);
-    viewport.fitScale = Math.max(0.05, Math.min(1.6, Math.min(
-      (availableWidth - viewport.padding * 2 - 1) / pageW,
-      (viewport.height - viewport.padding * 2 - 1) / pageH
-    )));
-    return true;
-  }
 
-  function effectiveScale() {
-    return viewport.mode === 'fit' ? viewport.fitScale : viewport.zoom;
-  }
 
-  function syncGeometry() {
-    if (!scrollEl || !stageEl) return;
-    drawStats.geometry += 1;
-    const pageW = Math.max(1, state.project.pageSize.width);
-    const pageH = Math.max(1, state.project.pageSize.height);
-    let previousSize = '';
-    for (let pass = 0; pass < 2; pass++) {
-      measureCanvas();
-      const chromeLeft = toolbarChromeLeft();
-      const scale = effectiveScale();
-      const contentW = pageW * scale + chromeLeft + viewport.padding * 2;
-      const contentH = pageH * scale + viewport.padding * 2;
-      const stageW = contentW <= viewport.width + 0.01 ? viewport.width : Math.ceil(contentW);
-      const stageH = contentH <= viewport.height + 0.01 ? viewport.height : Math.ceil(contentH);
-      stageEl.style.width = stageW + 'px';
-      stageEl.style.height = stageH + 'px';
-      viewport.scale = scale;
-      viewport.stageWidth = stageW;
-      viewport.stageHeight = stageH;
-      viewport.originX = stageW > viewport.width + 0.5
-        ? chromeLeft + viewport.padding
-        : chromeLeft + (viewport.width - chromeLeft - pageW * scale) / 2;
-      viewport.originY = stageH > viewport.height + 0.5
-        ? viewport.padding
-        : (viewport.height - pageH * scale) / 2;
-      // Scrollbars may appear or disappear after the stage resize; measure once
-      // more so the origin and offsets use the real visible area.
-      const size = scrollEl.clientWidth + 'x' + scrollEl.clientHeight;
-      if (size === previousSize) break;
-      previousSize = size;
-    }
-    viewport.scrollX = clamp(scrollEl.scrollLeft, 0, Math.max(0, viewport.stageWidth - viewport.width));
-    viewport.scrollY = clamp(scrollEl.scrollTop, 0, Math.max(0, viewport.stageHeight - viewport.height));
-    if (scrollEl.scrollLeft !== viewport.scrollX) scrollEl.scrollLeft = viewport.scrollX;
-    if (scrollEl.scrollTop !== viewport.scrollY) scrollEl.scrollTop = viewport.scrollY;
-    viewport.offsetX = viewport.originX - viewport.scrollX;
-    viewport.offsetY = viewport.originY - viewport.scrollY;
-    syncedPageW = pageW;
-    syncedPageH = pageH;
-    updateZoomUI();
-  }
 
-  function scheduleRedraw(layers) {
-    const list = layers && layers.length ? layers : ['content', 'overlay'];
-    list.forEach(function (layer) {
-      if (layer === 'bg') {
-        dirty.bg = true;
-      } else if (layer === 'content') {
-        dirty.content = true;
-        dirty.chrome = true;
-        overflowCache = null;
-      } else if (layer === 'chrome') {
-        dirty.chrome = true;
-      } else if (layer === 'overlay') {
-        dirty.overlay = true;
-      } else if (layer === 'all') {
-        dirty.bg = dirty.content = dirty.chrome = dirty.overlay = true;
-        overflowCache = null;
-      }
-    });
-    if (dirty.bg || dirty.content) dirty.draft = true;
-    requestRedrawFrame();
-  }
 
-  function requestGeometry() {
-    geometryDirty = true;
-    requestRedrawFrame();
-  }
 
-  function requestRedrawFrame() {
-    if (!redrawRaf) redrawRaf = requestAnimationFrame(flushRedraw);
-  }
 
-  function flushRedraw() {
-    redrawRaf = 0;
-    const page = currentPage();
-    if (!page) return;
-    const pageW = state.project.pageSize.width;
-    const pageH = state.project.pageSize.height;
-    if (pageW !== syncedPageW || pageH !== syncedPageH) geometryDirty = true;
-    if (geometryDirty) {
-      geometryDirty = false;
-      syncGeometry();
-      applyViewTransform();
-      syncedPageW = pageW;
-      syncedPageH = pageH;
-    }
-    if (syncSurface()) {
-      dirty.bg = true;
-      dirty.content = true;
-    }
-    if (dirty.bg || dirty.content) layout.beginFrame();
-    drawStats.redraws += 1;
-    if (dirty.bg) {
-      dirty.bg = false;
-      drawBackgroundLayer(page);
-      drawStats.bg += 1;
-    }
-    if (dirty.content) {
-      dirty.content = false;
-      drawContentLayer(page);
-      drawStats.content += 1;
-    }
-    if (dirty.chrome) {
-      dirty.chrome = false;
-      drawChrome(page);
-      drawStats.chrome += 1;
-    }
-    if (dirty.overlay) {
-      dirty.overlay = false;
-      drawOverlayLayer(page);
-      drawStats.overlay += 1;
-    }
-    if (dirty.draft) {
-      dirty.draft = false;
-      scheduleDraftSave();
-    }
-    refreshHoverCursor();
-  }
 
-  function applyViewTransform() {
-    if (!viewEl) return;
-    const pageW = Math.max(1, state.project.pageSize.width);
-    const pageH = Math.max(1, state.project.pageSize.height);
-    viewEl.style.width = pageW + 'px';
-    viewEl.style.height = pageH + 'px';
-    viewEl.style.transformOrigin = '0 0';
-    viewEl.style.transform = 'translate(' + viewport.originX + 'px,' + viewport.originY + 'px) scale(' + viewport.scale + ')';
 
-    sizeViewportCanvas(overlay);
-    sizeViewportCanvas(overlayChrome);
-  }
 
-  function sizeViewportCanvas(canvas) {
-    if (!canvas) return;
-    const pixelWidth = Math.max(1, Math.round(viewport.width * viewport.dpr));
-    const pixelHeight = Math.max(1, Math.round(viewport.height * viewport.dpr));
-    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-      canvas.width = pixelWidth;
-      canvas.height = pixelHeight;
-    }
-    if (canvas.style.width !== viewport.width + 'px' || canvas.style.height !== viewport.height + 'px') {
-      canvas.style.width = viewport.width + 'px';
-      canvas.style.height = viewport.height + 'px';
-    }
-  }
 
-  function pageScreenRect() {
-    return {
-      x: viewport.offsetX,
-      y: viewport.offsetY,
-      width: state.project.pageSize.width * viewport.scale,
-      height: state.project.pageSize.height * viewport.scale
-    };
-  }
 
-  function toScreen(x, y) {
-    return {
-      x: viewport.offsetX + x * viewport.scale,
-      y: viewport.offsetY + y * viewport.scale
-    };
-  }
 
-  function toPage(screenX, screenY) {
-    return {
-      x: (screenX - viewport.offsetX) / viewport.scale,
-      y: (screenY - viewport.offsetY) / viewport.scale
-    };
-  }
 
-  function redraw() {
-    scheduleRedraw(['all']);
-  }
 
-  function preparePageContext(ctx) {
-    const pageW = Math.max(1, state.project.pageSize.width);
-    const pageH = Math.max(1, state.project.pageSize.height);
-    ctx.setTransform(ctx.canvas.width / pageW, 0, 0, ctx.canvas.height / pageH, 0, 0);
-  }
 
-  function drawBackgroundLayer(page) {
-    if (!bgCtx) return;
-    const pageW = state.project.pageSize.width;
-    const pageH = state.project.pageSize.height;
-    preparePageContext(bgCtx);
-    bgCtx.clearRect(0, 0, pageW, pageH);
-    renderer.drawBackground(bgCtx, state.project, page);
-  }
 
-  function drawContentLayer(page) {
-    if (!contentCtx) return;
-    const pageW = state.project.pageSize.width;
-    const pageH = state.project.pageSize.height;
-    preparePageContext(contentCtx);
-    contentCtx.clearRect(0, 0, pageW, pageH);
-    renderer.drawPage(contentCtx, state.project, page, {
-      editMode: true,
-      selectedId: state.selection.type === 'element' ? state.selection.id : null,
-      includeBackground: false
-    });
-  }
 
-  function fit() {
-    viewport.mode = 'fit';
-    if (scrollEl) {
-      scrollEl.scrollLeft = 0;
-      scrollEl.scrollTop = 0;
-    }
-    syncGeometry();
-    applyViewTransform();
-    scheduleRedraw(['chrome', 'overlay']);
-  }
 
-  function updateZoomUI() {
-    if (!zoomInput) return;
-    const percent = Math.round(viewport.scale * 100);
-    if (document.activeElement !== zoomInput) {
-      zoomInput.value = percent + '%';
-    }
-    if (zoomOutBtn) {
-      const disabled = percent <= Math.round(ZOOM_MIN * 100);
-      zoomOutBtn.disabled = disabled;
-      zoomOutBtn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    }
-    if (zoomInBtn) {
-      const disabled = percent >= Math.round(ZOOM_MAX * 100);
-      zoomInBtn.disabled = disabled;
-      zoomInBtn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    }
-  }
 
-  function centerAnchor() {
-    return { x: viewport.width / 2, y: viewport.height / 2 };
-  }
 
-  function zoomAround(nextScale, anchor) {
-    if (!scrollEl || !stageEl) return;
-    const previousScale = viewport.scale;
-    const target = clamp(nextScale, ZOOM_MIN, ZOOM_MAX);
-    const point = anchor || centerAnchor();
-    const pageX = (point.x - viewport.offsetX) / previousScale;
-    const pageY = (point.y - viewport.offsetY) / previousScale;
-    viewport.mode = 'manual';
-    viewport.zoom = target;
-    syncGeometry();
-    const maxX = Math.max(0, viewport.stageWidth - viewport.width);
-    const maxY = Math.max(0, viewport.stageHeight - viewport.height);
-    scrollEl.scrollLeft = clamp(viewport.originX + pageX * viewport.scale - point.x, 0, maxX);
-    scrollEl.scrollTop = clamp(viewport.originY + pageY * viewport.scale - point.y, 0, maxY);
-    syncGeometry();
-    applyViewTransform();
-    scheduleRedraw(['chrome', 'overlay']);
-  }
 
-  function setZoomPercent(percent) {
-    const value = Number(percent);
-    if (!Number.isFinite(value)) return;
-    zoomAround(clamp(value, ZOOM_MIN * 100, ZOOM_MAX * 100) / 100, centerAnchor());
-  }
-
-  function stepZoom(delta) {
-    const current = Math.round(viewport.scale * 100);
-    const base = viewport.mode === 'fit' ? current : Math.round(viewport.zoom * 100);
-    let next = base + delta;
-    if (base < ZOOM_MIN * 100 && delta > 0) next = ZOOM_MIN * 100;
-    setZoomPercent(clamp(next, ZOOM_MIN * 100, ZOOM_MAX * 100));
-  }
-
-  function zoomIn() {
-    stepZoom(ZOOM_STEP);
-  }
-
-  function zoomOut() {
-    stepZoom(-ZOOM_STEP);
-  }
-
-  function syncScrollOffsets() {
-    if (!scrollEl) return;
-    viewport.scrollX = scrollEl.scrollLeft;
-    viewport.scrollY = scrollEl.scrollTop;
-    viewport.offsetX = viewport.originX - viewport.scrollX;
-    viewport.offsetY = viewport.originY - viewport.scrollY;
-  }
-
-  function onCanvasScroll() {
-    if (scrollRaf) return;
-    scrollRaf = requestAnimationFrame(function () {
-      scrollRaf = 0;
-      syncScrollOffsets();
-      scheduleRedraw(['chrome', 'overlay']);
-    });
-  }
-
-  function onCanvasWheel(event) {
-    if (!scrollEl) return;
-    if (event.ctrlKey || event.metaKey) {
-      event.preventDefault();
-      const rect = overlay.getBoundingClientRect();
-      const anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
-      zoomAround(viewport.scale * factor, anchor);
-      return;
-    }
-    let dx = event.deltaX;
-    let dy = event.deltaY;
-    if (event.deltaMode === 1) {
-      dx *= 16;
-      dy *= 16;
-    } else if (event.deltaMode === 2) {
-      dx *= viewport.width;
-      dy *= viewport.height;
-    }
-    if (event.shiftKey && !dx) {
-      dx = dy;
-      dy = 0;
-    }
-    if (!dx && !dy) return;
-    if (viewport.stageWidth <= viewport.width && viewport.stageHeight <= viewport.height) return;
-    event.preventDefault();
-    scrollEl.scrollLeft += dx;
-    scrollEl.scrollTop += dy;
-  }
-
-  function handleResize() {
-    if (viewport.mode === 'fit') {
-      fit();
-      return;
-    }
-    syncGeometry();
-    applyViewTransform();
-    scheduleRedraw(['chrome', 'overlay']);
-  }
-
-  function drawChrome(page) {
-    if (!overlayChromeCtx) return;
-    const ctx = overlayChromeCtx;
-    ctx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
-    ctx.clearRect(0, 0, viewport.width, viewport.height);
-    const rect = pageScreenRect();
-
-    // Page shadow and border live outside the page container and never export.
-    ctx.save();
-    ctx.shadowColor = 'rgba(15, 23, 42, 0.28)';
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 8;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.01)';
-    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(15, 23, 42, 0.16)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
-
-    drawMarginGuides(ctx, rect);
-    drawOverflow(ctx, page, rect);
-    if (!editingBackground()) drawPageSizeHandle(ctx, rect);
-  }
-
-  function drawOverlayLayer(page) {
-    if (!overlayCtx) return;
-    overlayCtx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
-    overlayCtx.clearRect(0, 0, viewport.width, viewport.height);
-    drawSelection(overlayCtx, page);
-  }
-
-  function drawMarginGuides(ctx, rect) {
-    const margins = state.project.margins;
-    const s = viewport.scale;
-    const left = rect.x + margins.left * s;
-    const right = rect.x + (state.project.pageSize.width - margins.right) * s;
-    const top = rect.y + margins.top * s;
-    const bottom = rect.y + (state.project.pageSize.height - margins.bottom) * s;
-
-    ctx.save();
-    ctx.strokeStyle = 'rgba(37, 99, 235, 0.48)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(left, rect.y);
-    ctx.lineTo(left, rect.y + rect.height);
-    ctx.moveTo(right, rect.y);
-    ctx.lineTo(right, rect.y + rect.height);
-    ctx.moveTo(rect.x, top);
-    ctx.lineTo(rect.x + rect.width, top);
-    ctx.moveTo(rect.x, bottom);
-    ctx.lineTo(rect.x + rect.width, bottom);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-
-    marginHandlePoints(rect).forEach(function (handle) {
-      drawRoundHandle(ctx, handle.x, handle.y, 4, '#2563eb', '#ffffff');
-    });
-  }
-
-  function marginHandlePoints(rect) {
-    const margins = state.project.margins;
-    const s = viewport.scale;
-    return [
-      { side: 'left', x: rect.x + margins.left * s, y: rect.y + rect.height / 2 },
-      { side: 'right', x: rect.x + (state.project.pageSize.width - margins.right) * s, y: rect.y + rect.height / 2 },
-      { side: 'top', x: rect.x + rect.width / 2, y: rect.y + margins.top * s },
-      { side: 'bottom', x: rect.x + rect.width / 2, y: rect.y + (state.project.pageSize.height - margins.bottom) * s }
-    ];
-  }
-
-  function cachedOverflow(page) {
-    if (!overflowCache) overflowCache = renderer.pageOverflow(state.project, page);
-    return overflowCache;
-  }
-
-  function drawOverflow(ctx, page, rect) {
-    const overflow = cachedOverflow(page);
-    if (!overflow.length) return;
-    ctx.save();
-    ctx.strokeStyle = '#dc2626';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 5]);
-    ctx.strokeRect(rect.x - 3, rect.y - 3, rect.width + 6, rect.height + 6);
-    ctx.setLineDash([]);
-    const text = '⚠ ' + overflow.length + ' 个元素超出页面';
-    ctx.font = '600 12px "Microsoft YaHei", "PingFang SC", sans-serif';
-    const textWidth = ctx.measureText(text).width;
-    const badgeWidth = textWidth + 18;
-    const badgeHeight = 24;
-    const bx = rect.x + rect.width - badgeWidth - 8;
-    const by = rect.y + 8;
-    ctx.fillStyle = '#dc2626';
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(bx, by, badgeWidth, badgeHeight, 12);
-    else ctx.rect(bx, by, badgeWidth, badgeHeight);
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, bx + badgeWidth / 2, by + badgeHeight / 2 + 0.5);
-    ctx.restore();
-  }
-
-  function drawRoundHandle(ctx, x, y, radius, stroke, fill) {
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = fill;
-    ctx.fill();
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  function drawSquareHandle(ctx, x, y, size, stroke, fill) {
-    ctx.beginPath();
-    ctx.rect(x - size / 2, y - size / 2, size, size);
-    ctx.fillStyle = fill;
-    ctx.fill();
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  function screenFromPage(x, y) {
-    return {
-      x: viewport.offsetX + x * viewport.scale,
-      y: viewport.offsetY + y * viewport.scale
-    };
-  }
 
   /* ---------- rotated handle cursors ---------- */
 
   // 双向箭头字形与手柄类型无关，只随方向旋转；按 1° 归一化角度缓存光标串。
-  const rotatedCursorCache = new Map();
   // 屏幕 y 向下、正角顺时针：0° 水平、45° “\”、90° 竖直、135° “/”。
-  const RESIZE_CURSOR_KEYWORDS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
-  const CURSOR_STANDARD_STEP = 45;
-  const CURSOR_SNAP_TOLERANCE = 0.5;
 
-  function normalizeCursorAngle(degrees) {
-    let angle = Number(degrees);
-    if (!Number.isFinite(angle)) angle = 0;
-    angle = angle % 180;
-    if (angle < 0) angle += 180;
-    return angle;
-  }
 
-  function resizeCursorKeyword(angle) {
-    const bucket = Math.round(angle / CURSOR_STANDARD_STEP) % RESIZE_CURSOR_KEYWORDS.length;
-    return RESIZE_CURSOR_KEYWORDS[bucket];
-  }
 
-  function rotatedCursorSvg(angle) {
-    // 32×32 是 Chrome/Edge 光标图上限；箭头画在中间约 20px 范围内。
-    const path = 'M6 16 L11 11.5 L11 14.5 L21 14.5 L21 11.5 L26 16 ' +
-      'L21 20.5 L21 17.5 L11 17.5 L11 20.5 Z';
-    return '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
-      '<g transform="rotate(' + angle + ' 16 16)">' +
-      '<path d="' + path + '" fill="none" stroke="#ffffff" stroke-width="4" ' +
-      'stroke-linejoin="round" stroke-linecap="round"/>' +
-      '<path d="' + path + '" fill="#111827" stroke="#111827" stroke-width="1" ' +
-      'stroke-linejoin="round" stroke-linecap="round"/>' +
-      '</g></svg>';
-  }
 
-  const HANDLE_CURSOR_OFFSETS = {
-    e: 0, w: 0,
-    n: 90, s: 90,
-    se: 45, nw: 45,
-    ne: 135, sw: 135
-  };
 
-  function handleCursor(handleName, rotationDegrees) {
-    const offset = HANDLE_CURSOR_OFFSETS[handleName] || 0;
-    const angle = normalizeCursorAngle((Number(rotationDegrees) || 0) + offset);
-    const snapped = Math.round(angle / CURSOR_STANDARD_STEP) * CURSOR_STANDARD_STEP;
-    const gap = Math.abs(angle - snapped);
-    if (Math.min(gap, 180 - gap) <= CURSOR_SNAP_TOLERANCE) return resizeCursorKeyword(angle);
 
-    const key = Math.round(angle) % 180;
-    let cursor = rotatedCursorCache.get(key);
-    if (!cursor) {
-      cursor = 'url("data:image/svg+xml;charset=utf-8,' +
-        encodeURIComponent(rotatedCursorSvg(key)) + '") 16 16, ' + resizeCursorKeyword(key);
-      rotatedCursorCache.set(key, cursor);
-    }
-    return cursor;
-  }
 
-  function imageHandlePoints(element) {
-    const width = element.width;
-    const height = element.height;
-    const centerX = element.x + width / 2;
-    const centerY = element.y + height / 2;
-    const radians = model.rotationRadians(element);
-    const degrees = radians * 180 / Math.PI;
-    const defs = [
-      { name: 'nw', sx: -1, sy: -1 },
-      { name: 'n', sx: 0, sy: -1 },
-      { name: 'ne', sx: 1, sy: -1 },
-      { name: 'e', sx: 1, sy: 0 },
-      { name: 'se', sx: 1, sy: 1 },
-      { name: 's', sx: 0, sy: 1 },
-      { name: 'sw', sx: -1, sy: 1 },
-      { name: 'w', sx: -1, sy: 0 }
-    ];
-    return defs.map(function (def) {
-      const offset = model.rotateVector(def.sx * width / 2, def.sy * height / 2, radians);
-      const screen = screenFromPage(centerX + offset.x, centerY + offset.y);
-      return { name: def.name, x: screen.x, y: screen.y, cursor: handleCursor(def.name, degrees) };
-    });
-  }
-
-  function handlePoints(bounds, element) {
-    if (element.type === 'image') return imageHandlePoints(element);
-    const x = viewport.offsetX + bounds.x * viewport.scale;
-    const y = viewport.offsetY + bounds.y * viewport.scale;
-    const w = bounds.width * viewport.scale;
-    const h = bounds.height * viewport.scale;
-    const midY = y + h / 2;
-    return [
-      { name: 'w', x: x, y: midY, cursor: 'ew-resize' },
-      { name: 'e', x: x + w, y: midY, cursor: 'ew-resize' }
-    ];
-  }
-
-  function drawSelection(ctx, page) {
-    const backgroundImage = selectedBackgroundImage();
-    if (backgroundImage) {
-      drawBackgroundSelection(ctx, backgroundImage);
-      return;
-    }
-    const element = selectedElement();
-    if (!element) return;
-    const bounds = renderer.elementBounds(state.project, page, element);
-
-    ctx.save();
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([]);
-    if (element.type === 'image') {
-      const corners = renderer.elementCorners(element);
-      ctx.beginPath();
-      corners.forEach(function (corner, index) {
-        const point = screenFromPage(corner.x, corner.y);
-        if (index === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
-      });
-      ctx.closePath();
-      ctx.stroke();
-    } else {
-      const x = viewport.offsetX + bounds.x * viewport.scale;
-      const y = viewport.offsetY + bounds.y * viewport.scale;
-      ctx.strokeRect(x, y, bounds.width * viewport.scale, bounds.height * viewport.scale);
-    }
-    handlePoints(bounds, element).forEach(function (handle) {
-      drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
-    });
-    ctx.restore();
-
-    if (element.type === 'category') drawTableDividers(ctx, page, element);
-  }
-
-  function drawBackgroundSelection(ctx, image) {
-    const bounds = backgroundImageBounds(image);
-    if (!(bounds.width > 0) || !(bounds.height > 0)) return;
-    const shape = {
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      rotation: image.rotation
-    };
-    const corners = renderer.elementCorners(shape);
-    ctx.save();
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    corners.forEach(function (corner, index) {
-      const point = screenFromPage(corner.x, corner.y);
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-    imageHandlePoints(shape).forEach(function (handle) {
-      drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
-    });
-    ctx.restore();
-  }
-
-  function drawTableDividers(ctx, page, element) {
-    const dividers = renderer.tableDividers(state.project, page, element);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(37, 99, 235, 0.65)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    dividers.forEach(function (divider) {
-      const x = viewport.offsetX + divider.x * viewport.scale;
-      const y = viewport.offsetY + divider.y * viewport.scale;
-      const h = divider.height * viewport.scale;
-      const active = drag && drag.type === 'divider' &&
-        drag.tableIndex === divider.tableIndex &&
-        drag.dividerIndex === divider.dividerIndex;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + h);
-      ctx.stroke();
-      drawRoundHandle(ctx, x, y + h / 2, active ? 5 : 3.5, active ? '#1d4ed8' : '#60a5fa', '#ffffff');
-    });
-    ctx.restore();
-  }
-
-  function drawPageSizeHandle(ctx, rect) {
-    const x = rect.x + rect.width + 10;
-    const y = rect.y + rect.height + 10;
-    drawSquareHandle(ctx, x, y, 12, '#2563eb', '#ffffff');
-    ctx.save();
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x - 3, y + 3);
-    ctx.lineTo(x + 3, y - 3);
-    ctx.stroke();
-    ctx.restore();
-  }
 
   /* ---------- hit testing ---------- */
 
-  function handleAt(screenX, screenY) {
-    const backgroundImage = selectedBackgroundImage();
-    if (backgroundImage) {
-      const bounds = backgroundImageBounds(backgroundImage);
-      const shape = {
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-        rotation: backgroundImage.rotation
-      };
-      for (const point of imageHandlePoints(shape)) {
-        if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
-          return {
-            type: 'resize-background',
-            image: backgroundImage,
-            handle: point.name,
-            cursor: point.cursor,
-            bounds: bounds
-          };
-        }
-      }
-      return null;
-    }
-    const page = currentPage();
-    const element = selectedElement();
-    if (!page || !element) return null;
-    const bounds = renderer.elementBounds(state.project, page, element);
-    const points = handlePoints(bounds, element);
-    for (const point of points) {
-      if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
-        return { type: 'resize', element: element, handle: point.name, cursor: point.cursor, bounds: bounds };
-      }
-    }
-    return null;
-  }
 
-  function dividerAt(screenX, screenY) {
-    const page = currentPage();
-    const element = selectedElement();
-    if (!page || !element || element.type !== 'category') return null;
-    const dividers = renderer.tableDividers(state.project, page, element);
-    for (const divider of dividers) {
-      const x = viewport.offsetX + divider.x * viewport.scale;
-      const y = viewport.offsetY + divider.y * viewport.scale;
-      const h = divider.height * viewport.scale;
-      if (Math.abs(screenX - x) <= 7 && screenY >= y - 4 && screenY <= y + h + 4) {
-        return { type: 'divider', element: element, divider: divider };
-      }
-    }
-    return null;
-  }
 
-  function pageSizeHandleAt(screenX, screenY) {
-    const rect = pageScreenRect();
-    const x = rect.x + rect.width + 10;
-    const y = rect.y + rect.height + 10;
-    if (Math.abs(screenX - x) <= 10 && Math.abs(screenY - y) <= 10) {
-      return { type: 'page-size' };
-    }
-    return null;
-  }
 
-  function marginAt(screenX, screenY) {
-    const rect = pageScreenRect();
-    const points = marginHandlePoints(rect);
-    for (const point of points) {
-      if (Math.abs(screenX - point.x) <= 9 && Math.abs(screenY - point.y) <= 9) {
-        return { type: 'margin', side: point.side };
-      }
-    }
-    return null;
-  }
-
-  function updateCursor(screenX, screenY) {
-    let cursor = 'default';
-    const pageHandle = pageSizeHandleAt(screenX, screenY);
-    if (pageHandle) cursor = 'nwse-resize';
-    if (cursor === 'default') {
-      const handle = handleAt(screenX, screenY);
-      if (handle) cursor = handle.cursor;
-    }
-    if (cursor === 'default') {
-      const divider = dividerAt(screenX, screenY);
-      if (divider) cursor = 'col-resize';
-    }
-    if (cursor === 'default') {
-      const page = currentPage();
-      if (page) {
-        const pt = toPage(screenX, screenY);
-        if (renderer.hitTest(state.project, page, pt.x, pt.y)) cursor = 'move';
-        else if (editingBackground() && renderer.hitTestBackground(state.project, page, pt.x, pt.y)) {
-          cursor = 'move';
-        }
-      }
-    }
-    if (cursor === 'default') {
-      const margin = marginAt(screenX, screenY);
-      if (margin) cursor = margin.side === 'left' || margin.side === 'right' ? 'ew-resize' : 'ns-resize';
-    }
-    if (cursor !== lastAppliedCursor) {
-      lastAppliedCursor = cursor;
-      overlay.style.cursor = cursor;
-    }
-  }
-
-  function refreshHoverCursor() {
-    if (!hoverPoint || drag || inlineEditor) return;
-    updateCursor(hoverPoint.x, hoverPoint.y);
-  }
-
-  function overlayPoint(event) {
-    const rect = overlay.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  }
 
   /* ---------- pointer interactions ---------- */
 
-  function onPointerDown(event) {
-    if (event.button !== 0) return;
-    // 任何拖拽开始都终结微调会话，避免微调快照吞掉后续拖拽的撤销
-    nudgeSession.key = null;
-    nudgeSession.direction = null;
-    const point = overlayPoint(event);
-    const page = currentPage();
-    if (!page) return;
 
-    const pageHandle = editingBackground() ? null : pageSizeHandleAt(point.x, point.y);
-    if (pageHandle) {
-      drag = {
-        type: 'page-size',
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startWidth: state.project.pageSize.width,
-        startHeight: state.project.pageSize.height
-      };
-      pushUndo('调整页面尺寸');
-      beginPointer(event);
-      return;
-    }
 
-    const handle = handleAt(point.x, point.y);
-    if (handle) {
-      if (handle.type === 'resize-background') {
-        ensureCustomBackgroundImage(handle.image);
-        const bounds = backgroundImageBounds(handle.image);
-        drag = {
-          type: 'resize',
-          background: true,
-          image: handle.image,
-          handle: handle.handle,
-          startClientX: event.clientX,
-          startClientY: event.clientY,
-          startBounds: {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height
-          }
-        };
-      } else {
-        drag = {
-          type: 'resize',
-          element: handle.element,
-          handle: handle.handle,
-          startClientX: event.clientX,
-          startClientY: event.clientY,
-          startBounds: handle.bounds
-        };
-      }
-      pushUndo(drag.background ? '调整背景图片' : '调整元素大小');
-      beginPointer(event);
-      return;
-    }
 
-    const divider = dividerAt(point.x, point.y);
-    if (divider) {
-      drag = {
-        type: 'divider',
-        element: divider.element,
-        tableIndex: divider.divider.tableIndex,
-        dividerIndex: divider.divider.dividerIndex,
-        startWidths: divider.divider.widths.slice(),
-        startClientX: event.clientX,
-        startClientY: event.clientY
-      };
-      pushUndo('调整列宽');
-      beginPointer(event);
-      return;
-    }
 
-    const pt = toPage(point.x, point.y);
 
-    // 选中者优先（内容元素）：指针在选中元素范围内时直接抓取，无视上层覆盖
-    const selectedHit = selectedElementAt(page, pt.x, pt.y);
-    if (selectedHit) {
-      drag = {
-        type: 'move',
-        element: selectedHit.element,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startX: selectedHit.element.x,
-        startY: selectedHit.element.y
-      };
-      pushUndo('移动元素');
-      beginPointer(event);
-      return;
-    }
-
-    // 选中者优先（背景图）：选中具体背景图时，其可见范围内优先于内容元素
-    if (state.selection.type === 'backgroundImage') {
-      const backgroundPriority = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
-      if (backgroundPriority && backgroundPriority.image.id === state.selection.imageId) {
-        ensureCustomBackgroundImage(backgroundPriority.image);
-        drag = {
-          type: 'move-background',
-          image: backgroundPriority.image,
-          startClientX: event.clientX,
-          startClientY: event.clientY,
-          startX: backgroundPriority.image.x,
-          startY: backgroundPriority.image.y
-        };
-        pushUndo('移动背景图片');
-        beginPointer(event);
-        return;
-      }
-    }
-
-    const hit = renderer.hitTest(state.project, page, pt.x, pt.y);
-    if (hit) {
-      if (state.selection.type !== 'element' || state.selection.id !== hit.element.id) {
-        state.selection = { type: 'element', id: hit.element.id };
-        ui.renderAll();
-      }
-      drag = {
-        type: 'move',
-        element: hit.element,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startX: hit.element.x,
-        startY: hit.element.y
-      };
-      pushUndo('移动元素');
-      beginPointer(event);
-      return;
-    }
-
-    if (editingBackground()) {
-      const backgroundHit = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
-      if (backgroundHit) {
-        ensureCustomBackgroundImage(backgroundHit.image);
-        state.selection = {
-          type: 'backgroundImage',
-          setId: backgroundHit.background.id,
-          imageId: backgroundHit.image.id
-        };
-        ui.renderAll();
-        drag = {
-          type: 'move-background',
-          image: backgroundHit.image,
-          startClientX: event.clientX,
-          startClientY: event.clientY,
-          startX: backgroundHit.image.x,
-          startY: backgroundHit.image.y
-        };
-        pushUndo('移动背景图片');
-        beginPointer(event);
-        return;
-      }
-    }
-
-    const margin = marginAt(point.x, point.y);
-    if (margin) {
-      drag = {
-        type: 'margin',
-        side: margin.side,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startValue: state.project.margins[margin.side]
-      };
-      pushUndo('调整页边距');
-      beginPointer(event);
-      return;
-    }
-
-    state.selection = { type: 'page' };
-    ui.renderAll();
-  }
-
-  function beginPointer(event) {
-    if (overlay.setPointerCapture) overlay.setPointerCapture(event.pointerId);
-    renderer.setBlurCacheFrozen(true);
-    event.preventDefault();
-  }
-
-  function onPointerMove(event) {
-    if (!drag) {
-      const point = overlayPoint(event);
-      hoverPoint = point;
-      updateCursor(point.x, point.y);
-      return;
-    }
-    event.preventDefault();
-    const dx = (event.clientX - drag.startClientX) / viewport.scale;
-    const dy = (event.clientY - drag.startClientY) / viewport.scale;
-
-    if (drag.type === 'move-background') {
-      drag.image.x = Math.round(drag.startX + dx);
-      drag.image.y = Math.round(drag.startY + dy);
-      scheduleRedraw(['bg', 'overlay']);
-      return;
-    }
-
-    if (drag.type === 'move') {
-      drag.element.x = Math.round(drag.startX + dx);
-      drag.element.y = Math.round(drag.startY + dy);
-      scheduleRedraw(['content', 'overlay']);
-      return;
-    }
-
-    if (drag.type === 'resize') {
-      resizeDrag(dx, dy);
-      scheduleRedraw(drag.background ? ['bg', 'overlay'] : ['content', 'overlay']);
-      return;
-    }
-
-    if (drag.type === 'divider') {
-      dividerDrag(dx);
-      scheduleRedraw(['content', 'overlay']);
-      return;
-    }
-
-    if (drag.type === 'page-size') {
-      const width = clamp(drag.startWidth + dx, 320, 5000);
-      const height = clamp(drag.startHeight + dy, 320, 5000);
-      state.project.pageSize.width = Math.round(width);
-      state.project.pageSize.height = Math.round(height);
-      requestGeometry();
-      scheduleRedraw(['bg', 'content', 'chrome', 'overlay']);
-      return;
-    }
-
-    if (drag.type === 'margin') {
-      const max = Math.min(state.project.pageSize.width, state.project.pageSize.height) / 2;
-      const horizontal = drag.side === 'left' || drag.side === 'right';
-      let delta = horizontal ? dx : dy;
-      if (drag.side === 'right' || drag.side === 'bottom') delta = -delta;
-      state.project.margins[drag.side] = Math.round(clamp(drag.startValue + delta, 0, max));
-      scheduleRedraw(['chrome', 'overlay']);
-    }
-  }
-
-  function resizeDrag(dx, dy) {
-    if (drag.background) {
-      const image = drag.image;
-      const start = drag.startBounds;
-      const next = model.computeImageResize(
-        { x: start.x, y: start.y, width: start.width, height: start.height, rotation: image.rotation },
-        drag.handle,
-        { x: dx, y: dy },
-        image.keepRatio !== false
-      );
-      image.x = Math.round(next.x);
-      image.y = Math.round(next.y);
-      image.width = Math.round(next.width);
-      image.height = Math.round(next.height);
-      return;
-    }
-    const element = drag.element;
-    const start = drag.startBounds;
-    const minWidth = element.type === 'text' ? 80 : 80;
-    if (element.type === 'image') {
-      const next = model.computeImageResize(
-        { x: start.x, y: start.y, width: start.width, height: start.height, rotation: element.rotation },
-        drag.handle,
-        { x: dx, y: dy },
-        element.keepRatio !== false
-      );
-      element.x = Math.round(next.x);
-      element.y = Math.round(next.y);
-      element.width = Math.round(next.width);
-      element.height = Math.round(next.height);
-      return;
-    }
-
-    const oldWidth = element.width;
-    let width;
-    let x = element.x;
-    if (drag.handle === 'e') {
-      width = clamp(start.width + dx, minWidth, state.project.pageSize.width * 3);
-      x = start.x;
-    } else {
-      const right = start.x + start.width;
-      width = clamp(start.width - dx, minWidth, state.project.pageSize.width * 3);
-      x = right - width;
-    }
-    element.x = Math.round(x);
-    element.width = Math.round(width);
-    if (element.type === 'category' && oldWidth > 0) {
-      layout.scaleManualWidths(element, element.width / oldWidth);
-    }
-  }
-
-  function dividerDrag(dx) {
-    const element = drag.element;
-    const widths = drag.startWidths.slice();
-    const index = drag.dividerIndex;
-    if (index < 0 || index + 1 >= widths.length) return;
-    const left = widths[index] + dx;
-    const right = widths[index + 1] - dx;
-    if (left < layout.MIN_COL_WIDTH || right < layout.MIN_COL_WIDTH) return;
-    widths[index] = left;
-    widths[index + 1] = right;
-    layout.setManualWidths(element, drag.tableIndex, widths);
-  }
-
-  function onPointerLeave() {
-    hoverPoint = null;
-  }
-
-  function onPointerUp(event) {
-    if (!drag) return;
-    const finished = drag;
-    drag = null;
-    renderer.setBlurCacheFrozen(false);
-
-    if (finished.type === 'page-size') {
-      state.project.pageSize.width = Math.round(clamp(state.project.pageSize.width, 320, 5000));
-      state.project.pageSize.height = Math.round(clamp(state.project.pageSize.height, 320, 5000));
-    }
-    if (finished.type === 'margin') {
-      state.project.margins[finished.side] = Math.round(state.project.margins[finished.side]);
-    }
-    if (finished.type === 'move-background' && finished.image) {
-      finished.image.x = Math.round(finished.image.x);
-      finished.image.y = Math.round(finished.image.y);
-    }
-    if (finished.type === 'resize' && finished.background && finished.image) {
-      finished.image.x = Math.round(finished.image.x);
-      finished.image.y = Math.round(finished.image.y);
-      finished.image.width = Math.round(finished.image.width);
-      finished.image.height = Math.round(finished.image.height);
-    }
-    if (finished.type === 'move' && finished.element) {
-      finished.element.x = Math.round(finished.element.x);
-      finished.element.y = Math.round(finished.element.y);
-    }
-    if (finished.type === 'resize' && finished.element) {
-      finished.element.x = Math.round(finished.element.x);
-      finished.element.y = Math.round(finished.element.y);
-      finished.element.width = Math.round(finished.element.width);
-      if (finished.element.type === 'image') {
-        finished.element.height = Math.round(finished.element.height);
-      }
-    }
-
-    if (overlay.releasePointerCapture && event && event.pointerId != null) {
-      try { overlay.releasePointerCapture(event.pointerId); } catch (err) { /* ignore */ }
-    }
-    if (event) hoverPoint = overlayPoint(event);
-    ui.renderAll();
-  }
-
-  function onDoubleClick(event) {
-    const point = overlayPoint(event);
-    const page = currentPage();
-    if (!page) return;
-    const pt = toPage(point.x, point.y);
-    const hit = renderer.hitTest(state.project, page, pt.x, pt.y);
-    if (!hit || hit.element.type !== 'text') return;
-    event.preventDefault();
-    state.selection = { type: 'element', id: hit.element.id };
-    ui.renderAll();
-    startInlineEditor(hit.element);
-  }
-
-  function startInlineEditor(element) {
-    closeInlineEditor(false);
-    const page = currentPage();
-    if (!page) return;
-    const bounds = renderer.elementBounds(state.project, page, element);
-    const textarea = document.createElement('textarea');
-    textarea.id = 'inline-text-editor';
-    textarea.value = element.text || '';
-    const left = viewport.offsetX + element.x * viewport.scale;
-    const top = viewport.offsetY + element.y * viewport.scale;
-    const style = element.style;
-    textarea.style.left = left + 'px';
-    textarea.style.top = top + 'px';
-    textarea.style.width = Math.max(40, element.width) + 'px';
-    textarea.style.height = Math.max(20, bounds.height) + 'px';
-    textarea.style.transformOrigin = '0 0';
-    textarea.style.transform = 'scale(' + viewport.scale + ')';
-    textarea.style.font = model.fontString(style);
-    textarea.style.lineHeight = String(style.lineHeight || 1.3);
-    textarea.style.textAlign = style.align || 'left';
-    textarea.style.color = style.color || '#111827';
-    textarea.style.boxSizing = 'border-box';
-
-    let closed = false;
-    function finish(save) {
-      if (closed) return;
-      closed = true;
-      if (save) element.text = textarea.value;
-      if (textarea.parentNode) textarea.remove();
-      inlineEditor = null;
-      ui.renderAll();
-    }
-
-    textarea.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        finish(false);
-      } else if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        finish(true);
-      }
-    });
-    textarea.addEventListener('blur', function () { finish(true); });
-
-    pane.appendChild(textarea);
-    inlineEditor = textarea;
-    textarea.focus();
-    textarea.select();
-  }
-
-  function closeInlineEditor(save) {
-    if (!inlineEditor) return;
-    if (save) {
-      const element = selectedElement();
-      if (element) element.text = inlineEditor.value;
-    }
-    inlineEditor.remove();
-    inlineEditor = null;
-  }
 
   /* ---------- drag and drop ---------- */
 
-  function onDragOver(event) {
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-  }
 
-  function categoryDropPosition(page, project, cursorY) {
-    const margins = project.margins;
-    let lowestBottom = null;
-
-    page.elements.forEach(function (element) {
-      if (!(element.y <= cursorY)) return;
-      const category = element.type === 'category'
-        ? model.getCategory(project, element.category)
-        : null;
-      const bottom = element.y + layout.elementHeight(element, category, { editMode: true });
-      if (lowestBottom === null || bottom > lowestBottom) lowestBottom = bottom;
-    });
-
-    return {
-      x: margins.left,
-      y: Math.max(0, Math.round(lowestBottom === null ? margins.top : lowestBottom))
-    };
-  }
-
-  function onDrop(event) {
-    event.preventDefault();
-    const page = currentPage();
-    if (!page) return;
-
-    if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length) {
-      handleImportFile(event.dataTransfer.files[0]);
-      return;
-    }
-
-    const name = (event.dataTransfer && (
-      event.dataTransfer.getData('application/x-listify-category') ||
-      event.dataTransfer.getData('text/plain')
-    )) || '';
-    if (!name) return;
-    const category = model.getCategory(state.project, name);
-    if (!category) return;
-
-    const placed = model.getPlacedBlock(state.project, name);
-    if (placed) {
-      if (placed.page.id !== state.currentPageId) switchPage(placed.page.id);
-      state.selection = { type: 'element', id: placed.element.id };
-      ui.renderAll();
-      ui.toast('“' + name + '”已经放置，已为你选中。');
-      return;
-    }
-
-    const point = overlayPoint(event);
-    const pt = toPage(point.x, point.y);
-    const width = Math.max(
-      120,
-      state.project.pageSize.width - state.project.margins.left - state.project.margins.right
-    );
-    const position = categoryDropPosition(page, state.project, pt.y);
-    const element = model.createCategoryElement(name, position.x, position.y, state.project, width, page);
-    page.elements.push(element);
-    state.selection = { type: 'element', id: element.id };
-    ui.renderAll();
-  }
 
   function placeCategory(name) {
     const page = currentPage();
@@ -1551,7 +242,7 @@
       120,
       state.project.pageSize.width - state.project.margins.left - state.project.margins.right
     );
-    const position = categoryDropPosition(page, state.project, Infinity);
+    const position = ctx.interactions.categoryDropPosition(page, state.project, Infinity);
     pushUndo('放置分类');
     const element = model.createCategoryElement(name, position.x, position.y, state.project, width, page);
     page.elements.push(element);
@@ -1564,7 +255,7 @@
 
   function selectPage() {
     state.selection = { type: 'page' };
-    if (uiRenderDepth > 0) redraw();
+    if (uiRenderDepth > 0) ctx.viewport.redraw();
     else ui.renderAll();
   }
 
@@ -1623,8 +314,8 @@
     }
     if (!target) return false;
     const direction = (dx < 0 ? 'l' : dx > 0 ? 'r' : '') + (dy < 0 ? 'u' : dy > 0 ? 'd' : '');
-    if (nudgeSession.key !== key || nudgeSession.direction !== direction) {
-      nudgeSession = { key: key, direction: direction };
+    if (ctx.nudgeSession.key !== key || ctx.nudgeSession.direction !== direction) {
+      ctx.nudgeSession = { key: key, direction: direction };
       pushUndo(label);
     }
     target.x = Math.round((target.x || 0) + dx);
@@ -1861,10 +552,44 @@
     const opts = options || {};
     if (opts.property === false) {
       if (layout.invalidate) layout.invalidate();
-      scheduleRedraw(opts.layers || ['content', 'overlay']);
+      ctx.viewport.scheduleRedraw(opts.layers || ['content', 'overlay']);
       return;
     }
     ui.renderAll();
+  }
+
+  /* ---------- 属性意图动作（供 UI 面板写入） ---------- */
+
+  const ELEMENT_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'blur', 'text', 'showTitle'];
+  const ELEMENT_STYLE_FIELDS = ['fontSize', 'fontWeight', 'color', 'lineHeight', 'align', 'fontFamily', 'fontFamilies'];
+
+  function setElementField(field, value) {
+    const element = selectedElement();
+    if (!element || ELEMENT_FIELDS.indexOf(field) === -1) return;
+    element[field] = value;
+    changed({ property: false });
+  }
+
+  function setElementStyleField(field, value) {
+    const element = selectedElement();
+    if (!element || !element.style || ELEMENT_STYLE_FIELDS.indexOf(field) === -1) return;
+    element.style[field] = value;
+    changed({ property: false });
+  }
+
+  function setBackgroundColor(setId, color) {
+    const set = model.findBackground(state.project, setId);
+    if (!set) return;
+    set.color = color;
+    changed({ property: false, layers: ['bg', 'overlay'] });
+  }
+
+  function setBackgroundImageField(setId, imageId, field, value) {
+    const set = model.findBackground(state.project, setId);
+    const image = set && (set.images || []).find(function (item) { return item.id === imageId; });
+    if (!image || field !== 'keepRatio') return;
+    image.keepRatio = !!value;
+    changed({ property: false, layers: ['bg', 'overlay'] });
   }
 
   /* ---------- content creation ---------- */
@@ -1914,7 +639,7 @@
       const image = await L.assets.loadImage(assetId);
       const meta = L.assets.getMeta(assetId);
       model.ensureAssetMeta(state.project, assetId, source.name, meta ? meta.mime : source.type);
-      await persistDraftAssetQuietly(assetId);
+      await ctx.draft.persistDraftAssetQuietly(assetId);
       return { assetId: assetId, image: image };
     } catch (err) {
       releaseUnusedAsset(assetId);
@@ -2117,832 +842,56 @@
     image.height = Math.round(bounds.height > 0 ? bounds.height : pageSize.height);
   }
 
-  function addBackgroundSet() {
-    const set = model.createBackgroundSet('背景 ' + (state.project.backgrounds.length + 1));
-    state.project.backgrounds.push(set);
-    state.selection = { type: 'backgroundSet', setId: set.id };
-    ui.renderAll();
-    return set;
-  }
 
-  function duplicateBackgroundSet(setId) {
-    const source = model.findBackground(state.project, setId);
-    if (!source) return null;
-    const copy = model.cloneBackgroundSet(source);
-    copy.name = source.name + ' 副本';
-    state.project.backgrounds.push(copy);
-    state.selection = { type: 'backgroundSet', setId: copy.id };
-    ui.renderAll();
-    return copy;
-  }
 
-  function renameBackgroundSet(setId, name) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const trimmed = String(name == null ? '' : name).trim();
-    if (!trimmed) return;
-    set.name = trimmed;
-    ui.renderAll();
-  }
 
-  function deleteBackgroundSet(setId) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const check = model.canDeleteBackground(state.project, setId);
-    if (!check.ok) {
-      ui.modal.alert('无法删除背景', check.reason);
-      return;
-    }
-    const index = state.project.backgrounds.indexOf(set);
-    state.project.backgrounds.splice(index, 1);
-    (set.images || []).forEach(function (image) { releaseUnusedAsset(image.assetId); });
-    state.selection = { type: 'page' };
-    ui.renderAll();
-    ui.toast('已删除背景“' + set.name + '”。');
-  }
-
-  function setPageBackground(setId) {
-    const page = currentPage();
-    if (!page) return;
-    if (!model.findBackground(state.project, setId)) return;
-    page.backgroundId = setId;
-    state.selection = { type: 'page' };
-    ui.renderAll();
-  }
-
-  function pickBackgroundImage(setId, imageId) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    pendingBackgroundSetId = setId;
-    pendingBackgroundImageId = imageId || null;
-    const input = document.getElementById('bg-file');
-    input.value = '';
-    input.click();
-  }
-
-  async function handleBackgroundFile(file) {
-    if (!file) return;
-    const setId = pendingBackgroundSetId;
-    const imageId = pendingBackgroundImageId;
-    const whole = pendingBackgroundWhole;
-    pendingBackgroundSetId = null;
-    pendingBackgroundImageId = null;
-    pendingBackgroundWhole = false;
-    const set = model.findBackground(state.project, setId) ||
-      model.effectiveBackground(state.project, currentPage());
-    if (!set) return;
-    let assetId;
-    try {
-      assetId = await L.assets.addFile(file);
-      const loaded = await L.assets.loadImage(assetId);
-      const meta = L.assets.getMeta(assetId);
-      model.ensureAssetMeta(state.project, assetId, file.name, meta ? meta.mime : file.type);
-      await persistDraftAssetQuietly(assetId);
-      const target = imageId
-        ? (set.images || []).find(function (image) { return image.id === imageId; })
-        : null;
-      if (target) {
-        const oldAssetId = target.assetId;
-        target.assetId = assetId;
-        if (target.fit === 'none') {
-          const rect = renderer.backgroundImageRect(state.project.pageSize, target, loaded);
-          target.width = target.width > 0 ? target.width : rect.width;
-          target.height = target.height > 0 ? target.height : rect.height;
-        }
-        releaseUnusedAsset(oldAssetId);
-        state.selection = { type: 'backgroundImage', setId: set.id, imageId: target.id };
-      } else {
-        const image = model.createBackgroundImage(assetId, set.images.length ? 'original' : 'cover');
-        set.images.push(image);
-        state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
-      }
-      ui.renderAll();
-      if (whole) {
-        const page = currentPage();
-        if (page) page.backgroundId = set.id;
-        state.selection = { type: 'page' };
-        ui.toast('已创建背景“' + set.name + '”并应用到当前页。');
-      } else {
-        ui.toast('背景图片已更新。');
-      }
-    } catch (err) {
-      if (assetId) L.assets.remove(assetId);
-      ui.toast('背景图片读取失败：' + err.message, 'error');
-    }
-  }
 
   // 整套模式本地链路：先新建背景集，再选图；选图后 handleBackgroundFile 加图并把该集指派当前页。
-  function pickBackgroundImageWhole() {
-    const set = addBackgroundSet();
-    pendingBackgroundSetId = set.id;
-    pendingBackgroundImageId = null;
-    pendingBackgroundWhole = true;
-    const input = document.getElementById('bg-file');
-    input.value = '';
-    input.click();
-  }
 
   // 预置弹窗拖入的图片文件：按模式直接处理（不走文件选择框）。
-  async function handleDroppedBackgroundFile(mode, context, file) {
-    if (!file) return;
-    const ctx = context || {};
-    if (mode === 'whole') {
-      const set = addBackgroundSet();
-      pendingBackgroundSetId = set.id;
-      pendingBackgroundImageId = null;
-      pendingBackgroundWhole = true;
-    } else {
-      pendingBackgroundSetId = ctx.setId || null;
-      pendingBackgroundImageId = mode === 'replace' ? (ctx.imageId || null) : null;
-    }
-    await handleBackgroundFile(file);
-  }
 
   // 预置素材应用处理器：base64 物化进现有资产管线（addFile 内容哈希去重），再按模式写入。
-  async function applyPreset(preset, mode, context) {
-    if (!preset) return;
-    // 索引项只有缩略图：应用前先补齐完整图数据；失败时提示并保持背景库/页面背景不变。
-    if (!preset.data) {
-      try {
-        await L.presets.hydrate(preset);
-      } catch (err) {
-        ui.toast('预置素材加载失败：' + (err && err.message ? err.message : '未知错误') + '，请重试。', 'error');
-        return;
-      }
-    }
-    if (!preset.data) return;
-    const ctx = context || {};
-    let assetId;
-    let loaded = null;
-    try {
-      const raw = String(preset.data);
-      const comma = raw.indexOf(',');
-      const match = /^data:(image\/[a-z0-9.+-]+)/i.exec(raw);
-      const mime = match ? match[1] : 'image/png';
-      const blob = model.base64ToBlob(raw.slice(comma + 1), mime);
-      assetId = await L.assets.addFile(new File([blob], preset.name, { type: mime }));
-      loaded = await L.assets.loadImage(assetId);
-      model.ensureAssetMeta(state.project, assetId, preset.name, mime);
-      await persistDraftAssetQuietly(assetId);
-    } catch (err) {
-      ui.toast('预置素材应用失败：' + err.message, 'error');
-      return;
-    }
-    try {
-      if (mode === 'whole') applyPresetWhole(preset, assetId);
-      else if (mode === 'add') applyPresetAdd(preset, ctx, assetId);
-      else if (mode === 'replace') applyPresetReplace(preset, ctx, assetId, loaded);
-    } catch (err) {
-      ui.toast('预置素材应用失败：' + err.message, 'error');
-    }
-  }
 
   // 预置图片加入背景集：同内容哈希复用已有层，避免重复。
-  function addPresetImage(set, preset, assetId, mode) {
-    let image = (set.images || []).find(function (img) { return img.assetId === assetId; }) || null;
-    if (!image) {
-      let fit;
-      if (preset.kind === 'overlay') fit = 'original';
-      else if (mode === 'add' && (set.images || []).length > 0) fit = 'original';
-      else fit = 'cover';
-      image = model.createBackgroundImage(assetId, fit);
-      image.opacity = preset.opacity == null ? 1 : preset.opacity;
-      set.images.push(image);
-    }
-    return image;
-  }
 
   // 整套模式：建/复用「预置 · X」背景集（同名指派、异名新建，新建时取建议填充色），
   // 全局开启 → 指派 unifiedBackgroundId（不覆写各页 backgroundId），关闭 → 指派当前页。
-  function applyPresetWhole(preset, assetId) {
-    const name = '预置 · ' + preset.name;
-    let set = (state.project.backgrounds || []).find(function (item) { return item.name === name; }) || null;
-    const isNew = !set;
-    if (isNew) {
-      set = model.createBackgroundSet(name);
-      set.color = preset.color || '#ffffff';
-      state.project.backgrounds.push(set);
-    }
-    const image = addPresetImage(set, preset, assetId, 'whole');
-    if (state.project.unifiedBackground) {
-      state.project.unifiedBackgroundId = set.id;
-    } else {
-      const page = currentPage();
-      if (page) page.backgroundId = set.id;
-    }
-    state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
-    ui.renderAll();
-    ui.toast(isNew ? '已创建背景“' + name + '”并应用到当前页。' : '已应用背景“' + name + '”。');
-    notifyDarkPreset(preset);
-  }
 
   // 加图模式：追加到入口指定的背景集（缺失时回退当前页生效背景）。
-  function applyPresetAdd(preset, ctx, assetId) {
-    const set = model.findBackground(state.project, ctx.setId) ||
-      model.effectiveBackground(state.project, currentPage());
-    if (!set) {
-      ui.toast('没有可添加图片的背景。', 'error');
-      return;
-    }
-    const image = addPresetImage(set, preset, assetId, 'add');
-    state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
-    ui.renderAll();
-    ui.toast('已添加预置图片“' + preset.name + '”。');
-    notifyDarkPreset(preset);
-  }
 
   // 替换模式：换 assetId，保留 fit/自定义矩形/不透明度/模糊/顺序。
-  function applyPresetReplace(preset, ctx, assetId, loaded) {
-    const set = model.findBackground(state.project, ctx.setId);
-    const target = set && (set.images || []).find(function (img) { return img.id === ctx.imageId; }) || null;
-    if (!set || !target) {
-      ui.toast('找不到要替换的背景图片。', 'error');
-      return;
-    }
-    const oldAssetId = target.assetId;
-    target.assetId = assetId;
-    if (target.fit === 'none' && loaded) {
-      const rect = renderer.backgroundImageRect(state.project.pageSize, target, loaded);
-      target.width = target.width > 0 ? target.width : rect.width;
-      target.height = target.height > 0 ? target.height : rect.height;
-    }
-    if (oldAssetId && oldAssetId !== assetId) releaseUnusedAsset(oldAssetId);
-    state.selection = { type: 'backgroundImage', setId: set.id, imageId: target.id };
-    ui.renderAll();
-    ui.toast('已替换为“' + preset.name + '”。');
-    notifyDarkPreset(preset);
-  }
 
   // 建议填充色相对亮度（sRGB → 线性）；深色预置应用后仅提示，不改数据。
-  function relativeLuminance(hex) {
-    const match = /^#?([0-9a-fA-F]{6})$/.exec(String(hex == null ? '' : hex).trim());
-    if (!match) return 1;
-    const value = parseInt(match[1], 16);
-    const channels = [
-      (value >> 16) & 255,
-      (value >> 8) & 255,
-      value & 255
-    ].map(function (channel) {
-      channel /= 255;
-      return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
-    });
-    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-  }
 
-  function notifyDarkPreset(preset) {
-    if (relativeLuminance(preset.color) < 0.35) {
-      ui.toast('当前预置偏暗，建议调亮歌名文字颜色以保证可读性。');
-    }
-  }
 
-  function deleteBackgroundImage(setId, imageId) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const index = (set.images || []).findIndex(function (image) { return image.id === imageId; });
-    if (index < 0) return;
-    const image = set.images[index];
-    set.images.splice(index, 1);
-    releaseUnusedAsset(image.assetId);
-    state.selection = { type: 'backgroundSet', setId: setId };
-    ui.renderAll();
-  }
 
-  function moveBackgroundImage(setId, imageId, delta) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const index = set.images.findIndex(function (image) { return image.id === imageId; });
-    const target = index + delta;
-    if (index < 0 || target < 0 || target >= set.images.length) return;
-    const image = set.images[index];
-    set.images.splice(index, 1);
-    set.images.splice(target, 0, image);
-    ui.renderAll();
-  }
 
-  function setBackgroundImageFit(setId, imageId, fit) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const image = (set.images || []).find(function (item) { return item.id === imageId; });
-    if (!image) return;
-    if (fit === 'none') {
-      ensureCustomBackgroundImage(image);
-    } else {
-      image.fit = fit;
-      image.rotation = 0;
-    }
-    ui.renderAll();
-  }
 
-  function restoreBackgroundImageFit(setId, imageId) {
-    setBackgroundImageFit(setId, imageId, 'cover');
-  }
 
-  function setBackgroundImageValue(setId, imageId, key, value) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const image = (set.images || []).find(function (item) { return item.id === imageId; });
-    if (!image) return;
-    image[key] = value;
-    const inputIds = {
-      x: 'prop-bg-x',
-      y: 'prop-bg-y',
-      width: 'prop-bg-w',
-      height: 'prop-bg-h',
-      rotation: 'prop-bg-rotation'
-    };
-    const input = inputIds[key] ? document.getElementById(inputIds[key]) : null;
-    if (input) input.value = image[key];
-    if (layout.invalidate) layout.invalidate();
-    scheduleRedraw(['bg', 'overlay']);
-  }
-
-  function toggleUnifiedBackground(value) {
-    const next = !!value;
-    if (next) {
-      let id = state.project.unifiedBackgroundId;
-      if (!model.findBackground(state.project, id)) {
-        const effective = model.effectiveBackground(state.project, currentPage());
-        id = effective ? effective.id : (state.project.backgrounds[0] || {}).id || null;
-      }
-      state.project.unifiedBackgroundId = id;
-    }
-    state.project.unifiedBackground = next;
-    state.selection = { type: 'page' };
-    ui.renderAll();
-  }
-
-  function setUnifiedBackground(setId) {
-    if (!model.findBackground(state.project, setId)) return;
-    state.project.unifiedBackgroundId = setId;
-    state.project.unifiedBackground = true;
-    ui.renderAll();
-  }
-
-  function bakeUnifiedBackground() {
-    const id = state.project.unifiedBackgroundId;
-    if (!id) return;
-    state.project.pages.forEach(function (page) { page.backgroundId = id; });
-    state.project.unifiedBackground = false;
-    state.selection = { type: 'page' };
-    ui.renderAll();
-    ui.toast('已将全局背景固化到所有页。');
-  }
-
-  function copyUnifiedBackgroundToPage() {
-    const id = state.project.unifiedBackgroundId;
-    const globalSet = model.findBackground(state.project, id);
-    const page = currentPage();
-    if (!globalSet || !page) return;
-    const copy = model.cloneBackgroundSet(globalSet);
-    copy.name = globalSet.name + ' 副本';
-    state.project.backgrounds.push(copy);
-    state.project.pages.forEach(function (item) {
-      item.backgroundId = item.id === page.id ? copy.id : id;
-    });
-    state.project.unifiedBackground = false;
-    state.selection = { type: 'backgroundSet', setId: copy.id };
-    ui.renderAll();
-    ui.toast('已为当前页创建独立背景副本。');
-  }
 
   /* ---------- import ---------- */
 
-  function escapeHtml(value) {
-    return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) {
-      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
-    });
-  }
 
-  function showImportErrors(result) {
-    const items = (result.errors || ['导入失败。']).map(function (message) {
-      return '<li>' + escapeHtml(message) + '</li>';
-    }).join('');
-    ui.modal.open({
-      title: '导入失败',
-      body: '<div class="prop-group"><p class="hint">本次导入未修改现有歌单。请修正文件后重试。</p>' +
-        '<ul class="import-error-list">' + items + '</ul></div>',
-      actions: [{ label: '知道了', className: 'btn-primary', onClick: function (close) { close(); } }]
-    });
-  }
 
-  function openEncodingDialog(file, message) {
-    const body =
-      '<div class="prop-group">' +
-        '<p class="hint">' + escapeHtml(message) + '</p>' +
-        '<div class="field"><label for="encoding-select">尝试编码</label><div class="control">' +
-          '<select id="encoding-select" class="select">' +
-            '<option value="utf-8">UTF-8</option>' +
-            '<option value="gb18030">GB18030</option>' +
-            '<option value="utf-16le">UTF-16LE</option>' +
-            '<option value="utf-16be">UTF-16BE</option>' +
-          '</select>' +
-        '</div></div>' +
-      '</div>';
-    const modal = ui.modal.open({
-      title: '选择文件编码',
-      body: body,
-      width: '420px',
-      actions: [
-        { label: '取消', onClick: function (close) { close(); } },
-        {
-          label: '重试导入',
-          className: 'btn-primary',
-          onClick: function (close) {
-            const select = modal.body.querySelector('#encoding-select');
-            const encoding = select ? select.value : 'utf-8';
-            close();
-            handleImportFile(file, encoding);
-          }
-        }
-      ]
-    });
-  }
 
-  function confirmReimport(result) {
-    const rec = L.importer.reconcile(state.project, result.categories);
-    if (!state.project.playlist.categories.length) return Promise.resolve(true);
-
-    const oldSongs = {};
-    state.project.playlist.categories.forEach(function (category) { oldSongs[category.name] = category.songs; });
-    const newSongs = {};
-    result.categories.forEach(function (category) { newSongs[category.name] = category.songs; });
-    const songUpdates = (rec.kept || []).map(function (name) {
-      return { name: name, count: countSongChanges(oldSongs[name] || [], newSongs[name] || []) };
-    }).filter(function (item) { return item.count > 0; });
-
-    if (!rec.added.length && !rec.removed.length && !songUpdates.length) return Promise.resolve(true);
-
-    return new Promise(function (resolve) {
-      let settled = false;
-      function finish(value) {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      }
-      const lines = [];
-      if (rec.added.length) {
-        lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(rec.added.join('、')) + '</p>');
-      }
-      if (rec.removed.length) {
-        lines.push('<p><strong>将删除分类块：</strong>' + escapeHtml(rec.removed.join('、')) + '</p>');
-      }
-      if (songUpdates.length) {
-        lines.push('<p><strong>将更新歌名：</strong>' +
-          escapeHtml(songUpdates.map(function (item) { return item.name + '（' + item.count + ' 处）'; }).join('、')) + '</p>');
-      }
-      lines.push('<p class="hint">同名分类会保留位置、尺寸、样式、表格结构和手动列宽，只更新歌名并重新排序。</p>');
-      const modal = ui.modal.open({
-        title: '重新导入确认',
-        body: '<div class="prop-group">' + lines.join('') + '</div>',
-        width: '460px',
-        actions: [
-          { label: '取消', onClick: function (close) { finish(false); close(); } },
-          {
-            label: '继续导入',
-            className: 'btn-primary',
-            onClick: function (close) {
-              finish(true);
-              close();
-            }
-          }
-        ],
-        onClose: function () { finish(false); }
-      });
-    });
-  }
-
-  async function handleImportFile(file, overrideEncoding) {
-    if (!file) return;
-    const result = await L.importer.importFile(file, overrideEncoding);
-    if (!result.ok) {
-      const encodingIssue = (result.errors || []).some(function (message) {
-        return /编码|解码/.test(message);
-      });
-      if (encodingIssue) openEncodingDialog(file, (result.errors || ['无法识别文件编码。'])[0]);
-      else showImportErrors(result);
-      return;
-    }
-
-    const ok = await confirmReimport(result);
-    if (!ok) return;
-
-    pushUndo('导入歌单');
-    L.importer.applyImport(state.project, result.categories);
-    if (state.selection.type === 'element') {
-      const found = findElementAnywhere(state.selection.id);
-      if (!found) state.selection = { type: 'page' };
-    }
-    ui.renderAll();
-    ui.toast('已导入 ' + result.stats.categories + ' 个分类、' + result.stats.songs + ' 首歌名（' + result.encoding + '）。', 'success');
-  }
-
-  function openImport() {
-    const input = document.getElementById('import-file');
-    input.value = '';
-    input.click();
-  }
-
-  function exportPlaylist() {
-    const result = L.playlistExport.exportPlaylist(state.project);
-    if (result.empty) {
-      ui.modal.confirm('没有歌单', '目前没有歌单，是否要导出歌单模板？', { confirmLabel: '导出模板' }).then(function (ok) {
-        if (!ok) return;
-        L.playlistExport.downloadTemplate();
-        ui.toast('歌单模板已导出。', 'success');
-      });
-      return;
-    }
-    ui.toast('歌单已导出。', 'success');
-  }
 
   /* ---------- draft persistence ---------- */
 
-  function formatDraftTime(timestamp) {
-    const date = new Date(timestamp || Date.now());
-    return String(date.getHours()).padStart(2, '0') + ':' +
-      String(date.getMinutes()).padStart(2, '0');
-  }
 
-  function draftSnapshotKey(envelope) {
-    return JSON.stringify({ ui: envelope.ui, project: envelope.project });
-  }
 
-  function setDraftStatus(status, error, title) {
-    draft.status = status;
-    draft.lastError = error || '';
-    const el = document.getElementById('draft-status');
-    if (!el) return;
-    let text = '草稿未保存';
-    if (status === 'saved') {
-      text = '草稿已自动保存 ' + formatDraftTime(draft.lastSavedAt);
-    } else if (status === 'unavailable') {
-      text = '草稿不可用';
-    } else if (status === 'idle') {
-      text = '自动保存已开启';
-    }
-    el.textContent = text;
-    el.setAttribute('data-state', status);
-    let tip = title || '';
-    if (!tip) {
-      if (status === 'saved') {
-        tip = '草稿保存在本机浏览器中；导出项目可长期备份。';
-      } else if (status === 'idle') {
-        tip = '草稿会自动保存在本机浏览器中；导出项目可长期备份。';
-      } else if (error) {
-        tip = '原因：' + error;
-      } else {
-        tip = '尚未自动保存。';
-      }
-    }
-    el.title = tip;
-  }
 
-  function reportDraftError(err) {
-    const message = err && err.message ? err.message : '本地存储写入失败';
-    const previous = draft.lastError;
-    const fatal = err && (err.name === 'SecurityError' || err.name === 'NotSupportedError');
-    if (fatal) {
-      draft.enabled = false;
-      draft.memoryOnly = true;
-      setDraftStatus('unavailable', message);
-    } else {
-      setDraftStatus('unsaved', message);
-    }
-    if (previous !== message) {
-      ui.toast('草稿自动保存失败：' + message, 'error');
-    }
-  }
 
-  function scheduleDraftSave() {
-    if (!draft.enabled || draft.restoring) return;
-    if (draft.timer) clearTimeout(draft.timer);
-    draft.timer = setTimeout(function () {
-      draft.timer = 0;
-      saveDraftNow();
-    }, 300);
-  }
 
-  async function saveDraftNow(options) {
-    if (!draft.enabled || draft.restoring) return;
-    const force = !!(options && options.force);
-    const initialEnvelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
-    if (!force && draftSnapshotKey(initialEnvelope) === draft.lastKey) return;
-    if (draft.saving) {
-      draft.queued = true;
-      return;
-    }
-    draft.saving = true;
-    try {
-      try {
-        await L.io.ensureDraftAssets(state.project);
-      } catch (err) {
-        // 图片资产没落盘时不要写结构，避免恢复时把图片当作缺失资产删掉。
-        reportDraftError(err);
-        return;
-      }
-      if (!draft.enabled || draft.restoring) return;
-      // 等待资产写入期间可能又有编辑；总是落盘当前状态，避免旧结构覆盖新编辑。
-      const envelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
-      const key = draftSnapshotKey(envelope);
-      if (!force && key === draft.lastKey) return;
-      const savedAt = L.io.writeDraftEnvelope(envelope);
-      draft.lastKey = key;
-      draft.lastSavedAt = savedAt;
-      setDraftStatus('saved');
-      try {
-        await L.io.pruneDraftAssets(state.project);
-      } catch (err) {
-        /* 未引用资产残留不影响草稿；下次保存会再清理。 */
-      }
-    } catch (err) {
-      reportDraftError(err);
-    } finally {
-      draft.saving = false;
-      if (draft.queued) {
-        draft.queued = false;
-        scheduleDraftSave();
-      }
-    }
-  }
-
-  function flushDraftSync() {
-    if (!draft.enabled || draft.restoring) return;
-    const envelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
-    const key = draftSnapshotKey(envelope);
-    if (key === draft.lastKey) return;
-    try {
-      const savedAt = L.io.writeDraftEnvelope(envelope);
-      draft.lastKey = key;
-      draft.lastSavedAt = savedAt;
-      setDraftStatus('saved');
-    } catch (err) {
-      reportDraftError(err);
-    }
-  }
-
-  async function persistDraftAssetQuietly(assetId) {
-    if (!draft.enabled || !assetId) return;
-    try {
-      await L.io.persistDraftAsset(assetId, state.project);
-    } catch (err) {
-      reportDraftError(err);
-    }
-  }
-
-  async function restoreDraftOnStartup() {
-    draft.restoring = true;
-    draft.enabled = false;
-    let result;
-    try {
-      result = await L.io.restoreDraft();
-    } catch (err) {
-      draft.memoryOnly = true;
-      return { ok: false, reason: 'unavailable', error: err.message };
-    }
-    if (result && result.ok && result.project) {
-      L.io.installAssets(result.assets);
-      state.project = result.project;
-      const savedPageId = result.ui && result.ui.currentPageId;
-      state.currentPageId = model.getPage(state.project, savedPageId)
-        ? savedPageId
-        : state.project.pages[0].id;
-      state.selection = { type: 'page' };
-      draft.lastKey = draftSnapshotKey(
-        L.io.createDraftEnvelope(state.project, state.currentPageId)
-      );
-      draft.lastSavedAt = result.savedAt || Date.now();
-      draft.status = 'saved';
-      return { ok: true, restored: true, missingCount: result.missingCount || 0 };
-    }
-    if (result && result.ok && result.empty) {
-      draft.lastKey = '';
-      draft.lastSavedAt = 0;
-      return { ok: true, restored: false };
-    }
-    if (result && result.reason === 'unavailable') draft.memoryOnly = true;
-    return {
-      ok: false,
-      reason: (result && result.reason) || 'corrupt',
-      error: result && result.error,
-      errors: result && result.errors
-    };
-  }
-
-  function notifyDraftRecovery(startup) {
-    if (!startup || startup.ok) {
-      if (startup && startup.missingCount) {
-        ui.toast('草稿已恢复，但 ' + startup.missingCount +
-          ' 张图片缺失，相关图片已移除。', 'error');
-      }
-      return;
-    }
-    if (startup.reason === 'unavailable') {
-      setDraftStatus('unavailable', startup.error || '浏览器本地存储不可用');
-      ui.modal.alert('草稿不可用',
-        '浏览器本地存储不可用，草稿不会自动保存；仍可编辑并导出项目。');
-      return;
-    }
-    const message = startup.reason === 'version'
-      ? '草稿版本高于当前支持的版本，已打开空白项目。原始草稿已保留在 listify.draft.corrupt。'
-      : '草稿无法恢复，已打开空白项目。原始草稿已保留在 listify.draft.corrupt。';
-    ui.modal.alert('草稿无法恢复', message);
-  }
 
   /* ---------- import / export ---------- */
 
-  async function exportProject() {
-    try {
-      await L.io.downloadProject(state.project);
-      ui.toast('项目已导出。', 'success');
-    } catch (err) {
-      ui.modal.alert('导出失败', err.message);
-    }
-  }
 
-  function openImportProject() {
-    const input = document.getElementById('load-file');
-    input.value = '';
-    input.click();
-  }
 
-  function discardBuiltAssets(store) {
-    if (!store || !store.urls) return;
-    store.urls.forEach(function (url) {
-      URL.revokeObjectURL(url);
-    });
-  }
-
-  async function handleImportProject(file) {
-    if (!file) return;
-    const result = await L.io.loadProjectFile(file);
-    if (!result.ok) {
-      ui.modal.alert('导入失败', result.error || '项目文件无法加载。');
-      return;
-    }
-    const ok = await ui.modal.confirm(
-      '导入项目',
-      '导入会替换当前草稿，且不可撤销。确定继续吗？',
-      { confirmLabel: '替换草稿' }
-    );
-    if (!ok) {
-      discardBuiltAssets(result.assets);
-      return;
-    }
-
-    draft.restoring = true;
-    try {
-      try {
-        await L.io.persistAssetStore(result.assets);
-      } catch (err) {
-        reportDraftError(err);
-      }
-      L.io.installAssets(result.assets);
-      state.project = result.project;
-      state.currentPageId = state.project.pages[0].id;
-      state.selection = { type: 'page' };
-      draft.lastKey = '';
-      undo.stack.length = 0;
-      ui.renderAll();
-    } finally {
-      draft.restoring = false;
-    }
-    await saveDraftNow({ force: true });
-    ui.toast('项目已导入。', 'success');
-  }
-
-  async function newProject() {
-    const ok = await ui.modal.confirm(
-      '新建项目',
-      '新建会清空当前草稿和所有图片，且不可撤销。确定新建吗？',
-      { confirmLabel: '新建项目', danger: true }
-    );
-    if (!ok) return;
-
-    draft.restoring = true;
-    try {
-      try {
-        await L.io.clearDraft();
-      } catch (err) {
-        reportDraftError(err);
-      }
-      L.assets.clear();
-      state.project = model.createDefaultProject();
-      state.currentPageId = state.project.pages[0].id;
-      state.selection = { type: 'page' };
-      draft.lastKey = '';
-      undo.stack.length = 0;
-      ui.renderAll();
-    } finally {
-      draft.restoring = false;
-    }
-    setDraftStatus('idle');
-    ui.toast('已新建空白项目。', 'success');
-  }
 
   /* ---------- bootstrap ---------- */
 
   async function init() {
-    setupSurface();
+    ctx.viewport.setupSurface();
     ui.init();
     const originalRenderAll = ui.renderAll;
     ui.renderAll = function () {
@@ -2954,24 +903,24 @@
       }
     };
 
-    overlay.addEventListener('pointerdown', onPointerDown);
-    overlay.addEventListener('pointermove', onPointerMove);
-    overlay.addEventListener('pointerleave', onPointerLeave);
-    overlay.addEventListener('pointerup', onPointerUp);
-    overlay.addEventListener('pointercancel', onPointerUp);
-    overlay.addEventListener('dblclick', onDoubleClick);
-    overlay.addEventListener('dragover', onDragOver);
-    overlay.addEventListener('drop', onDrop);
-    pane.addEventListener('wheel', onCanvasWheel, { passive: false });
-    if (scrollEl) scrollEl.addEventListener('scroll', onCanvasScroll);
+    surface.overlay.addEventListener('pointerdown', ctx.interactions.onPointerDown);
+    surface.overlay.addEventListener('pointermove', ctx.interactions.onPointerMove);
+    surface.overlay.addEventListener('pointerleave', ctx.interactions.onPointerLeave);
+    surface.overlay.addEventListener('pointerup', ctx.interactions.onPointerUp);
+    surface.overlay.addEventListener('pointercancel', ctx.interactions.onPointerUp);
+    surface.overlay.addEventListener('dblclick', ctx.interactions.onDoubleClick);
+    surface.overlay.addEventListener('dragover', ctx.interactions.onDragOver);
+    surface.overlay.addEventListener('drop', ctx.interactions.onDrop);
+    surface.pane.addEventListener('wheel', ctx.viewport.onCanvasWheel, { passive: false });
+    if (surface.scrollEl) surface.scrollEl.addEventListener('scroll', ctx.viewport.onCanvasScroll);
 
-    window.addEventListener('pagehide', flushDraftSync);
+    window.addEventListener('pagehide', ctx.draft.flushDraftSync);
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'hidden') flushDraftSync();
+      if (document.visibilityState === 'hidden') ctx.draft.flushDraftSync();
     });
     window.addEventListener('storage', function (event) {
       if (!event || event.key !== L.io.DRAFT_KEY) return;
-      if (draft.restoring) return;
+      if (ctx.draft.restoring) return;
       const now = Date.now();
       if (now - lastExternalDraftNotice < 8000) return;
       lastExternalDraftNotice = now;
@@ -2989,24 +938,74 @@
       });
     }
 
-    const startup = await restoreDraftOnStartup();
-    fit();
+    const startup = await ctx.draft.restoreDraftOnStartup();
+    ctx.viewport.fit();
     ui.renderAll();
-    draft.restoring = false;
+    ctx.draft.restoring = false;
 
     if (startup.reason === 'unavailable') {
-      draft.enabled = false;
-      setDraftStatus('unavailable', startup.error || '浏览器本地存储不可用');
+      ctx.draft.enabled = false;
+      ctx.draft.setDraftStatus('unavailable', startup.error || '浏览器本地存储不可用');
     } else {
-      draft.enabled = true;
-      setDraftStatus(startup.restored ? 'saved' : 'idle');
+      ctx.draft.enabled = true;
+      ctx.draft.setDraftStatus(startup.restored ? 'saved' : 'idle');
       if (startup.restored && startup.missingCount) {
-        saveDraftNow({ force: true });
+        ctx.draft.saveDraftNow({ force: true });
       }
     }
 
-    notifyDraftRecovery(startup);
+    ctx.draft.notifyDraftRecovery(startup);
   }
+
+  /* ---------- 子域装配 ---------- */
+
+  Object.assign(ctx.actions, {
+    changed: changed,
+    currentPage: currentPage,
+    selectedElement: selectedElement,
+    editingBackground: editingBackground,
+    selectedBackgroundImage: selectedBackgroundImage,
+    backgroundImageBounds: backgroundImageBounds,
+    switchPage: switchPage,
+    ensureCustomBackgroundImage: ensureCustomBackgroundImage,
+    pushUndo: pushUndo,
+    releaseUnusedAsset: releaseUnusedAsset,
+    countSongChanges: countSongChanges,
+    findElementAnywhere: findElementAnywhere,
+    selectPage: selectPage,
+    selectElement: selectElement,
+    selectBackground: selectBackground,
+    selectBackgroundSet: selectBackgroundSet,
+    selectBackgroundImage: selectBackgroundImage,
+    placeCategory: placeCategory,
+    openPlaylistEditor: openPlaylistEditor,
+    setPageSize: setPageSize,
+    setMargins: setMargins,
+    resizeElementWidth: resizeElementWidth,
+    setImageKeepRatio: setImageKeepRatio,
+    setElementField: setElementField,
+    setElementStyleField: setElementStyleField,
+    setBackgroundColor: setBackgroundColor,
+    setBackgroundImageField: setBackgroundImageField,
+    addText: addText,
+    pickFreeImage: pickFreeImage,
+    handleFreeImageFile: handleFreeImageFile,
+    handlePastedImages: handlePastedImages,
+    moveLayer: moveLayer,
+    deleteSelection: deleteSelection,
+    addPageDialog: addPageDialog,
+    deleteCurrentPage: deleteCurrentPage,
+    jumpToCategory: jumpToCategory,
+    nudgeSelection: nudgeSelection
+  });
+
+  ctx.draft = L.appDraft.create(ctx);
+  ctx.chrome = L.appChrome.create(ctx);
+  Object.assign(ctx.viewport, L.appViewport.create(ctx));
+  ctx.interactions = L.appInteractions.create(ctx);
+  ctx.backgrounds = L.appBackgrounds.create(ctx);
+  ctx.presets = L.appPresets.create(ctx);
+  ctx.importExport = L.appImportExport.create(ctx);
 
   L.app = {
     state: state,
@@ -3026,13 +1025,13 @@
     jumpToCategory: jumpToCategory,
     openPlaylistEditor: openPlaylistEditor,
     changed: changed,
-    fit: fit,
-    redraw: redraw,
-    handleResize: handleResize,
-    zoomIn: zoomIn,
-    zoomOut: zoomOut,
-    zoomFit: fit,
-    setZoomPercent: setZoomPercent,
+    fit: ctx.viewport.fit,
+    redraw: ctx.viewport.redraw,
+    handleResize: ctx.viewport.handleResize,
+    zoomIn: ctx.viewport.zoomIn,
+    zoomOut: ctx.viewport.zoomOut,
+    zoomFit: ctx.viewport.fit,
+    setZoomPercent: ctx.viewport.setZoomPercent,
     getZoomPercent: function () {
       return Math.round(viewport.scale * 100);
     },
@@ -3047,66 +1046,66 @@
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
     setImageKeepRatio: setImageKeepRatio,
-    addBackgroundSet: addBackgroundSet,
-    duplicateBackgroundSet: duplicateBackgroundSet,
-    renameBackgroundSet: renameBackgroundSet,
-    deleteBackgroundSet: deleteBackgroundSet,
-    setPageBackground: setPageBackground,
-    pickBackgroundImage: pickBackgroundImage,
-    pickBackgroundImageWhole: pickBackgroundImageWhole,
-    handleBackgroundFile: handleBackgroundFile,
-    handleDroppedBackgroundFile: handleDroppedBackgroundFile,
-    applyPreset: applyPreset,
-    deleteBackgroundImage: deleteBackgroundImage,
-    moveBackgroundImage: moveBackgroundImage,
-    setBackgroundImageFit: setBackgroundImageFit,
-    restoreBackgroundImageFit: restoreBackgroundImageFit,
-    setBackgroundImageValue: setBackgroundImageValue,
-    toggleUnifiedBackground: toggleUnifiedBackground,
-    setUnifiedBackground: setUnifiedBackground,
-    bakeUnifiedBackground: bakeUnifiedBackground,
-    copyUnifiedBackgroundToPage: copyUnifiedBackgroundToPage,
-    openImport: openImport,
-    exportPlaylist: exportPlaylist,
-    handleImportFile: handleImportFile,
+    setElementField: setElementField,
+    setElementStyleField: setElementStyleField,
+    setBackgroundColor: setBackgroundColor,
+    setBackgroundImageField: setBackgroundImageField,
+    addBackgroundSet: ctx.backgrounds.addBackgroundSet,
+    duplicateBackgroundSet: ctx.backgrounds.duplicateBackgroundSet,
+    renameBackgroundSet: ctx.backgrounds.renameBackgroundSet,
+    deleteBackgroundSet: ctx.backgrounds.deleteBackgroundSet,
+    setPageBackground: ctx.backgrounds.setPageBackground,
+    pickBackgroundImage: ctx.backgrounds.pickBackgroundImage,
+    pickBackgroundImageWhole: ctx.backgrounds.pickBackgroundImageWhole,
+    handleBackgroundFile: ctx.backgrounds.handleBackgroundFile,
+    handleDroppedBackgroundFile: ctx.backgrounds.handleDroppedBackgroundFile,
+    applyPreset: ctx.presets.applyPreset,
+    deleteBackgroundImage: ctx.backgrounds.deleteBackgroundImage,
+    moveBackgroundImage: ctx.backgrounds.moveBackgroundImage,
+    setBackgroundImageFit: ctx.backgrounds.setBackgroundImageFit,
+    restoreBackgroundImageFit: ctx.backgrounds.restoreBackgroundImageFit,
+    setBackgroundImageValue: ctx.backgrounds.setBackgroundImageValue,
+    toggleUnifiedBackground: ctx.backgrounds.toggleUnifiedBackground,
+    setUnifiedBackground: ctx.backgrounds.setUnifiedBackground,
+    bakeUnifiedBackground: ctx.backgrounds.bakeUnifiedBackground,
+    copyUnifiedBackgroundToPage: ctx.backgrounds.copyUnifiedBackgroundToPage,
+    openImport: ctx.importExport.openImport,
+    exportPlaylist: ctx.importExport.exportPlaylist,
+    handleImportFile: ctx.importExport.handleImportFile,
     placeCategory: placeCategory,
     undo: performUndo,
-    newProject: newProject,
-    exportProject: exportProject,
-    openImportProject: openImportProject,
-    handleImportProject: handleImportProject,
-    saveProject: exportProject,
-    openLoadProject: openImportProject,
-    handleLoadFile: handleImportProject,
+    newProject: ctx.importExport.newProject,
+    exportProject: ctx.importExport.exportProject,
+    openImportProject: ctx.importExport.openImportProject,
+    handleImportProject: ctx.importExport.handleImportProject,
+    saveProject: ctx.importExport.exportProject,
+    openLoadProject: ctx.importExport.openImportProject,
+    handleLoadFile: ctx.importExport.handleImportProject,
     moveLayer: moveLayer,
     deleteSelection: deleteSelection
-  };
-
-  L.devChecks = function () {
-    return layout.devChecks();
   };
 
   L.debugStats = function () {
     return {
       draws: {
-        redraws: drawStats.redraws,
-        bg: drawStats.bg,
-        content: drawStats.content,
-        chrome: drawStats.chrome,
-        overlay: drawStats.overlay,
-        geometry: drawStats.geometry
+        redraws: ctx.viewport.stats.redraws,
+        bg: ctx.viewport.stats.bg,
+        content: ctx.viewport.stats.content,
+        chrome: ctx.viewport.stats.chrome,
+        overlay: ctx.viewport.stats.overlay,
+        geometry: ctx.viewport.stats.geometry
       },
       layout: layout.getStats ? layout.getStats() : null
     };
   };
 
   L.resetDebugStats = function () {
-    drawStats.redraws = 0;
-    drawStats.bg = 0;
-    drawStats.content = 0;
-    drawStats.chrome = 0;
-    drawStats.overlay = 0;
-    drawStats.geometry = 0;
+    ctx.viewport.stats.redraws = 0;
+    ctx.viewport.stats.bg = 0;
+    ctx.viewport.stats.content = 0;
+    ctx.viewport.stats.chrome = 0;
+    ctx.viewport.stats.overlay = 0;
+    ctx.viewport.stats.geometry = 0;
     if (layout.resetStats) layout.resetStats();
   };
 

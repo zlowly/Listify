@@ -62,17 +62,35 @@ Listify/
 ├── index.html          # 入口页面（经典 <script> 标签加载）
 ├── style.css           # 全站样式与设计令牌
 ├── js/
-│   ├── app.js          # 应用装配、交互主流程、撤销
-│   ├── model.js        # 数据模型、默认值、项目结构
+│   ├── app.js          # 应用编排：状态、撤销、选择、页面管理、意图动作与公开 API
+│   ├── app-chrome.js   # 装饰层与选择框绘制、手柄命中、光标
+│   ├── app-viewport.js # 画布表面、分层重绘、缩放与滚动
+│   ├── app-interactions.js # 指针拖拽、行内编辑、分类拖放
+│   ├── app-presets.js  # 预置素材应用
+│   ├── app-backgrounds.js # 背景库、背景图与统一背景控制
+│   ├── app-draft.js    # 草稿防抖保存、恢复与错误上报
+│   ├── app-import-export.js # 歌单与项目导入导出
+│   ├── assets.js       # 图片资产缓存、哈希、Base64/Blob 与下载工具
+│   ├── model.js        # 数据模型、默认值、字体、样式与几何
 │   ├── layout.js       # 字宽测量、表格列宽与填充/续表算法
 │   ├── render.js       # 画面渲染
-│   ├── ui.js           # 面板、属性检查器、模态与快捷键
+│   ├── project-schema.js # 项目校验与旧版背景迁移
+│   ├── project-io.js   # 项目序列化、构建与文件加载
+│   ├── draft-store.js  # IndexedDB / localStorage 草稿存储
+│   ├── io.js           # 兼容聚合层（合并上述三个模块为 L.io）
+│   ├── ui.js           # 侧栏、页面标签、帮助提示与事件委托
+│   ├── ui-fields.js    # 表单字段工厂与分组折叠
+│   ├── ui-modal.js     # 模态框、焦点陷阱与 Esc/遮罩关闭
+│   ├── ui-pickers.js   # 背景库与预置选择弹窗
+│   ├── ui-playlist-editor.js # 歌单编辑器
+│   ├── ui-property-panel.js  # 页面/背景/分类/文字/图片属性面板
 │   ├── import.js       # 文本导入与编码处理
-│   ├── io.js           # 草稿持久化、项目 JSON 导入导出
+│   ├── playlist-export.js # 歌单文本导出
 │   ├── export.js       # PNG / ZIP 导出
 │   ├── zip.js          # 纯 JS ZIP 打包
 │   ├── fontpicker.js   # 本机字体选择
 │   ├── clipboard-image.js
+│   ├── dev-checks.js   # 控制台自检（开发期文件，不进入 dist）
 │   └── presets-data/   # 预置索引与分类数据块（打包生成文件，勿手改）
 ├── vendor/             # 随仓库分发的 LeaferJS UMD（唯一运行时依赖）
 ├── presets/            # 预置素材（6 个分类目录）、manifest.json 配置与 SOURCES.md
@@ -92,9 +110,13 @@ Listify/
 
 - 运行时保持零构建：不引入打包器、包管理器、转译步骤或 CDN；`file://` 下不能使用 ES module，脚本一律用经典 `<script>` 标签。
 - 用户可见文案使用中文，标识符使用英文。
-- 新增文件优先拆分为普通 `js/*.js` 模块，挂载到 `window.Listify` 命名空间。
+- 新增文件优先拆分为普通 `js/*.js` 模块，挂载到 `window.Listify` 命名空间；依赖必须单向：`model/assets/layout → project-* / draft-store → ui-* → app-* → app.js`。
+- UI 不直接写模型字段：属性面板通过 `L.app.setElementField` / `setElementStyleField` / `setBackgroundColor` / `setBackgroundImageField` 等意图方法修改并触发局部重绘。
+- 工具函数只保留一份实现：`model.clamp`、`model.clone`、`L.assets.downloadBlob`、`ui.esc`。
 - 文件导入只能经用户手势（`<input type="file">` / 拖放），不能访问后端或额外文件系统能力。
-- 项目没有测试套件、Lint 或 CI，改动后需在 Chrome 中手动走完整流程验证（导入、增删页、拖分类、改属性、导出）。
+- 纯逻辑回归检查：`node --test scripts/checks/*.test.js`（零依赖，不需要安装 npm 包；不覆盖 canvas 绘制、交互与 IndexedDB）。交互与导出仍需在浏览器中手动验证。
+- `js/dev-checks.js` 只在开发期手动注入，`./build.sh` 拷贝阶段排除并断言产物不含该文件。
+- `js/app.js` 的 `BUILD` 是占位常量，构建时由 `./build.sh` 按 `VERSION` 注入，始终与 `?v=` 一致。
 
 领域细节（字宽规则、图层顺序、背景库语义等）见 `AGENTS.md` 与 `openspec/specs/`。
 

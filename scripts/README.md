@@ -1,6 +1,6 @@
 # scripts/ 开发期脚本
 
-预置素材库的生成与打包工具。运行时**不依赖**这些脚本：它们只在开发期把 `presets/` 里的素材
+预置素材库的生成与打包工具，以及开发期回归检查。运行时**不依赖**这些脚本：它们只在开发期把 `presets/` 里的素材
 编译成 `js/presets-data/` 的经典脚本。仓库保持零构建，双击 `index.html` 即可使用。
 
 依赖：ImageMagick 7（`magick`，需带 WebP 支持）与 python3 标准库；不引入任何包管理器或第三方 Python 库。
@@ -15,12 +15,43 @@ scripts/build-presets.sh       打包入口（校验 + 归一化 + 生成）
 scripts/build-presets.py       打包实现（唯一决策者）
 scripts/gen-selfmade.sh        只重新生成 4 张渐变 + 颗粒叠层
 scripts/gen-selfmade.py        上述素材的像素生成实现
+scripts/checks/loader.js       Node vm 沙箱与确定性 canvas 桩
+scripts/checks/*.test.js       零依赖回归测试（node --test）
 
 js/presets-data/index.js       索引（分类、条目元数据、160px 缩略图、chunks）
 js/presets-data/<分类>.js      分类块（仅 id -> data URL）
 ```
 
 `js/presets-data/` 是生成物，文件头标注「请勿手改」。不要直接编辑它们。
+
+## 回归检查
+
+`scripts/checks/` 是零依赖的 Node 回归测试。它用 Node 内置 `vm` 造一个最小沙箱
+（`window`/`document`/确定性 canvas 桩），按 `index.html` 的真实顺序加载运行时脚本，
+在没有浏览器、没有 npm 的前提下验证纯逻辑：
+
+```sh
+node --test scripts/checks/*.test.js
+```
+
+- `loader.js`：沙箱与 canvas 桩；`measureText = virtualWidth(text) * fontSize * 0.6`。
+  脚本清单从 `index.html` 实读，跳过 `ui.js`、`fontpicker.js`、`clipboard-image.js`、
+  `presets.js`、`app.js`（依赖真实 DOM、剪贴板/字体枚举或启动即 `init()`）。
+- `model.test.js`：文本虚拟宽度（ASCII/CJK/全角/emoji）、排序稳定性、字体栈规整、
+  边距归一化、深拷贝。
+- `layout.test.js`：列宽分配、列优先/行优先填充、动态行数、满页续表、空表占位。
+  期望值就是当前实现的基线；改行为时先确认意图，再同步更新断言。
+- `io.test.js`：项目结构序列化往返、`validateProject` 的错误分类、草稿信封不含 base64。
+- `zip.test.js`：本地文件头、中央目录、CRC32、空目录与多文件条目；本机有 `unzip`
+  时额外执行 `unzip -t`，没有则仅跳过该条外部校验。
+
+约束与边界：
+
+- **零依赖**：只用 Node 内置模块（`node:test`、`node:assert`、`node:vm`、`node:crypto` 等），
+  不引入 npm、`package.json` 或第三方测试框架。
+- **不进产物**：`scripts/` 不复制进 `dist/`，测试也不被 `index.html` 引用。
+- **覆盖边界**：只测纯逻辑与字节结构。**不含** canvas 真实绘制/字体度量、鼠标交互与拖拽、
+  IndexedDB/localStorage 草稿持久化、图片解码与文件选择；这些仍需按 AGENTS.md 在浏览器里手工回归。
 
 ## 常见场景
 

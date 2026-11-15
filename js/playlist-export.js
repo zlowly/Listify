@@ -37,7 +37,7 @@
   }
 
   function downloadText(text, filename) {
-    L.model.downloadBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), filename);
+    L.assets.downloadBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), filename);
   }
 
   /* 歌单非空：序列化并下载 歌单.txt，返回 { empty: false, text }；

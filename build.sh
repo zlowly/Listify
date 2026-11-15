@@ -6,6 +6,17 @@ set -euo pipefail
 DIST_DIR="dist"
 VERSION_FILE="VERSION"
 
+# 仅开发期使用、不得进入发布产物的文件（源文件可以存在，构建时跳过拷贝）
+DEV_ONLY_FILES=("js/dev-checks.js")
+
+is_dev_only() {
+  local path="${1#./}" item
+  for item in "${DEV_ONLY_FILES[@]}"; do
+    [[ "$path" == "$item" ]] && return 0
+  done
+  return 1
+}
+
 ZIP=0
 PAGES=0
 DRY_RUN=0
@@ -101,6 +112,10 @@ read_version() {
 }
 
 copy_file() {
+  # 开发期专用文件不进入产物
+  if is_dev_only "$1"; then
+    return 0
+  fi
   # 目录按递归处理，便于调用方直接传入 js/ 这类目录
   if [[ -d "$1" ]]; then
     local f
@@ -152,6 +167,19 @@ inject_version() {
   echo "版本注入: $after 处本地资源引用 -> ?v=$VER"
 }
 
+inject_build_version() {
+  local file="$DIST_DIR/js/app.js"
+  [[ -f "$file" ]] || die "缺少产物文件: js/app.js"
+  grep -qF 'L.BUILD = BUILD;' "$file" ||
+    die "js/app.js 缺少 L.BUILD 导出，BUILD 版本注入中止"
+  grep -qE "const BUILD[[:space:]]*=[[:space:]]*'[^']*';" "$file" ||
+    die "js/app.js 未找到 BUILD 常量（形如 const BUILD = '...';），BUILD 版本注入中止"
+  sed -i -E "s#(const BUILD[[:space:]]*=[[:space:]]*')[^']*(';)#\1$VER\2#" "$file"
+  grep -qF "const BUILD = '$VER';" "$file" ||
+    die "js/app.js BUILD 版本注入失败（应为 const BUILD = '$VER';）"
+  echo "版本注入: js/app.js BUILD -> $VER"
+}
+
 inject_presets_version() {
   local file="$DIST_DIR/js/presets.js"
   [[ -f "$file" ]] || die "缺少产物文件: js/presets.js"
@@ -201,15 +229,15 @@ check_preset_chunks() {
 
 assert_dist_clean() {
   local bad=() p
-  for p in scripts presets js/presets-data.js; do
+  for p in scripts presets js/presets-data.js js/dev-checks.js; do
     if [[ -e "$DIST_DIR/$p" ]]; then
       bad+=("$p")
     fi
   done
   if ((${#bad[@]} > 0)); then
-    die "产物包含不应发布的开发期文件: ${bad[*]}（scripts/、presets/ 与旧预置单文件不得进入产物）"
+    die "产物包含不应发布的开发期文件: ${bad[*]}（scripts/、presets/、js/presets-data.js、js/dev-checks.js 不得进入产物）"
   fi
-  echo "产物清洁检查: 不含 scripts/、presets/ 与 js/presets-data.js"
+  echo "产物清洁检查: 不含 scripts/、presets/、js/presets-data.js 与 js/dev-checks.js"
 }
 
 build_dist() {
@@ -229,6 +257,7 @@ build_dist() {
   copy_tree vendor
 
   inject_version
+  inject_build_version
   inject_presets_version
   check_preset_chunks
   assert_dist_clean

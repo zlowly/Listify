@@ -109,7 +109,7 @@
     if (opts.isCancelled && opts.isCancelled()) return null;
     const result = await renderPageBlob(project, page, width, height, mode);
     if (opts.isCancelled && opts.isCancelled()) return null;
-    L.model.downloadBlob(result.blob, pageLabel(pageNumber, mode));
+    L.assets.downloadBlob(result.blob, pageLabel(pageNumber, mode));
     return result;
   }
 
@@ -160,7 +160,7 @@
     if (opts.isCancelled && opts.isCancelled()) {
       return { cancelled: true, total: total, exported: 0, skipped: skipped };
     }
-    L.model.downloadBlob(zip, zipLabel(total, mode));
+    L.assets.downloadBlob(zip, zipLabel(total, mode));
     return { cancelled: false, total: total, exported: entries.length, skipped: skipped };
   }
 

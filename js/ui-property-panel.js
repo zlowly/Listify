@@ -1,0 +1,818 @@
+(function () {
+  'use strict';
+
+  const L = window.Listify = window.Listify || {};
+  const ui = L.ui = L.ui || {};
+
+  const model = L.model;
+  const layout = L.layout;
+  const esc = ui.esc;
+  const field = ui.field;
+  const fieldHelp = ui.fieldHelp;
+  const fieldPair = ui.fieldPair;
+  const propGroup = ui.propGroup;
+  const helpTip = ui.helpTip;
+  const numberTier = ui.numberTier;
+  const numberInput = ui.numberInput;
+  const textInput = ui.textInput;
+  const colorInput = ui.colorInput;
+  const selectInput = ui.selectInput;
+  const rangeInput = ui.rangeInput;
+  const weightOptions = ui.weightOptions;
+  const alignOptions = ui.alignOptions;
+  const bind = ui.bind;
+  const valueOf = ui.valueOf;
+  const normalizeAngle = ui.normalizeAngle;
+  const setGroupCollapsed = ui.setGroupCollapsed;
+  const openPresetPicker = ui.openPresetPicker;
+  const openBackgroundLibrary = ui.openBackgroundLibrary;
+
+  /* 页面边距十字：上(1,2) 左(2,1) 右(2,3) 下(3,2)，中心页面示意 */
+  function marginCross(margins, idPrefix) {
+    const item = function (side) {
+      return '<input id="' + idPrefix + side + '" class="input ' + numberTier(0, 1000, 1) + ' cross-' + side +
+        '" type="number" min="0" max="1000" step="1" data-ctrl-step="10" value="' + esc(margins[side]) + '">';
+    };
+    return '<div class="margin-cross">' +
+      item('top') + item('left') + item('right') +
+      '<span class="cross-page"></span>' +
+      item('bottom') +
+    '</div>';
+  }
+
+  /* 重渲染前后捕获/恢复面板内聚焦控件（含光标）：点数值箭头改值会触发重渲染，
+     若不恢复，聚焦节点被 innerHTML 销毁后焦点丢失，蓝色焦点边框随之消失 */
+  function capturePanelFocus() {
+    const active = document.activeElement;
+    if (!active || !ui.els.propertyPanel.contains(active)) return null;
+    const tag = active.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return null;
+    const state = { id: active.id, tag: tag };
+    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+      state.start = active.selectionStart;
+      state.end = active.selectionEnd;
+    }
+    return state;
+  }
+
+  function restorePanelFocus(state) {
+    if (!state || !state.id) return;
+    const el = document.getElementById(state.id);
+    if (!el) return;
+    el.focus();
+    if ((state.tag === 'INPUT' || state.tag === 'TEXTAREA') && state.start != null) {
+      try { el.setSelectionRange(state.start, state.end); } catch (err) { /* 部分控件不支持 */ }
+    }
+  }
+
+  ui.renderPropertyPanel = function () {
+    const focusState = capturePanelFocus();
+    try {
+      renderPropertyPanelBody();
+    } finally {
+      restorePanelFocus(focusState);
+    }
+  };
+
+  const renderPropertyPanelBody = function () {
+    if (ui.propTip) ui.propTip.hide();
+    const project = L.app.state.project;
+    const page = L.app.currentPage();
+    if (!page) return;
+    const selection = L.app.state.selection;
+    if (selection.type === 'element') {
+      const element = page.elements.find(function (item) { return item.id === selection.id; });
+      if (!element) {
+        L.app.selectPage();
+        return;
+      }
+      if (element.type === 'category') renderCategoryProperties(element);
+      else if (element.type === 'text') renderTextProperties(element);
+      else renderImageProperties(element);
+      return;
+    }
+    if (selection.type === 'backgroundSet') {
+      const set = model.findBackground(project, selection.setId);
+      if (!set) {
+        L.app.selectPage();
+        return;
+      }
+      renderBackgroundSetProperties(set);
+      return;
+    }
+    if (selection.type === 'backgroundImage') {
+      const set = model.findBackground(project, selection.setId);
+      const image = set ? (set.images || []).find(function (item) { return item.id === selection.imageId; }) : null;
+      if (!set || !image) {
+        L.app.selectPage();
+        return;
+      }
+      renderBackgroundImageProperties(set, image);
+      return;
+    }
+    renderPageProperties(page);
+  };
+
+  function renderPageProperties(page) {
+    const project = L.app.state.project;
+    const pageIndex = project.pages.indexOf(page);
+    ui.els.propertyPanel.innerHTML =
+      propGroup('page', '当前页',
+        '<p class="hint">第 ' + (pageIndex + 1) + ' 页 / 共 ' + project.pages.length + ' 页。</p>',
+        { right: helpTip('页面尺寸与边距为全局设置。') }) +
+      propGroup('size', '页面尺寸',
+        fieldPair(
+          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1, false, 10),
+          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1, false, 10)
+        ) +
+        '<div class="inline-actions"><button id="prop-orient-portrait" class="btn btn-sm">纵向 1080×1920</button>' +
+        '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>') +
+      propGroup('margins', '页面边距',
+        marginCross(project.margins, 'prop-margin-'),
+        { right: helpTip('仅参考线') }) +
+      propGroup('background', '页面背景',
+        field('当前页背景', selectInput('prop-page-bg', backgroundOptions(project), page.backgroundId, project.unifiedBackground)) +
+        field('', '<label class="check-row"><input id="prop-unified" type="checkbox"' +
+          (project.unifiedBackground ? ' checked' : '') + '> 所有页面使用同一背景</label>') +
+        field('全局背景组', selectInput('prop-unified-id', backgroundOptions(project), project.unifiedBackgroundId, !project.unifiedBackground)) +
+        '<div class="inline-actions">' +
+          '<button id="prop-bg-pick" class="btn btn-sm">选择背景图</button>' +
+          '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
+        '</div>',
+        { right: helpTip(project.unifiedBackground
+          ? '全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。'
+          : '背景位于内容下方，可在图层中选中后编辑。') }) +
+      propGroup('actions', '',
+        '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
+          helpTip('在画布或图层面板中选择内容后可删除。') + '</div>', { plain: true });
+
+    bind('prop-page-w', 'change', function () {
+      L.app.setPageSize(Number(valueOf('prop-page-w')), project.pageSize.height);
+    });
+    bind('prop-page-h', 'change', function () {
+      L.app.setPageSize(project.pageSize.width, Number(valueOf('prop-page-h')));
+    });
+    bind('prop-orient-portrait', 'click', function () {
+      L.app.setPageSize(1080, 1920);
+    });
+    bind('prop-orient-landscape', 'click', function () {
+      L.app.setPageSize(1920, 1080);
+    });
+    ['top', 'right', 'bottom', 'left'].forEach(function (key) {
+      bind('prop-margin-' + key, 'change', function () {
+        const margins = Object.assign({}, project.margins);
+        margins[key] = Math.max(0, Number(valueOf('prop-margin-' + key)) || 0);
+        L.app.setMargins(margins);
+      });
+    });
+    bind('prop-page-bg', 'change', function () {
+      L.app.setPageBackground(valueOf('prop-page-bg'));
+    });
+    bind('prop-unified', 'change', function () {
+      const input = document.getElementById('prop-unified');
+      L.app.toggleUnifiedBackground(input ? input.checked : false);
+    });
+    bind('prop-unified-id', 'change', function () {
+      L.app.setUnifiedBackground(valueOf('prop-unified-id'));
+    });
+    bind('prop-bg-pick', 'click', function () { openPresetPicker('whole', null); });
+    bind('prop-bg-library', 'click', openBackgroundLibrary);
+  }
+
+  function backgroundOptions(project) {
+    return (project.backgrounds || []).map(function (set) {
+      return { value: set.id, label: set.name };
+    });
+  }
+
+  function fitLabel(fit) {
+    if (fit === 'original') return '原大小';
+    if (fit === 'fill-width') return '横向占满';
+    if (fit === 'fill-height') return '竖向占满';
+    if (fit === 'none') return '自定义';
+    return '最适合';
+  }
+
+  function renderBackgroundSetProperties(set) {
+    const project = L.app.state.project;
+    const page = L.app.currentPage();
+    const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+    const referenceCount = model.backgroundReferenceCount(project, set.id);
+    const check = model.canDeleteBackground(project, set.id);
+    const pageIndex = project.pages.indexOf(page);
+    const usage = project.unifiedBackground
+      ? '全局背景生效中；修改会立即影响所有页面。'
+      : (referenceCount > 0
+        ? '第 ' + (pageIndex + 1) + ' 页正在使用；另有 ' + Math.max(0, referenceCount - 1) + ' 页使用同一背景。'
+        : '当前没有页面使用该背景。');
+    ui.els.propertyPanel.innerHTML =
+      propGroup('set', '背景组',
+        '<p class="hint">' + esc(usage) + '</p>' +
+        field('名称', textInput('prop-bg-name', set.name, '背景名称')) +
+        field('填充色', colorInput('prop-bg-set-color', set.color || '#ffffff')),
+        { right: isGlobal ? '<span class="pill pill-blue">全局</span>' : '' }) +
+      propGroup('images', '图片',
+        '<div class="inline-actions">' +
+          '<button id="prop-bg-add-image" class="btn btn-sm">添加图片</button>' +
+          '<button id="prop-bg-duplicate" class="btn btn-sm">复制背景</button>' +
+          '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
+          '<button id="prop-bg-delete" class="btn btn-sm btn-danger"' + (check.ok ? '' : ' disabled title="' + esc(check.reason) + '"') + '>删除背景</button>' +
+        '</div>' +
+        (check.ok ? '' : '<p class="hint">' + esc(check.reason) + '</p>'),
+        { right: '<span class="hint">' + (set.images || []).length + ' 张</span>' +
+          helpTip('图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。') }) +
+      (project.unifiedBackground
+        ? propGroup('global', '全局背景',
+            '<div class="inline-actions">' +
+              '<button id="prop-bg-bake" class="btn btn-sm">固化到所有页</button>' +
+              '<button id="prop-bg-copy" class="btn btn-sm">本页独立副本</button>' +
+            '</div>',
+            { right: helpTip('取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。') })
+        : '');
+
+    bind('prop-bg-name', 'change', function () { L.app.renameBackgroundSet(set.id, valueOf('prop-bg-name')); });
+    bind('prop-bg-set-color', 'input', function () {
+      L.app.setBackgroundColor(set.id, valueOf('prop-bg-set-color'));
+    });
+    bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', { setId: set.id }); });
+    bind('prop-bg-duplicate', 'click', function () { L.app.duplicateBackgroundSet(set.id); });
+    bind('prop-bg-library', 'click', openBackgroundLibrary);
+    bind('prop-bg-delete', 'click', function () { L.app.deleteBackgroundSet(set.id); });
+    bind('prop-bg-bake', 'click', function () { L.app.bakeUnifiedBackground(); });
+    bind('prop-bg-copy', 'click', function () { L.app.copyUnifiedBackgroundToPage(); });
+  }
+
+  function renderBackgroundImageProperties(set, image) {
+    const project = L.app.state.project;
+    const index = (set.images || []).indexOf(image);
+    const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+    const meta = image.assetId ? (L.assets.getMeta(image.assetId) || project.assets.find(function (asset) {
+      return asset.id === image.assetId;
+    })) : null;
+    const custom = image.fit === 'none';
+    ui.els.propertyPanel.innerHTML =
+      propGroup('info', '背景图片 ' + (index + 1) + ' / ' + set.images.length,
+        '<p class="hint">所属背景：' + esc(set.name) + (isGlobal ? '（全局，修改会影响所有页面）' : '') + '</p>' +
+        '<p class="hint">' + (meta ? '当前图片：' + esc(meta.name) : '图片缺失或未选择。') + '</p>') +
+      propGroup('position', '定位',
+        (custom ? field : fieldHelp)('尺寸', selectInput('prop-bg-fit', [
+          { value: 'original', label: '原大小' },
+          { value: 'fill-width', label: '横向占满' },
+          { value: 'fill-height', label: '竖向占满' },
+          { value: 'cover', label: '最适合（居中裁剪）' },
+          { value: 'none', label: '自定义' }
+        ], image.fit || 'cover'), '该模式随页面尺寸自动重排。直接在画布拖动或缩放会转为自定义。') +
+        (custom
+          ? fieldPair(
+              'X', numberInput('prop-bg-x', Math.round(image.x), -20000, 20000, 1, false, 10),
+              'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1, false, 10)
+            ) +
+            fieldPair(
+              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1, false, 10),
+              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1, false, 10)
+            ) +
+            field('旋转', numberInput('prop-bg-rotation', Math.round(Number(image.rotation) || 0), -360, 360, 1, false, 45) + '<span class="unit">°</span>') +
+            field('', '<label class="check-row"><input id="prop-bg-ratio" type="checkbox"' +
+              (image.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>') +
+            '<div class="inline-actions"><button id="prop-bg-restore" class="btn btn-sm">恢复为最适合</button></div>'
+          : '')) +
+      propGroup('display', '显示',
+        field('透明度', rangeInput('prop-bg-opacity', image.opacity == null ? 1 : image.opacity, 0, 1, 0.01)) +
+        field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>')) +
+      propGroup('actions', '',
+        '<div class="inline-actions">' +
+          '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= set.images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
+          '<button id="prop-bg-move-down" class="btn btn-sm"' + (index <= 0 ? ' disabled' : '') + '>下移一层</button>' +
+          '<button id="prop-bg-replace" class="btn btn-sm">替换图片</button>' +
+          '<button id="prop-bg-image-delete" class="btn btn-sm btn-danger">删除图片</button>' +
+        '</div>', { plain: true });
+
+    bind('prop-bg-fit', 'change', function () { L.app.setBackgroundImageFit(set.id, image.id, valueOf('prop-bg-fit')); });
+    bind('prop-bg-x', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'x', Number(valueOf('prop-bg-x')) || 0); });
+    bind('prop-bg-y', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'y', Number(valueOf('prop-bg-y')) || 0); });
+    bind('prop-bg-w', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'width', Math.max(1, Number(valueOf('prop-bg-w')) || 1)); });
+    bind('prop-bg-h', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'height', Math.max(1, Number(valueOf('prop-bg-h')) || 1)); });
+    bind('prop-bg-rotation', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'rotation', Number(valueOf('prop-bg-rotation')) || 0); });
+    bind('prop-bg-ratio', 'change', function () {
+      const input = document.getElementById('prop-bg-ratio');
+      L.app.setBackgroundImageField(set.id, image.id, 'keepRatio', input ? input.checked : true);
+    });
+    bind('prop-bg-opacity', 'input', function () {
+      const value = Number(valueOf('prop-bg-opacity'));
+      L.app.setBackgroundImageValue(set.id, image.id, 'opacity', value);
+      const label = document.getElementById('prop-bg-opacity-value');
+      if (label) label.textContent = value.toFixed(2);
+    });
+    bind('prop-bg-blur', 'input', function () {
+      const value = Number(valueOf('prop-bg-blur'));
+      L.app.setBackgroundImageValue(set.id, image.id, 'blur', value);
+      const label = document.getElementById('prop-bg-blur-value');
+      if (label) label.textContent = value;
+    });
+    bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(set.id, image.id); });
+    bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, 1); });
+    bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, -1); });
+    bind('prop-bg-replace', 'click', function () { openPresetPicker('replace', { setId: set.id, imageId: image.id }); });
+    bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(set.id, image.id); });
+  }
+
+  function fontListValues(style) {
+    return Array.isArray(style.fontFamilies)
+      ? model.normalizeFontFamilies(style.fontFamilies)
+      : model.fontFamiliesFromFamily(style.fontFamily);
+  }
+
+  function isDefaultFont(family) {
+    return String(family || '').toLocaleLowerCase() === 'sans-serif';
+  }
+
+  function fontListField(prefix, style) {
+    const supported = !!(L.fontPicker && L.fontPicker.isSupported && L.fontPicker.isSupported());
+    const families = fontListValues(style);
+    const rows = families.map(function (family, index) {
+      const isDefault = isDefaultFont(family);
+      const deleteDisabled = families.length <= 1 ? ' disabled' : '';
+      let name;
+      if (supported) {
+        name = '<button id="' + prefix + '-font-' + index + '" class="font-list-name" type="button" title="点击替换字体">' +
+          esc(isDefault ? '系统默认' : family) + '</button>';
+      } else {
+        name = '<input id="' + prefix + '-font-' + index + '" class="input font-list-input" type="text" value="' +
+          (isDefault ? '' : esc(family)) + '" placeholder="系统默认">';
+      }
+      return '<div class="font-list-row" data-font-index="' + index + '">' + name +
+        '<button id="' + prefix + '-font-delete-' + index + '" class="icon-btn font-list-delete" type="button" title="删除字体"' +
+        deleteDisabled + '>×</button></div>';
+    }).join('');
+    const add = supported
+      ? '<button id="' + prefix + '-font-add" class="btn btn-sm font-list-add" type="button">＋ 添加字体</button>'
+      : '<div class="font-list-manual">' +
+          '<input id="' + prefix + '-font-manual" class="input" type="text" placeholder="输入字体族名">' +
+          '<button id="' + prefix + '-font-manual-add" class="btn btn-sm" type="button">添加</button>' +
+        '</div>';
+    return '<div class="field font-list-field field-help">' +
+        '<label for="' + prefix + '-font-0">字体</label>' +
+        '<div class="control"><div class="font-list">' + rows + add + '</div></div>' +
+        helpTip('按列表顺序回退；至少保留一个字体。') +
+      '</div>';
+  }
+
+  function bindFontList(prefix, style) {
+    const supported = !!(L.fontPicker && L.fontPicker.isSupported && L.fontPicker.isSupported());
+
+    function current() {
+      return fontListValues(style);
+    }
+
+    function commit(list) {
+      model.applyFontFamilies(style, list);
+      L.app.changed({ property: false });
+      ui.renderPropertyPanel();
+    }
+
+    function pick(index) {
+      if (!supported || !L.fontPicker) return;
+      const families = current();
+      const value = index == null ? '' : families[index];
+      L.fontPicker.open({
+        currentValue: isDefaultFont(value) ? '' : (value || ''),
+        onPick: function (picked) {
+          const next = current();
+          if (typeof picked === 'string' && picked) {
+            if (index == null) {
+              if (next.length === 1 && isDefaultFont(next[0])) next[0] = picked;
+              else next.push(picked);
+            } else {
+              next[index] = picked;
+            }
+          } else if (index != null && next.length > 1) {
+            next.splice(index, 1);
+          } else if (index != null) {
+            next[0] = 'sans-serif';
+          }
+          commit(next);
+        }
+      });
+    }
+
+    function deleteAt(index) {
+      const next = current();
+      if (next.length <= 1) return;
+      next.splice(index, 1);
+      commit(next);
+    }
+
+    if (supported) {
+      current().forEach(function (family, index) {
+        bind(prefix + '-font-' + index, 'click', function () { pick(index); });
+        bind(prefix + '-font-delete-' + index, 'click', function () { deleteAt(index); });
+      });
+      bind(prefix + '-font-add', 'click', function () { pick(null); });
+      return;
+    }
+
+    current().forEach(function (family, index) {
+      bind(prefix + '-font-' + index, 'change', function () {
+        const next = current();
+        const raw = valueOf(prefix + '-font-' + index).trim();
+        if (!raw) {
+          if (next.length <= 1) next[0] = 'sans-serif';
+          else next.splice(index, 1);
+        } else {
+          next[index] = raw;
+        }
+        commit(next);
+      });
+      bind(prefix + '-font-' + index, 'keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.target.blur();
+        }
+      });
+      bind(prefix + '-font-delete-' + index, 'click', function () { deleteAt(index); });
+    });
+
+    function addManual() {
+      const raw = valueOf(prefix + '-font-manual').trim();
+      if (!raw) return;
+      const next = current();
+      if (next.length === 1 && isDefaultFont(next[0])) next[0] = raw;
+      else next.push(raw);
+      commit(next);
+    }
+
+    bind(prefix + '-font-manual-add', 'click', addManual);
+    bind(prefix + '-font-manual', 'keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        addManual();
+      }
+    });
+  }
+
+  function shadowOutlineFields(prefix, style) {
+    const shadow = model.normalizeShadow(style.shadow);
+    const outline = model.normalizeOutline(style.outline);
+    return '<div class="so-group">' +
+      '<label class="check-row"><input id="' + prefix + '-shadow-enabled" type="checkbox"' +
+        (shadow.enabled ? ' checked' : '') + '> 阴影（投影）</label>' +
+      fieldPair(
+        '颜色', colorInput(prefix + '-shadow-color', shadow.color, !shadow.enabled),
+        '模糊', numberInput(prefix + '-shadow-blur', shadow.blur, 0, 100, 1, !shadow.enabled)
+      ) +
+      fieldPair(
+        '偏移 X', numberInput(prefix + '-shadow-x', shadow.offsetX, -200, 200, 1, !shadow.enabled),
+        '偏移 Y', numberInput(prefix + '-shadow-y', shadow.offsetY, -200, 200, 1, !shadow.enabled)
+      ) +
+      '<div class="so-sep"></div>' +
+      '<label class="check-row"><input id="' + prefix + '-outline-enabled" type="checkbox"' +
+        (outline.enabled ? ' checked' : '') + '> 轮廓</label>' +
+      fieldPair(
+        '颜色', colorInput(prefix + '-outline-color', outline.color, !outline.enabled),
+        '线宽', numberInput(prefix + '-outline-width', outline.width, 0, 50, 0.5, !outline.enabled)
+      ) +
+    '</div>';
+  }
+
+  function bindShadowOutline(prefix, style) {
+    function shadowPatch(key, parse) {
+      return function () {
+        const shadow = model.normalizeShadow(style.shadow);
+        shadow[key] = parse();
+        style.shadow = shadow;
+        L.app.changed({ property: false });
+      };
+    }
+    function outlinePatch(key, parse) {
+      return function () {
+        const outline = model.normalizeOutline(style.outline);
+        outline[key] = parse();
+        style.outline = outline;
+        L.app.changed({ property: false });
+      };
+    }
+    function enablePatch(key, normalize) {
+      return function () {
+        const input = document.getElementById(prefix + '-' + key + '-enabled');
+        const value = normalize(style[key]);
+        value.enabled = !!(input && input.checked);
+        style[key] = value;
+        L.app.changed({ property: false });
+        ui.renderPropertyPanel();
+      };
+    }
+
+    bind(prefix + '-shadow-enabled', 'change', enablePatch('shadow', model.normalizeShadow));
+    bind(prefix + '-shadow-color', 'input', shadowPatch('color', function () { return valueOf(prefix + '-shadow-color'); }));
+    bind(prefix + '-shadow-x', 'input', shadowPatch('offsetX', function () { return Number(valueOf(prefix + '-shadow-x')) || 0; }));
+    bind(prefix + '-shadow-y', 'input', shadowPatch('offsetY', function () { return Number(valueOf(prefix + '-shadow-y')) || 0; }));
+    bind(prefix + '-shadow-blur', 'input', shadowPatch('blur', function () { return Math.max(0, Number(valueOf(prefix + '-shadow-blur')) || 0); }));
+    bind(prefix + '-outline-enabled', 'change', enablePatch('outline', model.normalizeOutline));
+    bind(prefix + '-outline-color', 'input', outlinePatch('color', function () { return valueOf(prefix + '-outline-color'); }));
+    bind(prefix + '-outline-width', 'input', outlinePatch('width', function () { return Math.max(0, Number(valueOf(prefix + '-outline-width')) || 0); }));
+  }
+
+  function categoryStyleFields(prefix, style) {
+    return fontListField(prefix, style) +
+      fieldPair(
+        '字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>',
+        '粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight), false, 'select-compact'),
+        'field-row-weight'
+      ) +
+      field('颜色', colorInput(prefix + '-color', style.color)) +
+      field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05)) +
+      shadowOutlineFields(prefix, style);
+  }
+
+  function bindCategoryStyle(prefix, style) {
+    bindFontList(prefix, style);
+    bind(prefix + '-size', 'input', function () {
+      style.fontSize = Math.max(6, Number(valueOf(prefix + '-size')) || 6);
+      L.app.changed({ property: false });
+    });
+    bind(prefix + '-weight', 'change', function () {
+      style.fontWeight = Number(valueOf(prefix + '-weight'));
+      L.app.changed({ property: false });
+    });
+    bind(prefix + '-color', 'input', function () {
+      style.color = valueOf(prefix + '-color');
+      L.app.changed({ property: false });
+    });
+    bind(prefix + '-lineheight', 'input', function () {
+      style.lineHeight = Math.max(0.8, Number(valueOf(prefix + '-lineheight')) || 0.8);
+      L.app.changed({ property: false });
+    });
+    bindShadowOutline(prefix, style);
+  }
+
+  function tableCard(table, index, isLast) {
+    const widthLabel = table.widthMode === 'manual' ? '固定' : '自动';
+    const margins = model.normalizeMargins(table.margins);
+    function marginInput(side) {
+      return '<input class="input num-mid cross-' + side + '" data-table-field="margin-' + side +
+        '" type="number" min="0" step="1" value="' + esc(margins[side]) + '">';
+    }
+    return '<div class="table-card" data-table-index="' + index + '">' +
+      '<div class="table-card-head"><span class="table-card-title">表格 ' + (index + 1) +
+      (isLast ? ' · 末表' : '') + '</span>' +
+      '<span class="row-actions">' +
+      '<button class="btn btn-sm" data-table-action="auto">恢复自动</button>' +
+      '<button class="icon-btn" data-table-action="remove" title="删除表格">×</button>' +
+      '</span></div>' +
+      fieldPair(
+        '列数', '<input id="prop-table-' + index + '-columns" class="input num-slim" data-table-field="columns" type="number" min="1" max="50" step="1" value="' + table.columns + '">',
+        '行数', '<input id="prop-table-' + index + '-rows" class="input num-mid" data-table-field="rows" type="number" min="' + (isLast ? 0 : 1) +
+        '" max="500" step="1" value="' + table.rows + '">'
+      ) +
+      field('填充', '<select class="select" data-table-field="fill">' +
+        '<option value="column"' + (table.fill === 'column' ? ' selected' : '') + '>列优先（从上往下逐列）</option>' +
+        '<option value="row"' + (table.fill === 'row' ? ' selected' : '') + '>行优先（从左往右逐行）</option>' +
+      '</select>') +
+      field('对齐', '<select class="select" data-table-field="align">' +
+        alignOptions().map(function (option) {
+          return '<option value="' + option.value + '"' + (table.align === option.value ? ' selected' : '') + '>' +
+            option.label + '</option>';
+        }).join('') + '</select>') +
+      field('边距', '<div class="margin-cross">' +
+        marginInput('top') + marginInput('left') + marginInput('right') +
+        '<span class="cross-page"></span>' +
+        marginInput('bottom') +
+      '</div>') +
+      (isLast && table.rows === 0
+        ? fieldHelp('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
+          widthLabel + '</span>', '0 行 = 动态行')
+        : field('列宽', '<span class="pill ' + (table.widthMode === 'manual' ? 'pill-blue' : 'pill-gray') + '">' +
+          widthLabel + '</span>')) +
+      '</div>';
+  }
+
+  function renderCategoryProperties(element) {
+    const project = L.app.state.project;
+    const category = model.getCategory(project, element.category);
+    const tables = element.tables;
+    const tableCards = tables.map(function (table, index) {
+      return tableCard(table, index, index === tables.length - 1);
+    }).join('');
+
+    ui.els.propertyPanel.innerHTML =
+      propGroup('block', '分类块',
+        fieldPair(
+          '位置 X', numberInput('prop-el-x', Math.round(element.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-el-y', Math.round(element.y), -5000, 20000, 1, false, 10)
+        ) +
+        field('宽度', numberInput('prop-el-w', Math.round(element.width), 120, 5000, 1, false, 10) + '<span class="unit">px</span>'),
+        { right: '<span class="pill pill-green">' + (category ? category.songs.length : 0) + ' 首</span>' }) +
+      propGroup('title', '分类名子分区',
+        fieldHelp('', '<label class="check-row"><input id="prop-title-visible" type="checkbox"' +
+          (element.showTitle !== false ? ' checked' : '') + '> 显示分类名</label>',
+          '隐藏时样式保留，重新显示后生效。') +
+        categoryStyleFields('prop-title', element.titleStyle)) +
+      propGroup('song', '歌名子分区',
+        categoryStyleFields('prop-song', element.songStyle)) +
+      propGroup('tables', '表格',
+        tableCards +
+        '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>',
+        { right: '<span class="hint">' + tables.length + ' 个</span>' +
+          helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。') }) +
+      propGroup('actions', '',
+        '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除分类块</button>' +
+          helpTip('删除后分类回到左侧未放置状态，歌单数据保留。') + '</div>', { plain: true });
+
+    bind('prop-el-x', 'input', function () {
+      L.app.setElementField('x', Number(valueOf('prop-el-x')) || 0);
+    });
+    bind('prop-el-y', 'input', function () {
+      L.app.setElementField('y', Number(valueOf('prop-el-y')) || 0);
+    });
+    bind('prop-el-w', 'input', function () {
+      const next = Math.max(120, Number(valueOf('prop-el-w')) || 120);
+      L.app.resizeElementWidth(element, next);
+      L.app.changed({ property: false });
+    });
+    bind('prop-title-visible', 'change', function () {
+      const input = document.getElementById('prop-title-visible');
+      const visible = input ? input.checked : true;
+      L.app.setElementField('showTitle', visible);
+      setGroupCollapsed('title', !visible);
+    });
+    bindCategoryStyle('prop-title', element.titleStyle);
+    bindCategoryStyle('prop-song', element.songStyle);
+    bind('prop-add-table', 'click', function () {
+      layout.addTable(element, category);
+      L.app.changed();
+      ui.renderPropertyPanel();
+    });
+    bind('prop-delete-block', 'click', function () {
+      L.app.deleteSelection();
+    });
+
+    ui.els.propertyPanel.querySelectorAll('.table-card').forEach(function (card) {
+      const index = Number(card.getAttribute('data-table-index'));
+      const table = element.tables[index];
+      if (!table) return;
+      card.querySelectorAll('[data-table-field]').forEach(function (input) {
+        const fieldName = input.getAttribute('data-table-field');
+        const eventName = fieldName.indexOf('margin-') === 0 ? 'input' : 'change';
+        input.addEventListener(eventName, function () {
+          if (fieldName.indexOf('margin-') === 0) {
+            const side = fieldName.slice('margin-'.length);
+            table.margins = model.normalizeMargins(table.margins);
+            table.margins[side] = Math.max(0, Number(input.value) || 0);
+            L.app.changed({ property: false });
+          } else if (fieldName === 'columns') {
+            layout.setColumns(element, index, Number(input.value));
+            L.app.changed();
+            ui.renderPropertyPanel();
+          } else if (fieldName === 'rows') {
+            layout.setRows(element, index, Number(input.value));
+            L.app.changed();
+            ui.renderPropertyPanel();
+          } else if (fieldName === 'fill' || fieldName === 'align') {
+            table[fieldName] = input.value;
+            L.app.changed({ property: false });
+          }
+        });
+      });
+      card.querySelectorAll('[data-table-action]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          const action = button.getAttribute('data-table-action');
+          if (action === 'auto') {
+            layout.resetAuto(element, index);
+          } else if (action === 'remove') {
+            layout.removeTable(element, index);
+          }
+          L.app.changed();
+          ui.renderPropertyPanel();
+        });
+      });
+    });
+  }
+
+  function textStyleFields(prefix, style) {
+    return fontListField(prefix, style) +
+      fieldPair(
+        '字号', numberInput(prefix + '-size', style.fontSize, 6, 300, 1) + '<span class="unit">px</span>',
+        '粗细', selectInput(prefix + '-weight', weightOptions(), String(style.fontWeight), false, 'select-compact'),
+        'field-row-weight'
+      ) +
+      field('颜色', colorInput(prefix + '-color', style.color)) +
+      field('行距', numberInput(prefix + '-lineheight', style.lineHeight, 0.8, 3, 0.05)) +
+      field('对齐', selectInput(prefix + '-align', alignOptions(), style.align || 'left')) +
+      shadowOutlineFields(prefix, style);
+  }
+
+  function renderTextProperties(element) {
+    ui.els.propertyPanel.innerHTML =
+      propGroup('content', '自由文字',
+        fieldHelp('内容', '<textarea id="prop-text-content" class="input" rows="3" style="height:auto;padding:6px 7px;resize:vertical">' +
+          esc(element.text) + '</textarea>', '也可以双击画布上的文字直接编辑。')) +
+      propGroup('layout', '位置与尺寸',
+        fieldPair(
+          '位置 X', numberInput('prop-text-x', Math.round(element.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-text-y', Math.round(element.y), -5000, 20000, 1, false, 10)
+        ) +
+        fieldHelp('宽度', numberInput('prop-text-w', Math.round(element.width), 40, 5000, 1, false, 10) + '<span class="unit">px</span>',
+          '高度随文字自动增长。')) +
+      propGroup('style', '文字样式',
+        textStyleFields('prop-text', element.style)) +
+      propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除文字</button>', { plain: true });
+
+    bind('prop-text-content', 'input', function () {
+      L.app.setElementField('text', valueOf('prop-text-content'));
+    });
+    bind('prop-text-x', 'input', function () {
+      L.app.setElementField('x', Number(valueOf('prop-text-x')) || 0);
+    });
+    bind('prop-text-y', 'input', function () {
+      L.app.setElementField('y', Number(valueOf('prop-text-y')) || 0);
+    });
+    bind('prop-text-w', 'input', function () {
+      L.app.setElementField('width', Math.max(40, Number(valueOf('prop-text-w')) || 40));
+    });
+    bindFontList('prop-text', element.style);
+    bind('prop-text-size', 'input', function () {
+      L.app.setElementStyleField('fontSize', Math.max(6, Number(valueOf('prop-text-size')) || 6));
+    });
+    bind('prop-text-weight', 'change', function () {
+      L.app.setElementStyleField('fontWeight', Number(valueOf('prop-text-weight')));
+    });
+    bind('prop-text-color', 'input', function () {
+      L.app.setElementStyleField('color', valueOf('prop-text-color'));
+    });
+    bind('prop-text-lineheight', 'input', function () {
+      L.app.setElementStyleField('lineHeight', Math.max(0.8, Number(valueOf('prop-text-lineheight')) || 0.8));
+    });
+    bind('prop-text-align', 'change', function () {
+      L.app.setElementStyleField('align', valueOf('prop-text-align'));
+    });
+    bindShadowOutline('prop-text', element.style);
+    bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
+  }
+
+  function renderImageProperties(element) {
+    const meta = L.assets.getMeta(element.assetId) || L.app.state.project.assets.find(function (asset) {
+      return asset.id === element.assetId;
+    });
+    ui.els.propertyPanel.innerHTML =
+      propGroup('info', '自由图片',
+        '<p class="hint">当前图片：' + esc(meta ? meta.name : (element.assetId || '未选择')) + '</p>' +
+        '<div class="inline-actions"><button id="prop-img-replace" class="btn btn-sm">替换图片</button></div>') +
+      propGroup('layout', '位置与尺寸',
+        fieldPair(
+          '位置 X', numberInput('prop-img-x', Math.round(element.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1, false, 10)
+        ) +
+        fieldPair(
+          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1, false, 10),
+          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1, false, 10)
+        )) +
+      propGroup('appearance', '外观',
+        '<div class="field field-compact"><label>比例</label><div class="control">' +
+          '<label class="check-row"><input id="prop-img-ratio" type="checkbox"' +
+          (element.keepRatio !== false ? ' checked' : '') + '> 缩放时保持比例</label>' +
+        '</div></div>' +
+        field('旋转', numberInput('prop-img-rotation', Math.round(element.rotation || 0), -180, 180, 1, false, 45) +
+          '<span class="unit">°</span>') +
+        field('透明度', rangeInput('prop-img-opacity', element.opacity == null ? 1 : element.opacity, 0, 1, 0.01)) +
+        field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>')) +
+      propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除图片</button>', { plain: true });
+
+    bind('prop-img-replace', 'click', function () { L.app.pickFreeImage(element.id); });
+    bind('prop-img-x', 'input', function () {
+      L.app.setElementField('x', Number(valueOf('prop-img-x')) || 0);
+    });
+    bind('prop-img-y', 'input', function () {
+      L.app.setElementField('y', Number(valueOf('prop-img-y')) || 0);
+    });
+    bind('prop-img-w', 'input', function () {
+      L.app.setElementField('width', Math.max(40, Number(valueOf('prop-img-w')) || 40));
+    });
+    bind('prop-img-h', 'input', function () {
+      L.app.setElementField('height', Math.max(40, Number(valueOf('prop-img-h')) || 40));
+    });
+    bind('prop-img-ratio', 'change', function () {
+      const input = document.getElementById('prop-img-ratio');
+      L.app.setImageKeepRatio(element, input ? input.checked : true);
+    });
+    bind('prop-img-rotation', 'change', function () {
+      const angle = normalizeAngle(valueOf('prop-img-rotation'));
+      L.app.setElementField('rotation', angle);
+      const input = document.getElementById('prop-img-rotation');
+      if (input) input.value = angle;
+    });
+    bind('prop-img-opacity', 'input', function () {
+      const value = Number(valueOf('prop-img-opacity'));
+      L.app.setElementField('opacity', value);
+      document.getElementById('prop-img-opacity-value').textContent = value.toFixed(2);
+    });
+    bind('prop-img-blur', 'input', function () {
+      const value = Number(valueOf('prop-img-blur'));
+      L.app.setElementField('blur', value);
+      document.getElementById('prop-img-blur-value').textContent = value;
+    });
+    bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
+  }
+
+  /* 图层/属性共用：供 ui.js 渲染背景图片行时使用 */
+  ui.fitLabel = fitLabel;
+})();
