@@ -248,7 +248,7 @@ build_dist() {
   read_version
 
   local f
-  for f in index.html style.css "$VERSION_FILE"; do
+  for f in index.html style.css favicon.svg favicon.png "$VERSION_FILE"; do
     copy_file "$f"
   done
 
