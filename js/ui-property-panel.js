@@ -589,10 +589,6 @@
   function renderCategoryProperties(element) {
     const project = L.app.state.project;
     const category = model.getCategory(project, element.category);
-    const tables = element.tables;
-    const tableCards = tables.map(function (table, index) {
-      return tableCard(table, index, index === tables.length - 1);
-    }).join('');
 
     ui.els.propertyPanel.innerHTML =
       propGroup('block', '分类块',
@@ -610,10 +606,8 @@
       propGroup('song', '歌名子分区',
         categoryStyleFields('prop-song', element.songStyle)) +
       propGroup('tables', '表格',
-        tableCards +
-        '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>',
-        { right: '<span class="hint">' + tables.length + ' 个</span>' +
-          helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。') }) +
+        tableGroupBody(element),
+        { right: tableGroupRight(element) }) +
       propGroup('actions', '',
         '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm">删除分类块</button>' +
           helpTip('删除后分类回到左侧未放置状态，歌单数据保留。') + '</div>', { plain: true });
@@ -637,25 +631,47 @@
     });
     bindCategoryStyle('prop-title', element.titleStyle);
     bindCategoryStyle('prop-song', element.songStyle);
-    bind('prop-add-table', 'click', function () {
-      layout.addTable(element, category);
-      L.app.changed();
-      ui.renderPropertyPanel();
-    });
+    bindAddTable(element, category, ui.els.propertyPanel.querySelector('[data-group="tables"]'));
     bind('prop-delete-block', 'click', function () {
       L.app.deleteSelection();
     });
 
     ui.els.propertyPanel.querySelectorAll('.table-card').forEach(function (card) {
-      bindTableCard(card, element);
+      bindTableCard(card, element, category);
+    });
+  }
+
+  /* 表格组内容：全部表格卡片 + 添加表格按钮 */
+  function tableGroupBody(element) {
+    const tables = element.tables;
+    return tables.map(function (table, index) {
+      return tableCard(table, index, index === tables.length - 1);
+    }).join('') +
+      '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>';
+  }
+
+  /* 表格组头右侧状态：表格个数 + 帮助提示 */
+  function tableGroupRight(element) {
+    return '<span class="hint">' + element.tables.length + ' 个</span>' +
+      helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。');
+  }
+
+  /* 添加表格按钮绑定：结构动作只做表格组级刷新（只更新受影响区域） */
+  function bindAddTable(element, category, group) {
+    bind('prop-add-table', 'click', function () {
+      layout.addTable(element, category);
+      L.app.changed({ property: false });
+      refreshTableGroup(group, element, category);
     });
   }
 
   /* 表格卡片内部的字段绑定：抽出来，结构性改值（列数/行数）只重建当前卡片 */
-  function bindTableCard(card, element) {
+  function bindTableCard(card, element, category) {
     const index = Number(card.getAttribute('data-table-index'));
     const table = element.tables[index];
     if (!table) return;
+    const songCount = (category && category.songs.length) || 0;
+    const group = card.closest('.prop-group');
     card.querySelectorAll('[data-table-field]').forEach(function (input) {
       const fieldName = input.getAttribute('data-table-field');
       if (!input.hasAttribute('data-field')) {
@@ -668,14 +684,17 @@
           table.margins = model.normalizeMargins(table.margins);
           table.margins[side] = Math.max(0, Number(input.value) || 0);
           L.app.changed({ property: false });
-        } else if (fieldName === 'columns') {
-          layout.setColumns(element, index, Number(input.value));
+        } else if (fieldName === 'columns' || fieldName === 'rows') {
+          const before = element.tables.length;
+          if (fieldName === 'columns') {
+            layout.setColumns(element, index, Number(input.value), songCount);
+          } else {
+            layout.setRows(element, index, Number(input.value), songCount);
+          }
           L.app.changed({ property: false });
-          refreshTableCard(card, element, index);
-        } else if (fieldName === 'rows') {
-          layout.setRows(element, index, Number(input.value));
-          L.app.changed({ property: false });
-          refreshTableCard(card, element, index);
+          // 表格数量变化 → 表格组级刷新；否则只重建当前卡片
+          if (element.tables.length !== before) refreshTableGroup(group, element, category);
+          else refreshTableCard(card, element, index, category);
         } else if (fieldName === 'fill' || fieldName === 'align') {
           table[fieldName] = input.value;
           L.app.changed({ property: false });
@@ -687,17 +706,18 @@
         const action = button.getAttribute('data-table-action');
         if (action === 'auto') {
           layout.resetAuto(element, index);
+          L.app.changed();
         } else if (action === 'remove') {
-          layout.removeTable(element, index);
+          layout.removeTable(element, index, songCount);
+          L.app.changed({ property: false });
+          refreshTableGroup(group, element, category);
         }
-        L.app.changed();
-        ui.renderPropertyPanel();
       });
     });
   }
 
   /* 只替换单张表格卡片，保留面板滚动位置与当前输入的焦点/选区 */
-  function refreshTableCard(card, element, index) {
+  function refreshTableCard(card, element, index, category) {
     if (!element.tables[index]) return;
     const focusState = capturePanelFocus();
     const host = document.createElement('div');
@@ -705,7 +725,23 @@
     const next = host.firstElementChild;
     if (!next) return;
     card.replaceWith(next);
-    bindTableCard(next, element);
+    bindTableCard(next, element, category);
+    restorePanelFocus(focusState);
+  }
+
+  /* 只替换表格组内容（卡片 + 添加按钮）与组头计数，
+     保留其余分组、折叠状态与焦点/选区（连续步进不中断） */
+  function refreshTableGroup(group, element, category) {
+    if (!group) return;
+    const focusState = capturePanelFocus();
+    const body = group.querySelector('.prop-group-body');
+    const right = group.querySelector('.title-right');
+    if (body) body.innerHTML = tableGroupBody(element);
+    if (right) right.innerHTML = tableGroupRight(element);
+    group.querySelectorAll('.table-card').forEach(function (card) {
+      bindTableCard(card, element, category);
+    });
+    bindAddTable(element, category, group);
     restorePanelFocus(focusState);
   }
 

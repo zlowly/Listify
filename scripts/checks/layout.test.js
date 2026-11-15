@@ -338,3 +338,88 @@ test('块几何：隐藏标题时表格从顶部内边距开始', function () {
   near(result.tables[0].y, PADDING);
   near(result.tables[0].y, 16);
 });
+
+/* ---------- 结构归一化（syncTableStructure） ---------- */
+
+test('setRows：末表 0 行改固定且溢出立即追加续表', function () {
+  const element = categoryElement('续表', 600, [model.createTable({ columns: 5, rows: 0 })]);
+  const category = { name: '续表', songs: songs('歌曲', 21) };
+  layout.setRows(element, 0, 4, category.songs.length);
+  assert.equal(element.tables.length, 2);
+  assert.equal(element.tables[0].rows, 4);
+  assert.equal(element.tables[1].rows, 0);
+  assert.equal(element.tables[1].columns, 5);
+  const result = layout.layoutCategory(category, element);
+  assert.equal(result.tables.length, 2);
+  assert.equal(result.tables[0].take, 20);
+  assert.equal(result.tables[1].take, 1);
+});
+
+test('setRows：容量充足时不追加续表', function () {
+  const element = categoryElement('不溢', 600, [model.createTable({ columns: 5, rows: 0 })]);
+  layout.setRows(element, 0, 10, 10);
+  assert.equal(element.tables.length, 1);
+  assert.equal(element.tables[0].rows, 10);
+});
+
+test('setColumns：减少末表列数致溢出立即追加续表', function () {
+  const element = categoryElement('减列', 600, [model.createTable({ columns: 5, rows: 4 })]);
+  layout.setColumns(element, 0, 4, 21);
+  assert.equal(element.tables.length, 2);
+  assert.equal(element.tables[0].columns, 4);
+  assert.equal(element.tables[1].rows, 0);
+  assert.equal(element.tables[1].columns, 4);
+});
+
+test('removeTable：删除承载歌名的末表自动把新末表转为动态行', function () {
+  const element = categoryElement('删末', 600, [
+    model.createTable({ columns: 5, rows: 4 }),
+    model.createTable({ columns: 5, rows: 0 })
+  ]);
+  // 21 首：首表容量 20，末表承载 1
+  const ok = layout.removeTable(element, 1, 21);
+  assert.ok(ok);
+  assert.equal(element.tables.length, 1);
+  assert.equal(element.tables[0].rows, 0);
+  const result = layout.layoutCategory({ name: '删末', songs: songs('歌曲', 21) }, element);
+  assert.equal(result.tables.length, 1);
+  assert.equal(result.tables[0].rows, 5);
+  assert.equal(result.tables[0].cells.filter(function (cell) { return cell; }).length, 21);
+});
+
+test('removeTable：删除空末表时新末表保持原固定行数', function () {
+  const element = categoryElement('删空', 600, [
+    model.createTable({ columns: 5, rows: 4 }),
+    model.createTable({ columns: 5, rows: 0 })
+  ]);
+  // 20 首：首表恰好装满，末表为空
+  layout.removeTable(element, 1, 20);
+  assert.equal(element.tables.length, 1);
+  assert.equal(element.tables[0].rows, 4);
+});
+
+test('removeTable：删除中间表末表保持动态且歌名回流', function () {
+  const element = categoryElement('删中', 600, [
+    model.createTable({ columns: 5, rows: 2 }),
+    model.createTable({ columns: 5, rows: 2 }),
+    model.createTable({ columns: 5, rows: 0 })
+  ]);
+  layout.removeTable(element, 0, 21);
+  assert.equal(element.tables.length, 2);
+  assert.equal(element.tables[1].rows, 0);
+  const result = layout.layoutCategory({ name: '删中', songs: songs('歌曲', 21) }, element);
+  assert.equal(result.tables[0].take, 10);
+  assert.equal(result.tables[1].take, 11);
+});
+
+test('syncTableStructure：连续调用不重复追加', function () {
+  const dynamic = categoryElement('幂等', 600, [model.createTable({ columns: 5, rows: 0 })]);
+  layout.syncTableStructure(dynamic, 21);
+  layout.syncTableStructure(dynamic, 21);
+  assert.equal(dynamic.tables.length, 1);
+  const fixed = categoryElement('固定幂等', 600, [model.createTable({ columns: 5, rows: 1 })]);
+  layout.syncTableStructure(fixed, 21);
+  layout.syncTableStructure(fixed, 21);
+  assert.equal(fixed.tables.length, 2);
+  assert.equal(fixed.tables[1].rows, 0);
+});

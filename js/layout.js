@@ -124,6 +124,30 @@
     });
   }
 
+  /* 幂等的结构归一化：固定末表容量不足时追加复制上一表属性、行数为 0 的续表。
+     渲染期由 normalizeTables 调用（兜底导入/旧数据与歌单变化），编辑动作
+     （setRows/setColumns/removeTable）也同步调用，使模型状态在动作完成时
+     即确定，而不是在渲染副作用中突变。 */
+  function syncTableStructure(element, songCount) {
+    if (!Array.isArray(element.tables) || !element.tables.length) return;
+    const tables = element.tables;
+    const last = tables[tables.length - 1];
+    if (last.rows <= 0) return;
+    let capacity = 0;
+    tables.forEach(function (table) { capacity += table.columns * table.rows; });
+    if ((songCount || 0) > capacity) {
+      tables.push({
+        columns: last.columns,
+        rows: 0,
+        fill: last.fill,
+        align: last.align,
+        widthMode: last.widthMode,
+        widths: (last.widths || []).slice(),
+        margins: model.normalizeMargins(last.margins)
+      });
+    }
+  }
+
   function normalizeTables(element, songCount) {
     if (!Array.isArray(element.tables) || !element.tables.length) {
       element.tables = [model.createTable()];
@@ -139,23 +163,7 @@
       if (['left', 'center', 'right', 'justify'].indexOf(table.align) < 0) table.align = 'left';
       table.margins = model.normalizeMargins(table.margins);
     });
-
-    const last = tables[tables.length - 1];
-    if (last.rows > 0) {
-      let capacity = 0;
-      tables.forEach(function (table) { capacity += table.columns * table.rows; });
-      if (songCount > capacity) {
-        tables.push({
-          columns: last.columns,
-          rows: 0,
-          fill: last.fill,
-          align: last.align,
-          widthMode: last.widthMode,
-          widths: last.widths.slice(),
-          margins: model.normalizeMargins(last.margins)
-        });
-      }
-    }
+    syncTableStructure(element, songCount);
   }
 
   function fitWidths(rawWidths, totalWidth) {
@@ -442,20 +450,22 @@
     return element.height || 0;
   }
 
-  function setColumns(element, tableIndex, columns) {
+  function setColumns(element, tableIndex, columns, songCount) {
     const table = element.tables[tableIndex];
     if (!table) return;
     table.columns = Math.max(1, Math.min(50, Math.round(Number(columns) || 1)));
     table.widthMode = 'auto';
     table.widths = [];
     if (table.rows === 0 && tableIndex < element.tables.length - 1) table.rows = 1;
+    syncTableStructure(element, songCount);
   }
 
-  function setRows(element, tableIndex, rows) {
+  function setRows(element, tableIndex, rows, songCount) {
     const table = element.tables[tableIndex];
     if (!table) return;
     const value = Math.max(0, Math.round(Number(rows) || 0));
     table.rows = tableIndex === element.tables.length - 1 ? value : Math.max(1, value);
+    syncTableStructure(element, songCount);
   }
 
   function addTable(element, category) {
@@ -480,13 +490,24 @@
     return element.tables.length - 1;
   }
 
-  function removeTable(element, tableIndex) {
+  function removeTable(element, tableIndex, songCount) {
     if (element.tables.length <= 1) return false;
+    const wasLast = tableIndex === element.tables.length - 1;
     element.tables.splice(tableIndex, 1);
-    if (element.tables.length && element.tables[element.tables.length - 1].rows === 0) {
+    // 删除承载歌名的末表时，把新末表转为动态行吸收被删表格的歌名；
+    // 被删表为空时新末表保持原固定行数（不收缩稀疏表）。
+    if (wasLast) {
+      const last = element.tables[element.tables.length - 1];
+      let capacity = 0;
+      element.tables.forEach(function (table) { capacity += table.columns * table.rows; });
+      if ((songCount || 0) > capacity) last.rows = 0;
+    }
+    const newLast = element.tables[element.tables.length - 1];
+    if (newLast.rows === 0) {
       const previous = element.tables[element.tables.length - 2];
       if (previous && previous.rows === 0) previous.rows = 1;
     }
+    syncTableStructure(element, songCount);
     return true;
   }
 
@@ -530,6 +551,7 @@
     autoGapWidths: autoGapWidths,
     fitWidths: fitWidths,
     normalizeTables: normalizeTables,
+    syncTableStructure: syncTableStructure,
     layoutCategory: layoutCategory,
     layoutText: layoutText,
     elementHeight: elementHeight,
