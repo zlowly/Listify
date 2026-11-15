@@ -40,6 +40,15 @@
   const OPACITY_MAX = 1;
   const BLUR_MIN = 0;
   const MARGIN_MIN = 0;
+  // 页面尺寸的输入范围与预设；属性面板、setPageSize 与校验共用同一份定义。
+  const PAGE_SIZE_MIN = 320;
+  const PAGE_SIZE_MAX = 5000;
+  const PAGE_SIZE_PRESETS = [
+    { id: '1080p-portrait', label: '1080P 竖屏', width: 1080, height: 1920 },
+    { id: '1080p-landscape', label: '1080P 横屏', width: 1920, height: 1080 },
+    { id: '2k-portrait', label: '2K 竖屏', width: 1440, height: 2560 },
+    { id: '2k-landscape', label: '2K 横屏', width: 2560, height: 1440 }
+  ];
   // 需要“大于该值”的尺寸下限（页面尺寸、元素宽高、图片尺寸、表格列宽）。
   const IMAGE_MIN_SIZE = 0;
   const DEFAULT_BACKGROUND_COLOR = '#ffffff';
@@ -65,6 +74,17 @@
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function matchPageSizePreset(width, height) {
+    const w = Math.round(Number(width));
+    const h = Math.round(Number(height));
+    if (!isFinite(w) || !isFinite(h)) return null;
+    for (let i = 0; i < PAGE_SIZE_PRESETS.length; i += 1) {
+      const preset = PAGE_SIZE_PRESETS[i];
+      if (preset.width === w && preset.height === h) return preset;
+    }
+    return null;
   }
 
   function clone(value) {
@@ -763,12 +783,16 @@
     OPACITY_MAX: OPACITY_MAX,
     BLUR_MIN: BLUR_MIN,
     MARGIN_MIN: MARGIN_MIN,
+    PAGE_SIZE_MIN: PAGE_SIZE_MIN,
+    PAGE_SIZE_MAX: PAGE_SIZE_MAX,
+    PAGE_SIZE_PRESETS: PAGE_SIZE_PRESETS,
     IMAGE_MIN_SIZE: IMAGE_MIN_SIZE,
     DEFAULT_BACKGROUND_COLOR: DEFAULT_BACKGROUND_COLOR,
     DEFAULT_BACKGROUND_IMAGE: DEFAULT_BACKGROUND_IMAGE,
     DEFAULT_TABLE_MARGINS: DEFAULT_TABLE_MARGINS,
     uid: uid,
     clamp: clamp,
+    matchPageSizePreset: matchPageSizePreset,
     clone: clone,
     copyStyle: copyStyle,
     quoteFamily: quoteFamily,

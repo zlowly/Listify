@@ -275,3 +275,35 @@ test('findSongMatches：小写化变长字符（İ）命中坐标仍在原歌名
   // 中间变长：'Blue İstanbul' 中命中占 5..13
   assert.deepEqual(matches[1], { categoryIndex: 0, songIndex: 1, start: 5, end: 13 });
 });
+
+test('页面尺寸预设：四个预设精确匹配', function () {
+  assert.equal(model.PAGE_SIZE_PRESETS.length, 4);
+  model.PAGE_SIZE_PRESETS.forEach(function (preset) {
+    assert.equal(model.matchPageSizePreset(preset.width, preset.height), preset);
+    assert.equal(model.matchPageSizePreset(String(preset.width), String(preset.height)), preset);
+  });
+  assert.equal(model.matchPageSizePreset(1080, 1920).id, '1080p-portrait');
+  assert.equal(model.matchPageSizePreset(1920, 1080).id, '1080p-landscape');
+  assert.equal(model.matchPageSizePreset(1440, 2560).id, '2k-portrait');
+  assert.equal(model.matchPageSizePreset(2560, 1440).id, '2k-landscape');
+});
+
+test('页面尺寸预设：非匹配返回 null，交换宽高匹配另一方向', function () {
+  assert.equal(model.matchPageSizePreset(1200, 1800), null);
+  assert.equal(model.matchPageSizePreset(1080, 1080), null);
+  assert.equal(model.matchPageSizePreset(NaN, 1920), null);
+  assert.equal(model.matchPageSizePreset(1920, 1080).id, '1080p-landscape');
+  assert.equal(model.matchPageSizePreset(1080, 1920).id, '1080p-portrait');
+  assert.equal(model.matchPageSizePreset(2560, 1440).id, '2k-landscape');
+  assert.equal(model.matchPageSizePreset(1440, 2560).id, '2k-portrait');
+  // 匹配前按整数宽高比较，避免浮点输入绕过预设。
+  assert.equal(model.matchPageSizePreset(1080.4, 1920.4).id, '1080p-portrait');
+});
+
+test('页面尺寸预设：范围常量与默认项目尺寸', function () {
+  assert.equal(model.PAGE_SIZE_MIN, 320);
+  assert.equal(model.PAGE_SIZE_MAX, 5000);
+  const project = model.createDefaultProject();
+  assert.deepEqual(plain(project.pageSize), { width: 1080, height: 1920 });
+  assert.equal(model.matchPageSizePreset(project.pageSize.width, project.pageSize.height).id, '1080p-portrait');
+});

@@ -493,9 +493,10 @@ const viewport = {
     const h = Number(height);
     if (!Number.isFinite(w) || !Number.isFinite(h)) return;
     pushUndo('修改页面尺寸');
-    state.project.pageSize.width = Math.round(clamp(w, 320, 5000));
-    state.project.pageSize.height = Math.round(clamp(h, 320, 5000));
+    state.project.pageSize.width = Math.round(clamp(w, model.PAGE_SIZE_MIN, model.PAGE_SIZE_MAX));
+    state.project.pageSize.height = Math.round(clamp(h, model.PAGE_SIZE_MIN, model.PAGE_SIZE_MAX));
     ui.renderAll();
+    ctx.draft.scheduleDraftSave();
   }
 
   function setMargins(margins) {

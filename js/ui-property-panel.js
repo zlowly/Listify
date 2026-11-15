@@ -116,17 +116,26 @@
   function renderPageProperties(page) {
     const project = L.app.state.project;
     const pageIndex = project.pages.indexOf(page);
+    const sizePreset = model.matchPageSizePreset(project.pageSize.width, project.pageSize.height);
+    const sizeOptions = model.PAGE_SIZE_PRESETS.map(function (preset) {
+      return { value: preset.id, label: preset.label };
+    });
+    sizeOptions.push({
+      value: 'custom',
+      label: sizePreset ? '自定义' : '自定义 ' + project.pageSize.width + '×' + project.pageSize.height
+    });
+    const sizeValue = sizePreset ? sizePreset.id : 'custom';
     ui.els.propertyPanel.innerHTML =
       propGroup('page', '当前页',
         '<p class="hint">第 ' + (pageIndex + 1) + ' 页 / 共 ' + project.pages.length + ' 页。</p>',
         { right: helpTip('页面尺寸与边距为全局设置。') }) +
       propGroup('size', '页面尺寸',
+        field('预设', selectInput('prop-page-preset', sizeOptions, sizeValue)) +
         fieldPair(
-          '宽度', numberInput('prop-page-w', project.pageSize.width, 200, 5000, 1, false, 10),
-          '高度', numberInput('prop-page-h', project.pageSize.height, 200, 5000, 1, false, 10)
+          '宽度', numberInput('prop-page-w', project.pageSize.width, model.PAGE_SIZE_MIN, model.PAGE_SIZE_MAX, 1, false, 10),
+          '高度', numberInput('prop-page-h', project.pageSize.height, model.PAGE_SIZE_MIN, model.PAGE_SIZE_MAX, 1, false, 10)
         ) +
-        '<div class="inline-actions"><button id="prop-orient-portrait" class="btn btn-sm">纵向 1080×1920</button>' +
-        '<button id="prop-orient-landscape" class="btn btn-sm">横向 1920×1080</button></div>') +
+        '<div class="inline-actions"><button id="prop-page-swap" class="btn btn-sm" aria-label="交换宽高" title="交换宽高">⇄ 交换宽高</button></div>') +
       propGroup('margins', '页面边距',
         marginCross(project.margins, 'prop-margin-'),
         { right: helpTip('仅参考线') }) +
@@ -146,17 +155,26 @@
         '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
           helpTip('在画布或图层面板中选择内容后可删除。') + '</div>', { plain: true });
 
+    bind('prop-page-preset', 'change', function () {
+      const value = valueOf('prop-page-preset');
+      if (value === 'custom') {
+        const select = document.getElementById('prop-page-preset');
+        if (select) select.value = sizeValue;
+        const widthInput = document.getElementById('prop-page-w');
+        if (widthInput) widthInput.focus();
+        return;
+      }
+      const preset = model.PAGE_SIZE_PRESETS.find(function (item) { return item.id === value; });
+      if (preset) L.app.setPageSize(preset.width, preset.height);
+    });
     bind('prop-page-w', 'change', function () {
       L.app.setPageSize(Number(valueOf('prop-page-w')), project.pageSize.height);
     });
     bind('prop-page-h', 'change', function () {
       L.app.setPageSize(project.pageSize.width, Number(valueOf('prop-page-h')));
     });
-    bind('prop-orient-portrait', 'click', function () {
-      L.app.setPageSize(1080, 1920);
-    });
-    bind('prop-orient-landscape', 'click', function () {
-      L.app.setPageSize(1920, 1080);
+    bind('prop-page-swap', 'click', function () {
+      L.app.setPageSize(project.pageSize.height, project.pageSize.width);
     });
     ['top', 'right', 'bottom', 'left'].forEach(function (key) {
       bind('prop-margin-' + key, 'change', function () {
