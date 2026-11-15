@@ -208,7 +208,6 @@
           state.project = result.project;
           state.currentPageId = state.project.pages[0].id;
           state.selection = { type: 'page' };
-          appCtx.draft.lastKey = '';
           appCtx.undo.stack.length = 0;
           ui.renderAll();
         } finally {
@@ -237,7 +236,6 @@
           state.project = model.createDefaultProject();
           state.currentPageId = state.project.pages[0].id;
           state.selection = { type: 'page' };
-          appCtx.draft.lastKey = '';
           appCtx.undo.stack.length = 0;
           ui.renderAll();
         } finally {

@@ -15,8 +15,8 @@
 - **预置背景库**：背景选择弹窗内置 38 个免费素材，按 6 个分类组织（纸张纹理、纯色渐变、山水风景、花卉植物、图案插画、透明叠层），点击即可应用/加图/替换；分类与显示名由 `presets/manifest.json` 配置；素材来源与许可见 `presets/SOURCES.md`。
 - **自由文字与自由图片**：自由图片可从文件添加或 `Ctrl/Cmd + V` 粘贴剪贴板图片，支持位置/尺寸数值编辑、旋转、透明度、模糊与等比缩放开关。
 - **导出**：PNG 支持当前页/所有页、完整页面/仅歌单层透明底，多页自动打包为 ZIP。
-- **本地草稿**：项目结构存 `localStorage`，图片资产存 `IndexedDB`，刷新或重新打开自动恢复；项目可导出/导入 JSON（含旧版文件迁移）用于备份与跨浏览器迁移。
-- **编辑辅助**：最近 20 步撤销（`Ctrl/Cmd + Z`）、键盘放置分类、焦点环、模态焦点陷阱与字段可访问性标注。
+- **本地草稿**：项目结构与图片资产都存 `IndexedDB`（`draftMeta` 存结构化项目快照，`assetBlobs` 存二进制图片，`assets` 仅保留旧版 base64 记录供读取），页面隐藏或关闭时才同步写一次 `localStorage` 兜底；刷新或重新打开自动恢复。项目可导出/导入 JSON（含旧版文件迁移）用于备份与跨浏览器迁移。
+- **编辑辅助**：最近 20 步撤销（`Ctrl/Cmd + Z`）、键盘放置分类、焦点环、原生 `<dialog>` 模态对话框与字段可访问性标注。
 
 ## 快速开始
 
@@ -59,7 +59,7 @@
 
 ```text
 Listify/
-├── index.html          # 入口页面（经典 <script> 标签加载）
+├── index.html          # 入口页面（经典 <script defer> 按依赖顺序加载，DOM 就绪后启动）
 ├── style.css           # 全站样式与设计令牌
 ├── js/
 │   ├── app.js          # 应用编排：状态、撤销、选择、页面管理、意图动作与公开 API
@@ -79,8 +79,8 @@ Listify/
 │   ├── draft-store.js  # IndexedDB / localStorage 草稿存储
 │   ├── io.js           # 兼容聚合层（合并上述三个模块为 L.io）
 │   ├── ui.js           # 侧栏、页面标签、帮助提示与事件委托
-│   ├── ui-fields.js    # 表单字段工厂与分组折叠
-│   ├── ui-modal.js     # 模态框、焦点陷阱与 Esc/遮罩关闭
+│   ├── ui-fields.js    # 表单字段工厂与 <details> 分组折叠
+│   ├── ui-modal.js     # 原生 <dialog> 模态框与 Esc/遮罩关闭
 │   ├── ui-pickers.js   # 背景库与预置选择弹窗
 │   ├── ui-playlist-editor.js # 歌单编辑器
 │   ├── ui-property-panel.js  # 页面/背景/分类/文字/图片属性面板
@@ -91,7 +91,7 @@ Listify/
 │   ├── fontpicker.js   # 本机字体选择
 │   ├── clipboard-image.js
 │   ├── dev-checks.js   # 控制台自检（开发期文件，不进入 dist）
-│   └── presets-data/   # 预置索引与分类数据块（打包生成文件，勿手改）
+│   └── presets-data/   # 预置索引与分类数据块（打包生成文件，勿手改；单文件超 700KB 时按 `<分类>-N.js` 分片）
 ├── vendor/             # 随仓库分发的 LeaferJS UMD（唯一运行时依赖）
 ├── presets/            # 预置素材（6 个分类目录）、manifest.json 配置与 SOURCES.md
 ├── scripts/            # 开发期脚本：预置打包与自产素材生成（见 scripts/README.md）
@@ -108,7 +108,7 @@ Listify/
 
 ## 开发约定
 
-- 运行时保持零构建：不引入打包器、包管理器、转译步骤或 CDN；`file://` 下不能使用 ES module，脚本一律用经典 `<script>` 标签。
+- 运行时保持零构建：不引入打包器、包管理器、转译步骤或 CDN；`file://` 下不能使用 ES module，脚本一律用经典 `<script defer>` 标签，按 `index.html` 中的顺序执行，并在 `DOMContentLoaded`（或已就绪时立即）启动应用。
 - 用户可见文案使用中文，标识符使用英文。
 - 新增文件优先拆分为普通 `js/*.js` 模块，挂载到 `window.Listify` 命名空间；依赖必须单向：`model/assets/layout → project-* / draft-store → ui-* → app-* → app.js`。
 - UI 不直接写模型字段：属性面板通过 `L.app.setElementField` / `setElementStyleField` / `setBackgroundColor` / `setBackgroundImageField` 等意图方法修改并触发局部重绘。
@@ -142,7 +142,7 @@ Listify/
 
 ## 预置素材与推荐素材库
 
-「选择背景图」弹窗内置 38 个免费预置素材，按 6 个分类组织：纸张纹理 6、纯色渐变 4、山水风景 6、花卉植物 6、图案插画 7、透明叠层 9。整版背景图应用后自动新建/复用同名预置背景集并指派当前页；透明叠层默认以原大小加入当前背景集，作为覆盖装饰；本地图片仍走原有文件选择流程。打开弹窗只加载索引（缩略图与元数据），各分类素材按需加载，`file://` 下离线可用。
+「选择背景图」弹窗内置 38 个免费预置素材，按 6 个分类组织：纸张纹理 6、纯色渐变 4、山水风景 6、花卉植物 6、图案插画 7、透明叠层 9。整版背景图应用后自动新建/复用同名预置背景集并指派当前页；透明叠层默认以原大小加入当前背景集，作为覆盖装饰；本地图片仍走原有文件选择流程。打开弹窗只加载索引（缩略图与元数据）；各分类素材在悬停约 300ms 或按下时预取，脚本注入推迟到独立的异步任务，`file://` 下离线可用。索引里的 `chunkMap` 记录每个分类由哪些分片文件组成（单文件超过 700KB 时自动拆成 `<分类>-N.js`），运行时并发加载后合并。
 
 分类、分类名与每张图的显示名由 `presets/manifest.json` 决定；改完必须运行 `scripts/build-presets.sh` 重新打包才生效（弹窗运行时不读配置文件，这是 `file://` 的限制）。
 

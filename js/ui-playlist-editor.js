@@ -309,12 +309,6 @@
         input.addEventListener('focus', function () {
           input.__initialValue = input.value;
         });
-        input.addEventListener('compositionstart', function () {
-          input.__composing = true;
-        });
-        input.addEventListener('compositionend', function () {
-          input.__composing = false;
-        });
         input.addEventListener('input', function () {
           currentCategory().songs[index] = input.value;
           updateValidation();
@@ -328,7 +322,7 @@
           commitCell(input, index);
         });
         input.addEventListener('keydown', function (event) {
-          if (event.isComposing || input.__composing) return;
+          if (ui.isComposingEvent(event)) return;
           if (event.key === 'Enter') {
             event.preventDefault();
             commitCell(input, index);
@@ -352,14 +346,8 @@
       }
 
       function bindAddInput(addInput) {
-        addInput.addEventListener('compositionstart', function () {
-          addInput.__composing = true;
-        });
-        addInput.addEventListener('compositionend', function () {
-          addInput.__composing = false;
-        });
         addInput.addEventListener('keydown', function (event) {
-          if (event.isComposing || addInput.__composing) return;
+          if (ui.isComposingEvent(event)) return;
           if (event.key === 'Enter') {
             event.preventDefault();
             addSingleSong(addInput);

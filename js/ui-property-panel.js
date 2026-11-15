@@ -647,45 +647,66 @@
     });
 
     ui.els.propertyPanel.querySelectorAll('.table-card').forEach(function (card) {
-      const index = Number(card.getAttribute('data-table-index'));
-      const table = element.tables[index];
-      if (!table) return;
-      card.querySelectorAll('[data-table-field]').forEach(function (input) {
-        const fieldName = input.getAttribute('data-table-field');
-        const eventName = fieldName.indexOf('margin-') === 0 ? 'input' : 'change';
-        input.addEventListener(eventName, function () {
-          if (fieldName.indexOf('margin-') === 0) {
-            const side = fieldName.slice('margin-'.length);
-            table.margins = model.normalizeMargins(table.margins);
-            table.margins[side] = Math.max(0, Number(input.value) || 0);
-            L.app.changed({ property: false });
-          } else if (fieldName === 'columns') {
-            layout.setColumns(element, index, Number(input.value));
-            L.app.changed();
-            ui.renderPropertyPanel();
-          } else if (fieldName === 'rows') {
-            layout.setRows(element, index, Number(input.value));
-            L.app.changed();
-            ui.renderPropertyPanel();
-          } else if (fieldName === 'fill' || fieldName === 'align') {
-            table[fieldName] = input.value;
-            L.app.changed({ property: false });
-          }
-        });
-      });
-      card.querySelectorAll('[data-table-action]').forEach(function (button) {
-        button.addEventListener('click', function () {
-          const action = button.getAttribute('data-table-action');
-          if (action === 'auto') {
-            layout.resetAuto(element, index);
-          } else if (action === 'remove') {
-            layout.removeTable(element, index);
-          }
-          L.app.changed();
-          ui.renderPropertyPanel();
-        });
+      bindTableCard(card, element);
+    });
+  }
+
+  /* 表格卡片内部的字段绑定：抽出来，结构性改值（列数/行数）只重建当前卡片 */
+  function bindTableCard(card, element) {
+    const index = Number(card.getAttribute('data-table-index'));
+    const table = element.tables[index];
+    if (!table) return;
+    card.querySelectorAll('[data-table-field]').forEach(function (input) {
+      const fieldName = input.getAttribute('data-table-field');
+      if (!input.hasAttribute('data-field')) {
+        input.setAttribute('data-field', input.id || 'table-' + index + '-' + fieldName);
+      }
+      const eventName = fieldName.indexOf('margin-') === 0 ? 'input' : 'change';
+      input.addEventListener(eventName, function () {
+        if (fieldName.indexOf('margin-') === 0) {
+          const side = fieldName.slice('margin-'.length);
+          table.margins = model.normalizeMargins(table.margins);
+          table.margins[side] = Math.max(0, Number(input.value) || 0);
+          L.app.changed({ property: false });
+        } else if (fieldName === 'columns') {
+          layout.setColumns(element, index, Number(input.value));
+          L.app.changed({ property: false });
+          refreshTableCard(card, element, index);
+        } else if (fieldName === 'rows') {
+          layout.setRows(element, index, Number(input.value));
+          L.app.changed({ property: false });
+          refreshTableCard(card, element, index);
+        } else if (fieldName === 'fill' || fieldName === 'align') {
+          table[fieldName] = input.value;
+          L.app.changed({ property: false });
+        }
       });
     });
+    card.querySelectorAll('[data-table-action]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        const action = button.getAttribute('data-table-action');
+        if (action === 'auto') {
+          layout.resetAuto(element, index);
+        } else if (action === 'remove') {
+          layout.removeTable(element, index);
+        }
+        L.app.changed();
+        ui.renderPropertyPanel();
+      });
+    });
+  }
+
+  /* 只替换单张表格卡片，保留面板滚动位置与当前输入的焦点/选区 */
+  function refreshTableCard(card, element, index) {
+    if (!element.tables[index]) return;
+    const focusState = capturePanelFocus();
+    const host = document.createElement('div');
+    host.innerHTML = tableCard(element.tables[index], index, index === element.tables.length - 1);
+    const next = host.firstElementChild;
+    if (!next) return;
+    card.replaceWith(next);
+    bindTableCard(next, element);
+    restorePanelFocus(focusState);
   }
 
   function textStyleFields(prefix, style) {

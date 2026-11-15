@@ -279,11 +279,6 @@
     });
 
     reloadButton = modal.footer.querySelector('.btn-primary');
-    modal.root.addEventListener('keydown', function (event) {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      if (modal) modal.close();
-    });
     search.addEventListener('input', renderList);
     load(false);
     search.focus();

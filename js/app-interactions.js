@@ -211,7 +211,7 @@
         if (!surface.drag) {
           const point = appCtx.chrome.overlayPoint(event);
           surface.hoverPoint = point;
-          appCtx.chrome.updateCursor(point.x, point.y);
+          appCtx.chrome.requestCursor(point.x, point.y);
           return;
         }
         event.preventDefault();
@@ -422,6 +422,7 @@
         }
     
         textarea.addEventListener('keydown', function (event) {
+          if (ui.isComposingEvent(event)) return;
           if (event.key === 'Escape') {
             event.preventDefault();
             finish(false);

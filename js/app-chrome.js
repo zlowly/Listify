@@ -453,13 +453,34 @@
         updateCursor(surface.hoverPoint.x, surface.hoverPoint.y);
       }
     
+      let overlayRect = null;
+      let overlayRectVersion = -1;
+
       function overlayPoint(event) {
-        const rect = surface.overlay.getBoundingClientRect();
-        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const version = appCtx.viewport.stats.geometry;
+        if (!overlayRect || overlayRectVersion !== version) {
+          overlayRect = surface.overlay.getBoundingClientRect();
+          overlayRectVersion = version;
+        }
+        return { x: event.clientX - overlayRect.left, y: event.clientY - overlayRect.top };
+      }
+
+      let cursorRaf = 0;
+      let pendingCursor = null;
+
+      function requestCursor(screenX, screenY) {
+        pendingCursor = { x: screenX, y: screenY };
+        if (cursorRaf) return;
+        cursorRaf = requestAnimationFrame(function () {
+          cursorRaf = 0;
+          const point = pendingCursor;
+          pendingCursor = null;
+          if (point) updateCursor(point.x, point.y);
+        });
       }
 
       return {
-        drawChrome, drawOverlayLayer, drawMarginGuides, marginHandlePoints, cachedOverflow, drawOverflow, drawRoundHandle, drawSquareHandle, screenFromPage, normalizeCursorAngle, resizeCursorKeyword, rotatedCursorSvg, handleCursor, imageHandlePoints, handlePoints, drawSelection, drawBackgroundSelection, drawTableDividers, drawPageSizeHandle, handleAt, dividerAt, pageSizeHandleAt, marginAt, updateCursor, refreshHoverCursor, overlayPoint
+        drawChrome, drawOverlayLayer, drawMarginGuides, marginHandlePoints, cachedOverflow, drawOverflow, drawRoundHandle, drawSquareHandle, screenFromPage, normalizeCursorAngle, resizeCursorKeyword, rotatedCursorSvg, handleCursor, imageHandlePoints, handlePoints, drawSelection, drawBackgroundSelection, drawTableDividers, drawPageSizeHandle, handleAt, dividerAt, pageSizeHandleAt, marginAt, updateCursor, requestCursor, refreshHoverCursor, overlayPoint
       };
     }
   };

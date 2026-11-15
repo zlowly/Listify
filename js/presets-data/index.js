@@ -491,10 +491,50 @@
     "chunks": [
       "texture",
       "solid",
-      "landscape",
+      "landscape-1",
+      "landscape-2",
       "floral",
-      "pattern",
-      "overlay"
-    ]
+      "pattern-1",
+      "pattern-2",
+      "pattern-3",
+      "pattern-4",
+      "pattern-5",
+      "overlay-1",
+      "overlay-2",
+      "overlay-3",
+      "overlay-4",
+      "overlay-5",
+      "overlay-6"
+    ],
+    "chunkMap": {
+      "texture": [
+        "texture"
+      ],
+      "solid": [
+        "solid"
+      ],
+      "landscape": [
+        "landscape-1",
+        "landscape-2"
+      ],
+      "floral": [
+        "floral"
+      ],
+      "pattern": [
+        "pattern-1",
+        "pattern-2",
+        "pattern-3",
+        "pattern-4",
+        "pattern-5"
+      ],
+      "overlay": [
+        "overlay-1",
+        "overlay-2",
+        "overlay-3",
+        "overlay-4",
+        "overlay-5",
+        "overlay-6"
+      ]
+    }
   };
 })();

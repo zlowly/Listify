@@ -231,8 +231,10 @@
         tab.classList.add('active');
         renderTiles();
       });
-      // 悬停标签即预热该分类，失败静默、不阻塞浏览。
-      tab.addEventListener('pointerenter', function () { prefetch(def.id); });
+      // 悬停标签预热该分类：停留 300ms 才触发，快速划过不注入；按下立即预热。
+      tab.addEventListener('pointerenter', function () { prefetchSoon(def.id); });
+      tab.addEventListener('pointerleave', function () { cancelPrefetchSoon(def.id); });
+      tab.addEventListener('pointerdown', function () { prefetch(def.id); });
       tabs.appendChild(tab);
     });
     body.appendChild(tabs);
@@ -259,6 +261,24 @@
 
     // 预取分类块：已加载无操作，同一分类并发由 loader 复用 Promise。
     // 预取失败只在当前分类上给状态提示，不 toast，避免重复打扰。
+    const prefetchTimers = Object.create(null);
+    const PREFETCH_DELAY = 300;
+
+    function prefetchSoon(catId) {
+      if (!catId || catId === ALL || chunkReady(catId)) return;
+      cancelPrefetchSoon(catId);
+      prefetchTimers[catId] = setTimeout(function () {
+        delete prefetchTimers[catId];
+        prefetch(catId);
+      }, PREFETCH_DELAY);
+    }
+
+    function cancelPrefetchSoon(catId) {
+      if (!catId || !prefetchTimers[catId]) return;
+      clearTimeout(prefetchTimers[catId]);
+      delete prefetchTimers[catId];
+    }
+
     function prefetch(catId) {
       if (!catId || catId === ALL) return;
       if (chunkReady(catId)) {
@@ -315,7 +335,9 @@
         tile.appendChild(thumb);
         tile.appendChild(name);
         // 悬停瓦片预热所属分类（「全部」下的混合瓦片各按所属分类加载）。
-        tile.addEventListener('pointerenter', function () { prefetch(item.category); });
+        tile.addEventListener('pointerenter', function () { prefetchSoon(item.category); });
+        tile.addEventListener('pointerleave', function () { cancelPrefetchSoon(item.category); });
+        tile.addEventListener('pointerdown', function () { prefetch(item.category); });
         tile.addEventListener('click', function () { chooseTile(item, tile); });
         grid.appendChild(tile);
       });

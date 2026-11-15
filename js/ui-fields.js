@@ -65,11 +65,7 @@
   function syncGroupDom(groupKey, collapsed) {
     const section = ui.els.propertyPanel.querySelector('.prop-group[data-group="' + groupKey + '"]');
     if (!section) return;
-    section.classList.toggle('is-collapsed', collapsed);
-    const toggle = section.querySelector('.prop-group-toggle');
-    if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-    const body = section.querySelector('.prop-group-body');
-    if (body) body.hidden = collapsed;
+    if ('open' in section) section.open = !collapsed;
   }
 
   /* 写状态表并就地同步 DOM，不整块重渲染；供折叠按钮与显示开关共用 */
@@ -79,8 +75,8 @@
     syncGroupDom(groupKey, collapsed);
   }
 
-  /* 统一分组卡片：标题条内是折叠按钮（名称 + 箭头），右侧状态内容留在按钮外，
-     避免帮助图标等交互控件嵌套进按钮 */
+  /* 统一分组卡片：标题条本身就是原生披露控件（summary），名称、状态与箭头保持同一行；
+     状态内容留在 summary 内但不参与折叠，交互控件自行阻止默认切换 */
   function propGroup(key, titleHtml, bodyHtml, options) {
     const opts = options || {};
     if (opts.plain) {
@@ -88,17 +84,15 @@
     }
     const collapsed = isCollapsed(key);
     const bodyId = 'prop-group-body-' + key;
-    return '<section class="prop-group' + (collapsed ? ' is-collapsed' : '') + '" data-group="' + esc(key) + '">' +
-      '<div class="prop-group-title">' +
-        '<button type="button" class="prop-group-toggle" aria-expanded="' + (collapsed ? 'false' : 'true') +
-          '" aria-controls="' + bodyId + '">' +
-          '<span class="prop-group-name">' + titleHtml + '</span>' +
-        '</button>' +
+    return '<details class="prop-group" data-group="' + esc(key) + '"' +
+        (collapsed ? '' : ' open') + '>' +
+      '<summary class="prop-group-title">' +
+        '<span class="prop-group-name">' + titleHtml + '</span>' +
         (opts.right ? '<span class="title-right">' + opts.right + '</span>' : '') +
         '<span class="prop-group-chevron" aria-hidden="true"></span>' +
-      '</div>' +
-      '<div class="prop-group-body" id="' + bodyId + '"' + (collapsed ? ' hidden' : '') + '>' + bodyHtml + '</div>' +
-      '</section>';
+      '</summary>' +
+      '<div class="prop-group-body" id="' + bodyId + '">' + bodyHtml + '</div>' +
+      '</details>';
   }
 
   function helpTip(text) {
@@ -172,6 +166,8 @@
   function bind(id, event, handler) {
     const el = document.getElementById(id);
     if (!el) return null;
+    // 稳定字段键：结构性重渲染后可据此定位、恢复焦点与选区
+    if (!el.hasAttribute('data-field')) el.setAttribute('data-field', id);
     el.addEventListener(event, handler);
     return el;
   }

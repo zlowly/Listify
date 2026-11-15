@@ -18,8 +18,14 @@
   const DRAFT_CORRUPT_KEY = 'listify.draft.corrupt';
   const DRAFT_SCHEMA = 1;
   const DRAFT_DB_NAME = 'listify-draft';
+  // v1 的 base64 记录保留为只读兼容层；新写入统一进二进制 store。
   const DRAFT_DB_STORE = 'assets';
-  const DRAFT_DB_VERSION = 1;
+  const DRAFT_DB_BLOB_STORE = 'assetBlobs';
+  // 草稿信封存 IndexedDB：写入是异步事务，不必在交互路径里同步序列化整包；
+  // localStorage 仅保留 pagehide 一次同步兜底与旧版本兼容。
+  const DRAFT_META_STORE = 'draftMeta';
+  const DRAFT_META_ID = 'current';
+  const DRAFT_DB_VERSION = 3;
 
   let draftDbPromise = null;
   let knownDraftAssetIds = null;
@@ -42,6 +48,12 @@
         const db = request.result;
         if (!db.objectStoreNames.contains(DRAFT_DB_STORE)) {
           db.createObjectStore(DRAFT_DB_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(DRAFT_DB_BLOB_STORE)) {
+          db.createObjectStore(DRAFT_DB_BLOB_STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(DRAFT_META_STORE)) {
+          db.createObjectStore(DRAFT_META_STORE, { keyPath: 'id' });
         }
       };
       request.onsuccess = function () {
@@ -80,13 +92,13 @@
       return new Promise(function (resolve, reject) {
         let tx;
         try {
-          tx = db.transaction(DRAFT_DB_STORE, 'readwrite');
+          tx = db.transaction([DRAFT_DB_STORE, DRAFT_DB_BLOB_STORE], 'readwrite');
         } catch (err) {
           reject(err);
           return;
         }
         try {
-          run(tx.objectStore(DRAFT_DB_STORE));
+          run(tx.objectStore(DRAFT_DB_STORE), tx.objectStore(DRAFT_DB_BLOB_STORE));
         } catch (err) {
           try { tx.abort(); } catch (ignored) { /* empty */ }
           reject(err);
@@ -103,42 +115,84 @@
     });
   }
 
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve) {
+      if (!blob) {
+        resolve('');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { resolve(''); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
   async function draftAssetGet(id) {
     const db = await openDraftDb();
-    const tx = db.transaction(DRAFT_DB_STORE, 'readonly');
+    const tx = db.transaction([DRAFT_DB_STORE, DRAFT_DB_BLOB_STORE], 'readonly');
+    const binary = await requestResult(tx.objectStore(DRAFT_DB_BLOB_STORE).get(id));
+    if (binary) {
+      return {
+        id: binary.id,
+        name: binary.name,
+        mime: binary.mime,
+        data: await blobToDataUrl(binary.blob)
+      };
+    }
     return requestResult(tx.objectStore(DRAFT_DB_STORE).get(id));
   }
 
   async function draftAssetGetAll() {
     const db = await openDraftDb();
-    const tx = db.transaction(DRAFT_DB_STORE, 'readonly');
-    const records = await requestResult(tx.objectStore(DRAFT_DB_STORE).getAll());
-    return Array.isArray(records) ? records : [];
+    const tx = db.transaction([DRAFT_DB_STORE, DRAFT_DB_BLOB_STORE], 'readonly');
+    const legacy = await requestResult(tx.objectStore(DRAFT_DB_STORE).getAll());
+    const binary = await requestResult(tx.objectStore(DRAFT_DB_BLOB_STORE).getAll());
+    const byId = new Map();
+    (Array.isArray(legacy) ? legacy : []).forEach(function (record) {
+      if (record && record.id) byId.set(record.id, record);
+    });
+    for (const record of (Array.isArray(binary) ? binary : [])) {
+      if (!record || !record.id) continue;
+      byId.set(record.id, {
+        id: record.id,
+        name: record.name,
+        mime: record.mime,
+        data: await blobToDataUrl(record.blob)
+      });
+    }
+    return Array.from(byId.values());
   }
 
   async function draftAssetKeys() {
     const db = await openDraftDb();
-    const tx = db.transaction(DRAFT_DB_STORE, 'readonly');
-    const keys = await requestResult(tx.objectStore(DRAFT_DB_STORE).getAllKeys());
-    knownDraftAssetIds = new Set(keys || []);
+    const tx = db.transaction([DRAFT_DB_STORE, DRAFT_DB_BLOB_STORE], 'readonly');
+    const legacyKeys = await requestResult(tx.objectStore(DRAFT_DB_STORE).getAllKeys());
+    const binaryKeys = await requestResult(tx.objectStore(DRAFT_DB_BLOB_STORE).getAllKeys());
+    knownDraftAssetIds = new Set(
+      (legacyKeys || []).concat(binaryKeys || [])
+    );
     return Array.from(knownDraftAssetIds);
   }
 
   function draftAssetPut(record) {
-    return draftWriteTransaction(function (store) {
-      store.put(record);
+    return draftWriteTransaction(function (legacy, binary) {
+      binary.put(record);
+      legacy.delete(record.id);
     });
   }
 
   function draftAssetDelete(id) {
-    return draftWriteTransaction(function (store) {
-      store.delete(id);
+    return draftWriteTransaction(function (legacy, binary) {
+      legacy.delete(id);
+      binary.delete(id);
     });
   }
 
   function draftAssetsClear() {
-    return draftWriteTransaction(function (store) {
-      store.clear();
+    return draftWriteTransaction(function (legacy, binary) {
+      legacy.clear();
+      binary.clear();
     });
   }
 
@@ -156,12 +210,12 @@
     };
   }
 
-  async function draftAssetRecord(id, blob, meta) {
+  function draftAssetRecord(id, blob, meta) {
     return {
       id: id,
       name: meta.name || 'image',
       mime: meta.mime || blob.type || 'image/png',
-      data: await L.assets.blobToBase64(blob)
+      blob: blob
     };
   }
 
@@ -233,6 +287,40 @@
     return envelope.savedAt;
   }
 
+  // 交互路径使用的异步写入：结构化克隆直接进 IndexedDB，不做 JSON.stringify。
+  async function writeDraftEnvelopeAsync(envelope) {
+    envelope.savedAt = Date.now();
+    const db = await openDraftDb();
+    await new Promise(function (resolve, reject) {
+      let tx;
+      try {
+        tx = db.transaction(DRAFT_META_STORE, 'readwrite');
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      tx.objectStore(DRAFT_META_STORE).put({ id: DRAFT_META_ID, envelope: envelope });
+      tx.oncomplete = function () { resolve(); };
+      tx.onerror = function () { reject(tx.error || new Error('草稿写入失败')); };
+      tx.onabort = function () { reject(tx.error || new Error('草稿写入被中止')); };
+    });
+    return envelope.savedAt;
+  }
+
+  async function readDraftEnvelopeAsync() {
+    try {
+      const db = await openDraftDb();
+      const record = await requestResult(
+        db.transaction(DRAFT_META_STORE, 'readonly').objectStore(DRAFT_META_STORE).get(DRAFT_META_ID)
+      );
+      const envelope = record && record.envelope;
+      if (envelope && typeof envelope === 'object' && !Array.isArray(envelope)) return envelope;
+      return null;
+    } catch (err) {
+      return null;
+    }
+  }
+
   function backupCorruptDraft(text) {
     if (typeof text !== 'string') return;
     try {
@@ -248,6 +336,18 @@
       window.localStorage.removeItem(DRAFT_KEY);
     } catch (err) {
       storageFailure = err;
+    }
+    try {
+      const db = await openDraftDb();
+      await new Promise(function (resolve) {
+        const tx = db.transaction(DRAFT_META_STORE, 'readwrite');
+        tx.objectStore(DRAFT_META_STORE).delete(DRAFT_META_ID);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { resolve(); };
+        tx.onabort = function () { resolve(); };
+      });
+    } catch (err) {
+      /* 元数据存储不可用时由 localStorage 与资产清理兜底。 */
     }
     await draftAssetsClear();
     knownDraftAssetIds = new Set();
@@ -276,24 +376,25 @@
   }
 
   async function restoreDraft() {
-    let text;
-    try {
-      text = window.localStorage.getItem(DRAFT_KEY);
-    } catch (err) {
-      return {
-        ok: false,
-        reason: 'unavailable',
-        error: '本地存储不可用：' + (err.message || '未知错误')
-      };
-    }
-    if (!text) return { ok: true, empty: true };
-
-    let envelope;
-    try {
-      envelope = JSON.parse(text);
-    } catch (err) {
-      backupCorruptDraft(text);
-      return { ok: false, reason: 'corrupt', error: '草稿不是合法 JSON。' };
+    let text = null;
+    let envelope = await readDraftEnvelopeAsync();
+    if (!envelope) {
+      try {
+        text = window.localStorage.getItem(DRAFT_KEY);
+      } catch (err) {
+        return {
+          ok: false,
+          reason: 'unavailable',
+          error: '本地存储不可用：' + (err.message || '未知错误')
+        };
+      }
+      if (!text) return { ok: true, empty: true };
+      try {
+        envelope = JSON.parse(text);
+      } catch (err) {
+        backupCorruptDraft(text);
+        return { ok: false, reason: 'corrupt', error: '草稿不是合法 JSON。' };
+      }
     }
 
     if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) ||
@@ -411,6 +512,8 @@
     pruneDraftAssets: pruneDraftAssets,
     createDraftEnvelope: createDraftEnvelope,
     writeDraftEnvelope: writeDraftEnvelope,
+    writeDraftEnvelopeAsync: writeDraftEnvelopeAsync,
+    readDraftEnvelopeAsync: readDraftEnvelopeAsync,
     backupCorruptDraft: backupCorruptDraft,
     clearDraft: clearDraft,
     pruneMissingAssets: pruneMissingAssets,

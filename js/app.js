@@ -1109,10 +1109,18 @@ const viewport = {
     if (layout.resetStats) layout.resetStats();
   };
 
-  init().catch(function (err) {
-    console.error('[Listify] 初始化失败', err);
-    try {
-      ui.toast('初始化失败：' + (err && err.message ? err.message : '未知错误'), 'error');
-    } catch (ignored) { /* empty */ }
-  });
+  function boot() {
+    init().catch(function (err) {
+      console.error('[Listify] 初始化失败', err);
+      try {
+        ui.toast('初始化失败：' + (err && err.message ? err.message : '未知错误'), 'error');
+      } catch (ignored) { /* empty */ }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })();

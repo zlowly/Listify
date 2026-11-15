@@ -17,13 +17,16 @@
   }
 
   // 经典 script 注入（file:// 下不能用 fetch/XHR 读本地文件，也不能用 ESM）。
+  // 注入推迟到独立异步任务，避免在悬停等指针事件处理里同步解析大块数据。
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = function () { resolve(); };
-      script.onerror = function () { reject(new Error('script failed: ' + src)); };
-      document.head.appendChild(script);
+      setTimeout(function () {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = function () { resolve(); };
+        script.onerror = function () { reject(new Error('script failed: ' + src)); };
+        document.head.appendChild(script);
+      }, 0);
     });
   }
 
@@ -46,15 +49,26 @@
     return indexPromise;
   }
 
+  // 索引的 chunkMap 记录每个分类实际的分片文件名；旧索引没有该字段时按单片处理。
+  function chunkFiles(index, id) {
+    const map = index && index.chunkMap;
+    const list = map && map[id];
+    return Array.isArray(list) && list.length ? list : [id];
+  }
+
   // 按分类注入数据块，resolve 该分类的 id -> data URL 映射。
-  // 已加载直接返回；并发共享同一 Promise；失败后清空缓存，下次调用重新注入。
+  // 分类可能被拆成多片，逐片注入后合并；已加载直接返回；并发共享同一 Promise；失败后清空缓存。
   // 注意：这里不 toast，由调用方决定是否提示（预取静默、点击/应用时提示）。
   function loadChunk(catId) {
     const id = String(catId || '');
     if (!id) return Promise.reject(new Error('缺少预置分类 id'));
     if (L.PRESETS_CHUNKS && L.PRESETS_CHUNKS[id]) return Promise.resolve(L.PRESETS_CHUNKS[id]);
     if (chunkPromises[id]) return chunkPromises[id];
-    chunkPromises[id] = loadScript(CHUNK_DIR + id + '.js' + DATA_VER).then(function () {
+    chunkPromises[id] = loadIndex().then(function (index) {
+      return Promise.all(chunkFiles(index, id).map(function (name) {
+        return loadScript(CHUNK_DIR + name + '.js' + DATA_VER);
+      }));
+    }).then(function () {
       const chunk = L.PRESETS_CHUNKS && L.PRESETS_CHUNKS[id];
       if (!chunk) throw new Error('preset chunk missing: ' + id);
       delete chunkPromises[id];

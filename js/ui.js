@@ -20,11 +20,26 @@
   /* 分组折叠状态：<selectionKey>::<groupKey> → 是否收起，仅本页会话内记忆 */
   ui.groupCollapse = Object.create(null);
 
+  /* 输入法组合状态：compositionstart/end 显式记录，与事件自身的组合标记共同判定。
+     这是全库唯一的组合判定实现，新增文本输入必须复用它。 */
+  let composing = false;
+  document.addEventListener('compositionstart', function () {
+    composing = true;
+  }, true);
+  document.addEventListener('compositionend', function () {
+    /* 个别浏览器在 compositionend 之后仍会补发一次 keydown，延到微任务再清标志 */
+    queueMicrotask(function () { composing = false; });
+  }, true);
+  ui.isComposingEvent = function (event) {
+    return !!(event && (event.isComposing || event.keyCode === 229 || composing));
+  };
+
   function initToolbarTips() {
     const toolbar = document.getElementById('canvas-toolbar');
     if (!toolbar) return;
     const tip = document.createElement('div');
     tip.className = 'canvas-tip';
+    tip.id = 'canvas-tip';
     tip.setAttribute('role', 'tooltip');
     tip.hidden = true;
     document.body.appendChild(tip);
@@ -42,6 +57,7 @@
       if (!label) return;
       current = el;
       tip.textContent = label;
+      el.setAttribute('aria-describedby', tip.id);
       place(el);
       tip.hidden = false;
       requestAnimationFrame(function () { tip.classList.add('show'); });
@@ -85,6 +101,7 @@
       if (this.el) return this.el;
       const el = document.createElement('div');
       el.className = 'prop-tip pos-below';
+      el.id = 'prop-tip';
       el.setAttribute('role', 'tooltip');
       el.hidden = true;
       document.body.appendChild(el);
@@ -97,6 +114,7 @@
       if (!text) return;
       this.current = el;
       tip.textContent = text;
+      el.setAttribute('aria-describedby', tip.id);
       tip.hidden = false;
       this.place(el);
       requestAnimationFrame(function () { tip.classList.add('show'); });
@@ -166,11 +184,8 @@
     });
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Escape') return;
-      if (propTip.el && !propTip.el.hidden) {
-        propTip.hide();
-        event.stopPropagation();
-      }
-    }, true);
+      if (propTip.el && !propTip.el.hidden) propTip.hide();
+    });
   }
 
   ui.init = function () {
@@ -190,16 +205,19 @@
       event.preventDefault();
       ctrlStepNumber(target, event.key === 'ArrowUp' ? 1 : -1);
     });
-    /* 分组折叠：委托到面板容器，跨 innerHTML 重建存活；按钮原生支持 Enter/Space */
+    /* 分组折叠：原生 details/summary 承担键盘与展开状态，这里只把状态写回按对象的记忆表；
+       summary 内的帮助图标等交互控件不触发切换 */
     ui.els.propertyPanel.addEventListener('click', function (event) {
-      const toggle = event.target.closest && event.target.closest('.prop-group-toggle');
-      if (!toggle) return;
-      const section = toggle.closest('.prop-group');
-      if (!section) return;
+      const control = event.target.closest && event.target.closest('summary .help-tip, summary .btn, summary a');
+      if (control) event.preventDefault();
+    });
+    ui.els.propertyPanel.addEventListener('toggle', function (event) {
+      const section = event.target;
+      if (!section || !section.classList || !section.classList.contains('prop-group')) return;
       const groupKey = section.getAttribute('data-group');
       if (!groupKey) return;
-      setGroupCollapsed(groupKey, toggle.getAttribute('aria-expanded') === 'true');
-    });
+      setGroupCollapsed(groupKey, !section.open);
+    }, true);
     ui.els.selectionLabel = document.getElementById('selection-label');
     ui.els.emptyHint = document.getElementById('empty-hint');
     ui.els.modalRoot = document.getElementById('modal-root');
@@ -255,6 +273,7 @@
       zoomInput.select();
     });
     zoomInput.addEventListener('keydown', function (event) {
+      if (ui.isComposingEvent(event)) return;
       if (event.key === 'Enter') {
         event.preventDefault();
         commitZoomInput();
@@ -362,7 +381,7 @@
     document.querySelectorAll('.sidebar-tab').forEach(function (tab) {
       const active = tab.getAttribute('data-panel') === panel;
       tab.classList.toggle('active', active);
-      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     ui.els.categoryToolbar.hidden = panel !== 'categories';
     ui.els.categoryPanel.hidden = panel !== 'categories';
@@ -386,8 +405,8 @@
     const current = L.app.state.currentPageId;
     ui.els.pageTabs.innerHTML = project.pages.map(function (page, index) {
       const active = page.id === current;
-      return '<button class="page-tab' + (active ? ' active' : '') + '" role="tab" aria-selected="' +
-        (active ? 'true' : 'false') + '" aria-label="第 ' + (index + 1) + ' 页" data-page-id="' +
+      return '<button class="page-tab' + (active ? ' active' : '') + '"' +
+        (active ? ' aria-current="page"' : '') + ' aria-label="第 ' + (index + 1) + ' 页" data-page-id="' +
         esc(page.id) + '">' + (index + 1) + '</button>';
     }).join('');
     ui.els.pageTabs.querySelectorAll('.page-tab').forEach(function (button) {
@@ -410,14 +429,14 @@
       const rowHint = placed
         ? '已放在第 ' + (pageIndex + 1) + ' 页，回车或点击跳转'
         : '未放置，回车或点击放到当前页';
-      return '<div class="category-row ' + (placed ? 'placed' : 'unplaced') + '" draggable="true" tabindex="0" role="button" aria-label="' +
+      return '<button type="button" class="category-row ' + (placed ? 'placed' : 'unplaced') + '" draggable="true" aria-label="' +
         esc('分类 ' + category.name + '，' + category.songs.length + ' 首，' + rowHint) + '" data-category="' +
         esc(category.name) + '">' +
         '<span class="category-name" title="' + esc(category.name) + '">' + esc(category.name) + '</span>' +
         '<span class="category-meta">' + category.songs.length + ' 首</span>' +
         '<span class="pill ' + (placed ? 'pill-green' : 'pill-gray') + '">' +
         (placed ? '第 ' + (pageIndex + 1) + ' 页' : '未放置') + '</span>' +
-        '</div>';
+        '</button>';
     }).join('');
 
     ui.els.categoryPanel.querySelectorAll('.category-row').forEach(function (row) {
@@ -431,12 +450,6 @@
         }
       };
       row.addEventListener('click', activate);
-      row.addEventListener('keydown', function (event) {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          activate();
-        }
-      });
       row.addEventListener('dragstart', function (event) {
         event.dataTransfer.effectAllowed = 'copy';
         event.dataTransfer.setData('application/x-listify-category', name);
@@ -480,9 +493,9 @@
         '<span class="layer-icon">' + icon + '</span>' +
         '<span class="layer-name">' + esc(name) + '<span class="layer-sub"> ' + esc(sub) + '</span></span>' +
         '<span class="row-actions">' +
-        '<button class="icon-btn" data-layer-move="' + realIndex + ':-1" title="下移一层"' +
+        '<button class="icon-btn" data-layer-move="' + realIndex + ':-1" title="下移一层" aria-label="下移一层"' +
         (realIndex === 0 ? ' disabled' : '') + '>↓</button>' +
-        '<button class="icon-btn" data-layer-move="' + realIndex + ':1" title="上移一层"' +
+        '<button class="icon-btn" data-layer-move="' + realIndex + ':1" title="上移一层" aria-label="上移一层"' +
         (realIndex === page.elements.length - 1 ? ' disabled' : '') + '>↑</button>' +
         '</span></div>');
     });
@@ -500,7 +513,7 @@
           '<span class="layer-sub"> ' + esc(subParts.join(' · ')) + '</span></span>' +
         (isGlobal ? '<span class="pill pill-blue">全局</span>' : '') +
         '<span class="pill pill-blue">底层</span>' +
-        '<button class="icon-btn" data-bg-add="' + esc(set.id) + '" title="添加背景图片">＋</button>' +
+        '<button class="icon-btn" data-bg-add="' + esc(set.id) + '" title="添加背景图片" aria-label="添加背景图片">＋</button>' +
         '</div>');
       const images = (set.images || []).slice().reverse();
       images.forEach(function (image, reverseIndex) {

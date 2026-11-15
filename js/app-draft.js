@@ -20,7 +20,8 @@
         enabled: false,
         restoring: true,
         timer: 0,
-        lastKey: '',
+        revision: 0,
+        savedRevision: 0,
         lastSavedAt: 0,
         status: 'idle',
         lastError: '',
@@ -33,10 +34,6 @@
         const date = new Date(timestamp || Date.now());
         return String(date.getHours()).padStart(2, '0') + ':' +
           String(date.getMinutes()).padStart(2, '0');
-      }
-    
-      function draftSnapshotKey(envelope) {
-        return JSON.stringify({ ui: envelope.ui, project: envelope.project });
       }
     
       function setDraftStatus(status, error, title) {
@@ -87,6 +84,7 @@
     
       function scheduleDraftSave() {
         if (!appCtx.draft.enabled || appCtx.draft.restoring) return;
+        appCtx.draft.revision += 1;
         if (appCtx.draft.timer) clearTimeout(appCtx.draft.timer);
         appCtx.draft.timer = setTimeout(function () {
           appCtx.draft.timer = 0;
@@ -97,13 +95,13 @@
       async function saveDraftNow(options) {
         if (!appCtx.draft.enabled || appCtx.draft.restoring) return;
         const force = !!(options && options.force);
-        const initialEnvelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
-        if (!force && draftSnapshotKey(initialEnvelope) === appCtx.draft.lastKey) return;
+        if (!force && appCtx.draft.revision === appCtx.draft.savedRevision) return;
         if (appCtx.draft.saving) {
           appCtx.draft.queued = true;
           return;
         }
         appCtx.draft.saving = true;
+        const snapshotRevision = appCtx.draft.revision;
         try {
           try {
             await L.io.ensureDraftAssets(state.project);
@@ -115,11 +113,9 @@
           if (!appCtx.draft.enabled || appCtx.draft.restoring) return;
           // 等待资产写入期间可能又有编辑；总是落盘当前状态，避免旧结构覆盖新编辑。
           const envelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
-          const key = draftSnapshotKey(envelope);
-          if (!force && key === appCtx.draft.lastKey) return;
-          const savedAt = L.io.writeDraftEnvelope(envelope);
-          appCtx.draft.lastKey = key;
+          const savedAt = await L.io.writeDraftEnvelopeAsync(envelope);
           appCtx.draft.lastSavedAt = savedAt;
+          appCtx.draft.savedRevision = snapshotRevision;
           setDraftStatus('saved');
           try {
             await L.io.pruneDraftAssets(state.project);
@@ -139,13 +135,12 @@
     
       function flushDraftSync() {
         if (!appCtx.draft.enabled || appCtx.draft.restoring) return;
+        if (appCtx.draft.revision === appCtx.draft.savedRevision) return;
         const envelope = L.io.createDraftEnvelope(state.project, state.currentPageId);
-        const key = draftSnapshotKey(envelope);
-        if (key === appCtx.draft.lastKey) return;
         try {
           const savedAt = L.io.writeDraftEnvelope(envelope);
-          appCtx.draft.lastKey = key;
           appCtx.draft.lastSavedAt = savedAt;
+          appCtx.draft.savedRevision = appCtx.draft.revision;
           setDraftStatus('saved');
         } catch (err) {
           reportDraftError(err);
@@ -179,15 +174,13 @@
             ? savedPageId
             : state.project.pages[0].id;
           state.selection = { type: 'page' };
-          appCtx.draft.lastKey = draftSnapshotKey(
-            L.io.createDraftEnvelope(state.project, state.currentPageId)
-          );
+          appCtx.draft.savedRevision = appCtx.draft.revision;
           appCtx.draft.lastSavedAt = result.savedAt || Date.now();
           appCtx.draft.status = 'saved';
           return { ok: true, restored: true, missingCount: result.missingCount || 0 };
         }
         if (result && result.ok && result.empty) {
-          appCtx.draft.lastKey = '';
+          appCtx.draft.savedRevision = appCtx.draft.revision;
           appCtx.draft.lastSavedAt = 0;
           return { ok: true, restored: false };
         }
@@ -222,7 +215,7 @@
 
       return {
         ...Object.assign(draft, {
-          formatDraftTime, draftSnapshotKey, setDraftStatus, reportDraftError, scheduleDraftSave, saveDraftNow, flushDraftSync, persistDraftAssetQuietly, restoreDraftOnStartup, notifyDraftRecovery
+          formatDraftTime, setDraftStatus, reportDraftError, scheduleDraftSave, saveDraftNow, flushDraftSync, persistDraftAssetQuietly, restoreDraftOnStartup, notifyDraftRecovery
         })
       };
     }

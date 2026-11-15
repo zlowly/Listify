@@ -425,12 +425,7 @@
       }
     
       function handleResize() {
-        if (viewport.mode === 'fit') {
-          fit();
-          return;
-        }
-        syncGeometry();
-        applyViewTransform();
+        requestGeometry();
         scheduleRedraw(['chrome', 'overlay']);
       }
 

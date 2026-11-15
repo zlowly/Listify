@@ -2,8 +2,9 @@
 # 打包脚本（仅 python3 标准库 + 本机 ImageMagick `magick`）。
 # 读取 presets/manifest.json，校验配置与素材，把素材归一化为长边 1400 的 WebP q78，
 # 生成 160px 缩略图，并输出：
-#   js/presets-data/index.js          索引（分类、条目元数据、缩略图、chunks）
+#   js/presets-data/index.js          索引（分类、条目元数据、缩略图、chunkMap/chunks）
 #   js/presets-data/<category>.js     分类块（仅 id -> data URL）
+#   js/presets-data/<category>-N.js   超出体积预算的分类按序拆片，运行时按索引合并
 # 配置是唯一事实源：分类、名称、来源、许可都从这里读取；目录扫描只用于发现未登记文件。
 # 用法：./scripts/build-presets.sh（推荐，先检查 magick/WebP）或 python3 scripts/build-presets.py
 import base64
@@ -26,6 +27,8 @@ CATEGORY_ID_RE = re.compile(r"^[a-z0-9-]+$")
 FITS = {"original", "fill-width", "fill-height", "cover", "none"}
 KINDS = {"background", "overlay"}
 VERSION = 1
+# 单片体积预算：超过就拆片，避免悬停预取后一次解析几十兆脚本造成长任务。
+CHUNK_BUDGET = 700 * 1024
 HEADER = "// 由 scripts/build-presets.py 生成，请勿手改。\n"
 
 
@@ -300,8 +303,51 @@ def js_object(value, indent=2):
     return body.replace("\n", "\n" + " " * indent)
 
 
+def split_entries(entries, budget=CHUNK_BUDGET):
+    """把单个分类的 id -> data URL 映射按体积切成若干片，避免一次解析几十兆脚本。"""
+    parts = []
+    current = {}
+    size = 0
+    for key, value in entries.items():
+        item_size = len(key) + len(value) + 8
+        if current and size + item_size > budget:
+            parts.append(current)
+            current = {}
+            size = 0
+        current[key] = value
+        size += item_size
+    if current or not parts:
+        parts.append(current)
+    return parts
+
+
 def write_outputs(index, chunks):
     contents = {}
+    index_files = {}
+    for cid, entries in chunks.items():
+        parts = split_entries(entries)
+        names = []
+        for order, part in enumerate(parts):
+            # 单片分类沿用 <分类>.js，多片用 <分类>-1.js、<分类>-2.js…，运行时按索引合并。
+            name = cid if len(parts) == 1 else "%s-%d" % (cid, order + 1)
+            names.append(name)
+            lines = [
+                HEADER,
+                "(function () {\n",
+                "  const L = window.Listify = window.Listify || {};\n",
+                "  L.PRESETS_CHUNKS = L.PRESETS_CHUNKS || {};\n",
+                '  L.PRESETS_CHUNKS["' + cid + '"] = Object.assign(L.PRESETS_CHUNKS["' + cid + '"] || {}, ',
+                js_object(part),
+                ");\n",
+                "})();\n",
+            ]
+            contents[name + ".js"] = "".join(lines)
+        index_files[cid] = names
+        if len(parts) > 1:
+            print("%s 拆分为 %d 片：%s" % (cid, len(parts), "、".join(names)))
+
+    index["chunkMap"] = index_files
+    index["chunks"] = [name for names in index_files.values() for name in names]
     contents["index.js"] = (
         HEADER
         + "(function () {\n"
@@ -309,18 +355,6 @@ def write_outputs(index, chunks):
         + "  L.PRESETS_INDEX = " + js_object(index) + ";\n"
         + "})();\n"
     )
-    for cid, entries in chunks.items():
-        lines = [
-            HEADER,
-            "(function () {\n",
-            "  const L = window.Listify = window.Listify || {};\n",
-            "  L.PRESETS_CHUNKS = L.PRESETS_CHUNKS || {};\n",
-            '  L.PRESETS_CHUNKS["' + cid + '"] = ',
-            js_object(entries),
-            ";\n",
-            "})();\n",
-        ]
-        contents[cid + ".js"] = "".join(lines)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     for filename, text in contents.items():
