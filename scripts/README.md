@@ -39,6 +39,8 @@ node --test scripts/checks/*.test.js
   `presets.js`、`app.js`（依赖真实 DOM、剪贴板/字体枚举或启动即 `init()`）。
 - `model.test.js`：文本虚拟宽度（ASCII/CJK/全角/emoji）、排序稳定性、字体栈规整、
   边距归一化、深拷贝。
+- `playlist-check.test.js`：歌名查重键、索引、重复分组、冲突位置与提示文案。
+- `import.test.js`：替换/追加计划、同名并集、跳过定位、新分类保留与分类块增删。
 - `layout.test.js`：列宽分配、列优先/行优先填充、动态行数、满页续表、空表占位。
   期望值就是当前实现的基线；改行为时先确认意图，再同步更新断言。
 - `io.test.js`：项目结构序列化往返、`validateProject` 的错误分类、草稿信封不含 base64。

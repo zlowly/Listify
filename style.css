@@ -669,6 +669,18 @@ button { cursor: pointer; }
 .export-options { flex-wrap: wrap; gap: 4px 16px; }
 .export-options .check-row { white-space: nowrap; }
 .export-options input[type="radio"] { accent-color: var(--blue); }
+.import-mode { flex-wrap: wrap; gap: 4px 16px; }
+.import-mode input[type="radio"] { accent-color: var(--blue); }
+.import-preview p { margin: 6px 0; font-size: 12px; line-height: 1.6; }
+.import-skip-list {
+  margin: 2px 0 6px;
+  padding-left: 18px;
+  max-height: 160px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
 
 .seg {
   display: inline-flex;
@@ -1433,6 +1445,16 @@ button { cursor: pointer; }
 .playlist-editor-add-cell .playlist-editor-input { padding-left: 10px; }
 .playlist-editor-status { margin-right: auto; font-size: 12px; color: var(--muted); }
 .playlist-editor-status.has-errors { color: var(--red); font-weight: 600; }
+.playlist-editor-modal .modal-footer { flex-wrap: wrap; }
+.playlist-editor-duplicates {
+  flex: 1 1 100%;
+  order: -1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.playlist-editor-duplicates[hidden] { display: none; }
+.playlist-editor-duplicates-summary { color: var(--red); font-weight: 600; }
+.playlist-editor-duplicates-hint { margin-left: 6px; color: var(--muted); }
 .playlist-editor-discard {
   position: absolute;
   left: 0;

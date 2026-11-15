@@ -417,34 +417,9 @@ const viewport = {
 
   /* ---------- playlist editing ---------- */
 
-  function songKey(value) {
-    return String(value == null ? '' : value).trim();
-  }
-
-  /* 多重集比较：同名的数量差才是真实的增删改，重排不产生差异 */
-  function diffSongChanges(original, next) {
-    const counts = new Map();
-    (original || []).forEach(function (song) {
-      const key = songKey(song);
-      counts.set(key, (counts.get(key) || 0) + 1);
-    });
-    let added = 0;
-    (next || []).forEach(function (song) {
-      const key = songKey(song);
-      const remaining = counts.get(key) || 0;
-      if (remaining > 0) counts.set(key, remaining - 1);
-      else added += 1;
-    });
-    let removed = 0;
-    counts.forEach(function (remaining) { removed += remaining; });
-    const modified = Math.min(added, removed);
-    return { modified: modified, added: added - modified, removed: removed - modified };
-  }
-
-  function countSongChanges(original, next) {
-    const diff = diffSongChanges(original, next);
-    return diff.modified + diff.added + diff.removed;
-  }
+  const songKey = L.playlistCheck.key;
+  const diffSongChanges = L.playlistCheck.diffSongs;
+  const countSongChanges = L.playlistCheck.countSongChanges;
 
   function songOrderChanged(original, next) {
     if (original.length !== next.length) return false;

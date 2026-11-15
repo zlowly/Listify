@@ -61,56 +61,115 @@
         });
       }
     
-      function confirmReimport(result) {
-        const rec = L.importer.reconcile(state.project, result.categories);
-        if (!state.project.playlist.categories.length) return Promise.resolve(true);
-    
-        const oldSongs = {};
-        state.project.playlist.categories.forEach(function (category) { oldSongs[category.name] = category.songs; });
-        const newSongs = {};
-        result.categories.forEach(function (category) { newSongs[category.name] = category.songs; });
-        const songUpdates = (rec.kept || []).map(function (name) {
-          return { name: name, count: actions.countSongChanges(oldSongs[name] || [], newSongs[name] || []) };
-        }).filter(function (item) { return item.count > 0; });
-    
-        if (!rec.added.length && !rec.removed.length && !songUpdates.length) return Promise.resolve(true);
-    
+      function planFor(categories, mode) {
+        return L.importer.planImport(state.project, categories, mode);
+      }
+
+      function replacePreviewHtml(plan) {
+        const lines = [];
+        if (plan.addedCategoryNames.length) {
+          lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(plan.addedCategoryNames.join('、')) + '</p>');
+        }
+        if (plan.removedCategoryNames.length) {
+          lines.push('<p><strong>将删除分类块：</strong>' + escapeHtml(plan.removedCategoryNames.join('、')) + '</p>');
+        }
+        if (plan.songUpdates.length) {
+          lines.push('<p><strong>将更新歌名：</strong>' +
+            escapeHtml(plan.songUpdates.map(function (item) { return item.name + '（' + item.count + ' 处）'; }).join('、')) + '</p>');
+        }
+        lines.push('<p class="hint">同名分类会保留位置、尺寸、样式、表格结构和手动列宽，只更新歌名并重新排序。</p>');
+        return lines.join('');
+      }
+
+      function appendPreviewHtml(plan) {
+        const lines = [];
+        const newCategories = plan.mergedCategories.filter(function (item) { return item.isNew; });
+        if (newCategories.length) {
+          lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(newCategories.map(function (item) {
+            return item.addedSongs ? item.name + '（+' + item.addedSongs + ' 首）' : item.name + '（0 首新增）';
+          }).join('、')) + '</p>');
+        }
+        const mergedCategories = plan.mergedCategories.filter(function (item) {
+          return !item.isNew && item.addedSongs > 0;
+        });
+        if (mergedCategories.length) {
+          lines.push('<p><strong>并入分类：</strong>' + escapeHtml(mergedCategories.map(function (item) {
+            return item.name + '（+' + item.addedSongs + ' 首' +
+              (item.skippedSongs ? '，跳过 ' + item.skippedSongs + ' 首' : '') + '）';
+          }).join('、')) + '</p>');
+        }
+        if (plan.unchangedCategoryNames.length) {
+          lines.push('<p><strong>无变化分类：</strong>' + escapeHtml(plan.unchangedCategoryNames.join('、')) + '</p>');
+        }
+        if (plan.skipped.length) {
+          lines.push('<p><strong>跳过 ' + plan.skipped.length + ' 首已存在歌名：</strong></p>' +
+            '<ul class="import-skip-list">' + plan.skipped.map(function (item) {
+              return '<li>「' + escapeHtml(item.song) + '」已存在于「' + escapeHtml(item.category) + '」（不重复添加）</li>';
+            }).join('') + '</ul>');
+        }
+        if (plan.stats.addedSongs === 0) {
+          lines.push('<p class="hint warn">没有新增内容：' + plan.stats.skippedSongs + ' 首歌名均已存在。</p>');
+        }
+        lines.push('<p class="hint">' + escapeHtml(L.playlistCheck.HINT) + '</p>');
+        return lines.join('');
+      }
+
+      function confirmImport(result) {
+        if (!state.project.playlist.categories.length) {
+          return Promise.resolve(planFor(result.categories, 'replace'));
+        }
+
         return new Promise(function (resolve) {
           let settled = false;
+          let mode = 'replace';
+          let plan = null;
           function finish(value) {
             if (settled) return;
             settled = true;
             resolve(value);
           }
-          const lines = [];
-          if (rec.added.length) {
-            lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(rec.added.join('、')) + '</p>');
-          }
-          if (rec.removed.length) {
-            lines.push('<p><strong>将删除分类块：</strong>' + escapeHtml(rec.removed.join('、')) + '</p>');
-          }
-          if (songUpdates.length) {
-            lines.push('<p><strong>将更新歌名：</strong>' +
-              escapeHtml(songUpdates.map(function (item) { return item.name + '（' + item.count + ' 处）'; }).join('、')) + '</p>');
-          }
-          lines.push('<p class="hint">同名分类会保留位置、尺寸、样式、表格结构和手动列宽，只更新歌名并重新排序。</p>');
+          const body =
+            '<div class="prop-group">' +
+              '<div class="field"><label>导入方式</label><div class="control import-mode">' +
+                '<label class="check-row"><input type="radio" name="import-mode" value="replace" checked> 替换全部</label>' +
+                '<label class="check-row"><input type="radio" name="import-mode" value="append"> 追加到现有歌单</label>' +
+              '</div></div>' +
+              '<div id="import-preview" class="import-preview"></div>' +
+            '</div>';
           const modal = ui.modal.open({
-            title: '重新导入确认',
-            body: '<div class="prop-group">' + lines.join('') + '</div>',
-            width: '460px',
+            title: '导入确认',
+            body: body,
+            width: '520px',
             actions: [
-              { label: '取消', onClick: function (close) { finish(false); close(); } },
+              { label: '取消', onClick: function (close) { finish(null); close(); } },
               {
                 label: '继续导入',
                 className: 'btn-primary',
                 onClick: function (close) {
-                  finish(true);
+                  if (!plan) return;
+                  if (plan.mode === 'append' && plan.stats.addedSongs === 0) return;
+                  finish(plan);
                   close();
                 }
               }
             ],
-            onClose: function () { finish(false); }
+            onClose: function () { finish(null); }
           });
+          const preview = modal.body.querySelector('#import-preview');
+          const continueButton = modal.footer.querySelector('.btn-primary');
+          function render() {
+            plan = planFor(result.categories, mode);
+            preview.innerHTML = mode === 'append' ? appendPreviewHtml(plan) : replacePreviewHtml(plan);
+            continueButton.disabled = mode === 'append' && plan.stats.addedSongs === 0;
+          }
+          modal.body.querySelectorAll('input[name="import-mode"]').forEach(function (radio) {
+            radio.addEventListener('change', function () {
+              if (!radio.checked) return;
+              mode = radio.value;
+              render();
+            });
+          });
+          render();
         });
       }
     
@@ -126,17 +185,27 @@
           return;
         }
     
-        const ok = await confirmReimport(result);
-        if (!ok) return;
+        const plan = await confirmImport(result);
+        if (!plan) return;
+        if (plan.mode === 'append' && plan.stats.addedSongs === 0) {
+          ui.toast('没有新增内容：' + plan.stats.skippedSongs + ' 首歌名均已存在。');
+          return;
+        }
     
         actions.pushUndo('导入歌单');
-        L.importer.applyImport(state.project, result.categories);
+        L.importer.applyImport(state.project, plan);
         if (state.selection.type === 'element') {
           const found = actions.findElementAnywhere(state.selection.id);
           if (!found) state.selection = { type: 'page' };
         }
         ui.renderAll();
-        ui.toast('已导入 ' + result.stats.categories + ' 个分类、' + result.stats.songs + ' 首歌名（' + result.encoding + '）。', 'success');
+        if (plan.mode === 'append') {
+          ui.toast('已追加 ' + plan.stats.newCategories + ' 个分类，新增 ' + plan.stats.addedSongs +
+            ' 首歌名，跳过 ' + plan.stats.skippedSongs + ' 首重复（' + result.encoding + '）。', 'success');
+        } else {
+          ui.toast('已导入 ' + result.stats.categories + ' 个分类、' + result.stats.songs +
+            ' 首歌名（' + result.encoding + '）。', 'success');
+        }
       }
     
       function openImport() {
@@ -246,7 +315,7 @@
       }
 
       return {
-        showImportErrors, openEncodingDialog, confirmReimport, handleImportFile, openImport, exportPlaylist, exportProject, openImportProject, discardBuiltAssets, handleImportProject, newProject
+        showImportErrors, openEncodingDialog, confirmImport, handleImportFile, openImport, exportPlaylist, exportProject, openImportProject, discardBuiltAssets, handleImportProject, newProject
       };
     }
   };

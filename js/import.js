@@ -187,28 +187,165 @@
     };
   }
 
-  function applyImport(project, categories) {
+  function copyCategories(categories) {
+    return (categories || []).map(function (category) {
+      return { name: category.name, songs: (category.songs || []).slice() };
+    });
+  }
+
+  function planReplace(project, categories) {
+    const rec = reconcile(project, categories);
+    const oldByName = new Map(project.playlist.categories.map(function (category) {
+      return [category.name, category];
+    }));
+    const newByName = new Map(categories.map(function (category) {
+      return [category.name, category];
+    }));
+    const songUpdates = [];
+    let updateCount = 0;
+
+    rec.kept.forEach(function (name) {
+      const before = oldByName.get(name);
+      const after = newByName.get(name);
+      const count = L.playlistCheck.countSongChanges(
+        before ? before.songs : [],
+        after ? after.songs : []
+      );
+      if (!count) return;
+      songUpdates.push({ name: name, count: count });
+      updateCount += count;
+    });
+    const updatedNames = new Set(songUpdates.map(function (item) { return item.name; }));
+
+    return {
+      mode: 'replace',
+      categories: copyCategories(categories),
+      addedCategoryNames: rec.added.slice(),
+      removedCategoryNames: rec.removed.slice(),
+      unchangedCategoryNames: rec.kept.filter(function (name) {
+        return !updatedNames.has(name);
+      }),
+      mergedCategories: [],
+      skipped: [],
+      songUpdates: songUpdates,
+      stats: {
+        newCategories: rec.added.length,
+        addedSongs: categories.reduce(function (total, category) {
+          return total + (category.songs || []).length;
+        }, 0),
+        skippedSongs: 0,
+        songUpdates: updateCount
+      }
+    };
+  }
+
+  function planAppend(project, categories) {
+    const existing = project.playlist.categories || [];
+    const planned = copyCategories(existing);
+    const byName = new Map();
+    planned.forEach(function (category, index) {
+      byName.set(category.name, { category: category, index: index });
+    });
+
+    const index = L.playlistCheck.index(existing);
+    const addedCategoryNames = [];
+    const mergedCategories = [];
+    const skipped = [];
+    let addedSongs = 0;
+    let skippedSongs = 0;
+
+    (categories || []).forEach(function (fileCategory) {
+      let slot = byName.get(fileCategory.name);
+      const isNew = !slot;
+      if (isNew) {
+        const created = { name: fileCategory.name, songs: [] };
+        planned.push(created);
+        slot = { category: created, index: planned.length - 1 };
+        byName.set(fileCategory.name, slot);
+        addedCategoryNames.push(fileCategory.name);
+      }
+
+      let categoryAdded = 0;
+      let categorySkipped = 0;
+      (fileCategory.songs || []).forEach(function (song) {
+        const songKey = L.playlistCheck.key(song);
+        const found = index.get(songKey);
+        if (found) {
+          skipped.push({ song: songKey, category: found.category });
+          categorySkipped += 1;
+          skippedSongs += 1;
+          return;
+        }
+        slot.category.songs.push(song);
+        index.set(songKey, {
+          category: slot.category.name,
+          categoryIndex: slot.index,
+          songIndex: slot.category.songs.length - 1
+        });
+        categoryAdded += 1;
+        addedSongs += 1;
+      });
+
+      if (isNew || categoryAdded > 0) {
+        mergedCategories.push({
+          name: slot.category.name,
+          addedSongs: categoryAdded,
+          skippedSongs: categorySkipped,
+          isNew: isNew
+        });
+      }
+    });
+
+    const mergedNames = new Set(mergedCategories.map(function (item) { return item.name; }));
+    const unchangedCategoryNames = existing.map(function (category) {
+      return category.name;
+    }).filter(function (name) {
+      return !mergedNames.has(name);
+    });
+
+    return {
+      mode: 'append',
+      categories: planned,
+      addedCategoryNames: addedCategoryNames,
+      removedCategoryNames: [],
+      unchangedCategoryNames: unchangedCategoryNames,
+      mergedCategories: mergedCategories,
+      skipped: skipped,
+      songUpdates: [],
+      stats: {
+        newCategories: addedCategoryNames.length,
+        addedSongs: addedSongs,
+        skippedSongs: skippedSongs,
+        songUpdates: 0
+      }
+    };
+  }
+
+  function planImport(project, categories, mode) {
+    if (mode === 'append') return planAppend(project, categories);
+    return planReplace(project, categories);
+  }
+
+  function applyImport(project, plan) {
+    const isPlan = plan && !Array.isArray(plan);
+    const categories = isPlan ? plan.categories : plan;
+    const mode = isPlan && plan.mode === 'append' ? 'append' : 'replace';
     const names = new Set(categories.map(function (category) { return category.name; }));
     let removedBlocks = 0;
-    project.pages.forEach(function (page) {
-      const before = page.elements.length;
-      page.elements = page.elements.filter(function (element) {
-        if (element.type === 'category' && !names.has(element.category)) {
-          removedBlocks += 1;
-          return false;
-        }
-        return true;
+
+    if (mode === 'replace') {
+      project.pages.forEach(function (page) {
+        page.elements = page.elements.filter(function (element) {
+          if (element.type === 'category' && !names.has(element.category)) {
+            removedBlocks += 1;
+            return false;
+          }
+          return true;
+        });
       });
-      if (!page.elements.length) {
-        /* keep the page even if it becomes empty */
-      }
-      if (page.elements.length !== before && page.elements.length === 0) {
-        /* no-op, explicit for readability */
-      }
-    });
-    project.playlist.categories = categories.map(function (category) {
-      return { name: category.name, songs: category.songs.slice() };
-    });
+    }
+
+    project.playlist.categories = copyCategories(categories);
     return { removedBlocks: removedBlocks };
   }
 
@@ -218,6 +355,7 @@
     parseText: parseText,
     importFile: importFile,
     reconcile: reconcile,
+    planImport: planImport,
     applyImport: applyImport,
     labelForEncoding: labelForEncoding
   };

@@ -40,6 +40,7 @@
 
       let activeIndex = working.activeIndex;
       let errors = {};
+      let duplicateAnalysis = null;
       let dragPayload = null;
       let gridRenderToken = 0;
       let modal = null;
@@ -75,7 +76,8 @@
           }
         });
 
-        const songPositions = new Map();
+        const analysis = L.playlistCheck.analyze(working.categories);
+        duplicateAnalysis = analysis;
         working.categories.forEach(function (category, categoryIndex) {
           category.songs.forEach(function (song, songIndex) {
             const key = 'song:' + categoryIndex + ':' + songIndex;
@@ -86,17 +88,15 @@
             }
             if (value.charAt(0) === '#') {
               issues[key] = '歌名不能以 # 开头';
-              return;
             }
-            if (!songPositions.has(value)) songPositions.set(value, []);
-            songPositions.get(value).push(key);
           });
         });
 
-        songPositions.forEach(function (keys) {
-          if (keys.length > 1) {
-            keys.forEach(function (key) { issues[key] = '歌名与另一首歌重复'; });
-          }
+        analysis.groups.forEach(function (group) {
+          group.occurrences.forEach(function (occurrence, occurrenceIndex) {
+            const key = 'song:' + occurrence.categoryIndex + ':' + occurrence.songIndex;
+            if (!issues[key]) issues[key] = L.playlistCheck.cellMessage(group, occurrenceIndex);
+          });
         });
 
         return issues;
@@ -191,6 +191,16 @@
       status.className = 'playlist-editor-status';
       status.setAttribute('aria-live', 'polite');
       modal.footer.insertBefore(status, modal.footer.firstChild);
+
+      const duplicates = document.createElement('div');
+      duplicates.className = 'playlist-editor-duplicates';
+      duplicates.hidden = true;
+      duplicates.innerHTML =
+        '<span class="playlist-editor-duplicates-summary"></span>' +
+        '<span class="playlist-editor-duplicates-hint"></span>';
+      modal.footer.insertBefore(duplicates, modal.footer.firstChild);
+      const duplicatesSummary = duplicates.querySelector('.playlist-editor-duplicates-summary');
+      const duplicatesHint = duplicates.querySelector('.playlist-editor-duplicates-hint');
 
       const actionButtons = modal.footer.querySelectorAll('button.btn');
       const applyButton = actionButtons[actionButtons.length - 1];
@@ -545,10 +555,8 @@
           return;
         }
         const category = currentCategory();
-        const exists = working.categories.some(function (item) {
-          return item.songs.some(function (song) { return song.trim() === value; });
-        });
-        if (exists) {
+        const existing = L.playlistCheck.index(working.categories);
+        if (existing.has(value)) {
           ui.toast('歌名已存在。', 'error');
           return;
         }
@@ -560,10 +568,7 @@
 
       function appendSongs(lines, announce) {
         const category = currentCategory();
-        const existing = new Set();
-        working.categories.forEach(function (item) {
-          item.songs.forEach(function (song) { existing.add(song.trim()); });
-        });
+        const existing = L.playlistCheck.index(working.categories);
         let added = 0;
         let skipped = 0;
         lines.forEach(function (line) {
@@ -572,7 +577,7 @@
             skipped += 1;
             return;
           }
-          existing.add(value);
+          existing.set(value, { category: category.name.trim(), categoryIndex: activeIndex, songIndex: category.songs.length });
           category.songs.push(value);
           added += 1;
         });
@@ -658,6 +663,10 @@
         const count = Object.keys(errors).length;
         status.textContent = count ? count + ' 处待修正' : '';
         status.classList.toggle('has-errors', count > 0);
+        const groups = duplicateAnalysis ? duplicateAnalysis.groups : [];
+        duplicates.hidden = groups.length === 0;
+        duplicatesSummary.textContent = groups.length ? L.playlistCheck.summary(groups) : '';
+        duplicatesHint.textContent = groups.length ? L.playlistCheck.HINT : '';
         if (applyButton) applyButton.disabled = count > 0;
         if (sortButton) sortButton.disabled = currentCategory().songs.length < 2;
 

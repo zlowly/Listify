@@ -102,6 +102,21 @@
 - **WHEN** 需要深拷贝项目或选择对象
 - **THEN** 调用统一的 `clone` 实现，不出现第二处 `JSON.parse(JSON.stringify(...))`
 
+### Requirement: 歌名查重单一实现
+歌名重复的判断、冲突位置定位与提示文案 MUST 只有一处实现（`js/playlist-check.js`）；导入追加计划与歌单编辑器 MUST 调用同一模块，MUST NOT 各自维护扫描逻辑。该模块 MUST 为纯逻辑，可在 Node 中加载，不依赖 DOM、canvas 或浏览器存储。
+
+#### Scenario: 单一定义
+- **WHEN** 在运行时脚本中搜索歌名查重与冲突定位的实现
+- **THEN** 仅命中 `js/playlist-check.js`，其余文件通过 `L.playlistCheck` 使用
+
+#### Scenario: 纯逻辑可测试
+- **WHEN** 在 Node 沙箱中加载 `js/playlist-check.js` 并传入分类数组
+- **THEN** 返回重复分组与冲突位置，无需 DOM、canvas 或浏览器存储
+
+#### Scenario: 两处结果一致
+- **WHEN** 同一组分类数据分别用于导入追加计划和歌单编辑器校验
+- **THEN** 得到的重复歌名分组、冲突位置与提示文案一致
+
 ### Requirement: 版本标识一致性
 
 构建标识 MUST 以仓库根 `VERSION` 为唯一来源。发布产物中 `index.html` 的缓存参数 `?v=<版本号>` 与 `js/app.js` 暴露的构建标识 MUST 一致；仓库源码 MUST NOT 维护与 `VERSION` 冲突的手工版本字面量。
