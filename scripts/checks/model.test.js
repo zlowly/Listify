@@ -5,7 +5,7 @@
  * 运行：node --test scripts/checks/model.test.js
  *
  * 这里不覆盖画布绘制、资产下载与 IndexedDB；只保证文本宽度、排序、
- * 字体栈规整、边距归一化与深拷贝的现有语义不被后续拆分改掉。
+ * 字体栈规整、边距归一化、旋转角度归一与深拷贝的现有语义不被后续拆分改掉。
  */
 
 const test = require('node:test');
@@ -306,4 +306,54 @@ test('页面尺寸预设：范围常量与默认项目尺寸', function () {
   const project = model.createDefaultProject();
   assert.deepEqual(plain(project.pageSize), { width: 1080, height: 1920 });
   assert.equal(model.matchPageSizePreset(project.pageSize.width, project.pageSize.height).id, '1080p-portrait');
+});
+
+test('旋转角度：wrapAngle 归一到 [-halfRange, halfRange]', function () {
+  assert.equal(model.wrapAngle(0, 180), 0);
+  assert.equal(model.wrapAngle(90, 180), 90);
+  assert.equal(model.wrapAngle(180, 180), 180);
+  assert.equal(model.wrapAngle(200, 180), -160);  // 内容图：200° → -160°
+  assert.equal(model.wrapAngle(400, 180), 40);    // 400 mod 360 = 40，在 [-180,180] 内
+  assert.equal(model.wrapAngle(-200, 180), 160);
+  assert.equal(model.wrapAngle(359.99, 360), 360); // 0.1 精度向上
+  assert.equal(model.wrapAngle(-179.96, 180), -180);
+  // 背景图（halfRange=360，输入范围 -360..360）：结果仍在范围内且与等价角度视觉一致
+  assert.equal(model.wrapAngle(400, 360), -320);
+  assert.equal(model.wrapAngle(-400, 360), 320);
+  assert.equal(model.wrapAngle(359, 360), 359);
+  // 非有限输入回落到 0
+  assert.equal(model.wrapAngle(NaN, 180), 0);
+  assert.equal(model.wrapAngle(undefined, 360), 0);
+});
+
+test('旋转角度：angleDeltaDeg 绕中心的角度增量（含 ±180° 接缝）', function () {
+  const rad = function (deg) { return deg * Math.PI / 180; };
+  // 基本象限
+  assert.equal(model.angleDeltaDeg(0, 0, 1, 0, 0, 1), 90);     // 0° → 90°
+  assert.equal(model.angleDeltaDeg(0, 0, 0, 1, 1, 0), -90);    // 90° → 0°
+  assert.equal(model.angleDeltaDeg(0, 0, 1, 0, -1, 0), 180);   // 半圈
+  assert.equal(model.angleDeltaDeg(0, 0, 1, 0, 1, 0), 0);      // 未移动
+  // 跨越 ±180° 接缝：170° → 190° 应为 +20° 而非 -340°
+  assert.equal(
+    model.angleDeltaDeg(0, 0, Math.cos(rad(170)), Math.sin(rad(170)), Math.cos(rad(190)), Math.sin(rad(190))),
+    20
+  );
+  assert.equal(
+    model.angleDeltaDeg(0, 0, Math.cos(rad(190)), Math.sin(rad(190)), Math.cos(rad(170)), Math.sin(rad(170))),
+    -20
+  );
+  // 非零中心
+  assert.equal(model.angleDeltaDeg(100, 100, 200, 100, 100, 200), 90);
+});
+
+test('旋转角度：snapAngle 吸附到 step 整数倍', function () {
+  assert.equal(model.snapAngle(7, 15), 0);
+  assert.equal(model.snapAngle(8, 15), 15);
+  assert.equal(model.snapAngle(14.5, 15), 15);  // 吸附边界
+  assert.equal(model.snapAngle(22, 15), 15);
+  assert.equal(model.snapAngle(23, 15), 30);
+  assert.equal(model.snapAngle(-8, 15), -15);
+  assert.equal(model.snapAngle(0, 15), 0);
+  assert.equal(model.snapAngle(7), 7);          // 默认 step=1
+  assert.equal(model.snapAngle(NaN, 15), 0);
 });

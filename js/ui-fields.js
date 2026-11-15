@@ -196,11 +196,7 @@
   }
 
   function normalizeAngle(value) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return 0;
-    let angle = ((number % 360) + 360) % 360;
-    if (angle > 180) angle -= 360;
-    return Math.round(angle * 10) / 10;
+    return L.model.wrapAngle(value, 180);
   }
 
   /* 无状态字段工厂与分组折叠辅助：供属性面板与 ui.js 复用 */

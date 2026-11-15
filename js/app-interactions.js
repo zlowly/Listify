@@ -55,6 +55,30 @@
     
         const handle = appCtx.chrome.handleAt(point.x, point.y);
         if (handle) {
+          if (handle.type === 'rotate' || handle.type === 'rotate-background') {
+            const isBackground = handle.type === 'rotate-background';
+            const target = isBackground ? handle.image : handle.element;
+            if (isBackground) actions.ensureCustomBackgroundImage(handle.image);
+            const pp = appCtx.viewport.toPage(point.x, point.y);
+            const centerX = target.x + target.width / 2;
+            const centerY = target.y + target.height / 2;
+            surface.drag = {
+              type: 'rotate',
+              background: isBackground,
+              element: isBackground ? null : handle.element,
+              image: isBackground ? handle.image : null,
+              center: { x: centerX, y: centerY },
+              startPointerX: pp.x,
+              startPointerY: pp.y,
+              startRotation: Number(target.rotation) || 0,
+              startClientX: event.clientX,
+              startClientY: event.clientY,
+              liveAngle: Number(target.rotation) || 0
+            };
+            actions.pushUndo(isBackground ? '旋转背景图片' : '旋转图片');
+            beginPointer(event);
+            return;
+          }
           if (handle.type === 'resize-background') {
             actions.ensureCustomBackgroundImage(handle.image);
             const bounds = actions.backgroundImageBounds(handle.image);
@@ -232,6 +256,22 @@
           return;
         }
     
+        if (surface.drag.type === 'rotate') {
+          const drag = surface.drag;
+          const sp = appCtx.chrome.overlayPoint(event);
+          const pp = appCtx.viewport.toPage(sp.x, sp.y);
+          const delta = model.angleDeltaDeg(drag.center.x, drag.center.y,
+            drag.startPointerX, drag.startPointerY, pp.x, pp.y);
+          let newRotation = drag.startRotation + delta;
+          if (!(event.ctrlKey || event.metaKey)) newRotation = model.snapAngle(newRotation, 15);
+          const finalRotation = model.wrapAngle(newRotation, drag.background ? 360 : 180);
+          if (drag.background) drag.image.rotation = finalRotation;
+          else drag.element.rotation = finalRotation;
+          drag.liveAngle = finalRotation;
+          appCtx.viewport.scheduleRedraw(drag.background ? ['bg', 'overlay'] : ['content', 'overlay']);
+          return;
+        }
+    
         if (surface.drag.type === 'resize') {
           resizeDrag(dx, dy);
           appCtx.viewport.scheduleRedraw(surface.drag.background ? ['bg', 'overlay'] : ['content', 'overlay']);
@@ -348,6 +388,10 @@
         if (finished.type === 'move-background' && finished.image) {
           finished.image.x = Math.round(finished.image.x);
           finished.image.y = Math.round(finished.image.y);
+        }
+        if (finished.type === 'rotate') {
+          if (finished.background && finished.image) finished.image.rotation = Math.round(finished.image.rotation);
+          if (finished.element) finished.element.rotation = Math.round(finished.element.rotation);
         }
         if (finished.type === 'resize' && finished.background && finished.image) {
           finished.image.x = Math.round(finished.image.x);

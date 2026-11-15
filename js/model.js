@@ -560,6 +560,35 @@
     return { x: x * cos - y * sin, y: x * sin + y * cos };
   }
 
+  // 把任意角度归一到 [-halfRange, halfRange]（0.1 精度），作为旋转角度的规范存储值。
+  function wrapAngle(degrees, halfRange) {
+    const number = Number(degrees);
+    if (!Number.isFinite(number)) return 0;
+    const half = (Number(halfRange) > 0 ? Number(halfRange) : 180);
+    const range = half * 2;
+    let angle = ((number % range) + range) % range;
+    if (angle > half) angle -= range;
+    return Math.round(angle * 10) / 10;
+  }
+
+  // 指针绕中心 (cx,cy) 从 (x0,y0) 到 (x1,y1) 的角度增量（度），归一到 (-180,180] 防 ±180° 接缝跳变。
+  function angleDeltaDeg(cx, cy, x0, y0, x1, y1) {
+    const from = Math.atan2(y0 - cy, x0 - cx);
+    const to = Math.atan2(y1 - cy, x1 - cx);
+    let delta = (to - from) * 180 / Math.PI;
+    delta = ((delta % 360) + 360) % 360;
+    if (delta > 180) delta -= 360;
+    return Math.round(delta * 10) / 10;
+  }
+
+  // 把角度吸附到 step 的整数倍；step 非正数时按 1 处理。
+  function snapAngle(degrees, step) {
+    const number = Number(degrees);
+    if (!Number.isFinite(number)) return 0;
+    const s = (Number(step) > 0 ? Number(step) : 1);
+    return Math.round(number / s) * s;
+  }
+
   function computeImageResize(start, handle, delta, keepRatio) {
     const width0 = start.width;
     const height0 = start.height;
@@ -824,6 +853,9 @@
     createImageElement: createImageElement,
     rotationRadians: rotationRadians,
     rotateVector: rotateVector,
+    wrapAngle: wrapAngle,
+    angleDeltaDeg: angleDeltaDeg,
+    snapAngle: snapAngle,
     computeImageResize: computeImageResize,
     migrateImageRect: migrateImageRect,
     getPage: getPage,

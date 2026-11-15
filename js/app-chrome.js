@@ -27,6 +27,16 @@
         se: 45, nw: 45,
         ne: 135, sw: 135
       };
+      const ROTATE_STEM_LENGTH = 24;   // 茎线长度（屏幕像素，与缩放无关）
+      const ROTATE_HANDLE_HIT = 10;    // 旋转手柄命中半径（屏幕像素）
+      function rotateCursorSvg() {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+          '<path d="M25 16 A9 9 0 1 1 16 7" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>' +
+          '<path d="M25 16 A9 9 0 1 1 16 7" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round"/>' +
+          '<path d="M11 2 L22 7 L11 12 Z" fill="#ffffff" stroke="#111827" stroke-width="1" stroke-linejoin="round"/></svg>';
+      }
+      const ROTATE_CURSOR = 'url("data:image/svg+xml;charset=utf-8,' +
+        encodeURIComponent(rotateCursorSvg()) + '") 16 16, grab';
 
       function drawChrome(page) {
         if (!surface.overlayChromeCtx) return;
@@ -227,6 +237,60 @@
         });
       }
     
+      // 旋转手柄：自选框顶边中点沿旋转后的法线向外伸出一段固定屏幕长度的茎线，末端为圆形手柄。
+      function rotateHandlePoint(element) {
+        const width = element.width;
+        const height = element.height;
+        if (!(width > 0) || !(height > 0)) return null;
+        const centerX = element.x + width / 2;
+        const centerY = element.y + height / 2;
+        const radians = model.rotationRadians(element);
+        const topMid = model.rotateVector(0, -height / 2, radians);
+        const normal = model.rotateVector(0, -1, radians);
+        const stemStart = screenFromPage(centerX + topMid.x, centerY + topMid.y);
+        return {
+          stemStart: stemStart,
+          handle: {
+            x: stemStart.x + normal.x * ROTATE_STEM_LENGTH,
+            y: stemStart.y + normal.y * ROTATE_STEM_LENGTH
+          }
+        };
+      }
+    
+      function drawRotateHandle(ctx, rp) {
+        if (!rp) return;
+        ctx.strokeStyle = '#2563eb';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(rp.stemStart.x, rp.stemStart.y);
+        ctx.lineTo(rp.handle.x, rp.handle.y);
+        ctx.stroke();
+        drawRoundHandle(ctx, rp.handle.x, rp.handle.y, 5, '#2563eb', '#ffffff');
+      }
+    
+      function drawRotateBadge(ctx, rp, angle) {
+        if (!rp) return;
+        const text = Math.round(angle) + '°';
+        ctx.save();
+        ctx.font = '600 12px "Microsoft YaHei", "PingFang SC", sans-serif';
+        const textWidth = ctx.measureText(text).width;
+        const bw = textWidth + 14;
+        const bh = 20;
+        const bx = rp.handle.x - bw / 2;
+        const by = rp.handle.y - 14 - bh;
+        ctx.fillStyle = '#1d4ed8';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 6);
+        else ctx.rect(bx, by, bw, bh);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, rp.handle.x, by + bh / 2 + 0.5);
+        ctx.restore();
+      }
+    
       function handlePoints(bounds, element) {
         if (element.type === 'image') return imageHandlePoints(element);
         const x = viewport.offsetX + bounds.x * viewport.scale;
@@ -272,6 +336,13 @@
         handlePoints(bounds, element).forEach(function (handle) {
           drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
         });
+        if (element.type === 'image') {
+          const rp = rotateHandlePoint(element);
+          drawRotateHandle(ctx, rp);
+          if (surface.drag && surface.drag.type === 'rotate' && !surface.drag.background) {
+            drawRotateBadge(ctx, rp, surface.drag.liveAngle || 0);
+          }
+        }
         ctx.restore();
     
         if (element.type === 'category') drawTableDividers(ctx, page, element);
@@ -303,6 +374,11 @@
         imageHandlePoints(shape).forEach(function (handle) {
           drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
         });
+        const rp = rotateHandlePoint(shape);
+        drawRotateHandle(ctx, rp);
+        if (surface.drag && surface.drag.type === 'rotate' && surface.drag.background) {
+          drawRotateBadge(ctx, rp, surface.drag.liveAngle || 0);
+        }
         ctx.restore();
       }
     
@@ -353,6 +429,10 @@
             height: bounds.height,
             rotation: backgroundImage.rotation
           };
+          const rpBg = rotateHandlePoint(shape);
+          if (rpBg && Math.abs(screenX - rpBg.handle.x) <= ROTATE_HANDLE_HIT && Math.abs(screenY - rpBg.handle.y) <= ROTATE_HANDLE_HIT) {
+            return { type: 'rotate-background', image: backgroundImage, cursor: ROTATE_CURSOR };
+          }
           for (const point of imageHandlePoints(shape)) {
             if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
               return {
@@ -369,6 +449,12 @@
         const page = actions.currentPage();
         const element = actions.selectedElement();
         if (!page || !element) return null;
+        if (element.type === 'image') {
+          const rpEl = rotateHandlePoint(element);
+          if (rpEl && Math.abs(screenX - rpEl.handle.x) <= ROTATE_HANDLE_HIT && Math.abs(screenY - rpEl.handle.y) <= ROTATE_HANDLE_HIT) {
+            return { type: 'rotate', element: element, cursor: ROTATE_CURSOR };
+          }
+        }
         const bounds = renderer.elementBounds(state.project, page, element);
         const points = handlePoints(bounds, element);
         for (const point of points) {
