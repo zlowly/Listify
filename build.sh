@@ -6,6 +6,10 @@ set -euo pipefail
 DIST_DIR="dist"
 VERSION_FILE="VERSION"
 
+# 预置生成物预算：与 scripts/build-presets.py 保持一致。
+CHUNK_BUDGET=$((700 * 1024))
+TOTAL_B64_BUDGET=$((5 * 1024 * 1024))
+
 # 仅开发期使用、不得进入发布产物的文件（源文件可以存在，构建时跳过拷贝）
 DEV_ONLY_FILES=("js/dev-checks.js")
 
@@ -227,6 +231,63 @@ check_preset_chunks() {
   echo "分类块校验: ${#ids[@]} 个（${ids[*]}）均存在于产物"
 }
 
+# data URL 里 base64 载荷的字节数（不含 MIME 前缀）
+preset_base64_bytes() {
+  awk '
+    {
+      rest = $0
+      while (match(rest, /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+\/=]*/)) {
+        url = substr(rest, RSTART, RLENGTH)
+        comma = index(url, ",")
+        total += length(url) - comma
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+    }
+    END { print total + 0 }
+  ' "$1"
+}
+
+check_preset_budget() {
+  local dir="$DIST_DIR/js/presets-data"
+  local files=() f
+  while IFS= read -r -d '' f; do
+    files+=("$f")
+  done < <(find "$dir" -maxdepth 1 -name '*.js' -print0)
+  ((${#files[@]} > 0)) || die "产物中没有预置生成物文件: js/presets-data/*.js"
+
+  local total=0 size b64 name
+  local over=()
+  for f in "${files[@]}"; do
+    name=$(basename "$f")
+    size=$(wc -c <"$f")
+    b64=$(preset_base64_bytes "$f")
+    total=$((total + b64))
+    if [[ "$name" == "index.js" ]]; then
+      continue
+    fi
+    grep -q 'data:image/' "$f" ||
+      die "预置分类块内容为空: js/presets-data/$name（未找到任何 data:image/ 条目）"
+    if ((size > CHUNK_BUDGET)); then
+      over+=("分类块 js/presets-data/$name ${size} 字节超过 700 KB")
+    fi
+  done
+  if ((total > TOTAL_B64_BUDGET)); then
+    over+=("预置数据 base64 合计 ${total} 字节超过 5.0 MB（${TOTAL_B64_BUDGET} 字节）")
+  fi
+  if ((${#over[@]} > 0)); then
+    if grep -q 'data:image/avif' "${files[@]}"; then
+      die "预置生成物超出体积预算: ${over[*]}"
+    fi
+    # WebP 回退生成物（--format webp --quality 78）按设计超过预算，仅提示。
+    local msg
+    for msg in "${over[@]}"; do
+      printf '警告: %s（WebP 回退生成物，仅提示）\n' "$msg" >&2
+    done
+  fi
+  echo "预置体积校验: base64 合计 ${total} 字节（预算 ${TOTAL_B64_BUDGET}）"
+}
+
+
 assert_dist_clean() {
   local bad=() p
   for p in scripts presets js/presets-data.js js/dev-checks.js; do
@@ -260,6 +321,7 @@ build_dist() {
   inject_build_version
   inject_presets_version
   check_preset_chunks
+  check_preset_budget
   assert_dist_clean
 
   BUILD_STARTED=0

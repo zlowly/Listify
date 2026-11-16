@@ -71,15 +71,19 @@
 ## ADDED Requirements
 
 ### Requirement: 预置生成物完整性
-`build.sh` SHALL 校验预置生成物的结构与体积：索引中 `chunks` 列出的每个分类块 MUST 存在于产物；每个分类块 SHALL 至少包含一个 `data:image/avif` 或 `data:image/webp` 的 data URL；索引与全部分类块的 base64 字节合计 SHALL ≤ 5.0MB；单个分类块 SHALL ≤ 700KB。任一条不满足 SHALL 使构建失败并指名违规文件或超限项。构建 MUST NOT 把生成物重新编码为其它格式。
+`build.sh` SHALL 校验预置生成物的结构与体积：索引中 `chunks` 列出的每个分类块 MUST 存在于产物；每个分类块 SHALL 至少包含一个 `data:image/avif` 或 `data:image/webp` 的 data URL；索引与全部分类块的 base64 字节合计 SHALL ≤ 5.0MB；单个分类块 SHALL ≤ 700KB。产物含 AVIF 生成物（默认构建）时任一条不满足 SHALL 使构建失败并指名违规文件或超限项；WebP 回退生成物超限时 SHALL 打印警告但继续构建，保证回退产物仍可发布。构建 MUST NOT 把生成物重新编码为其它格式。
 
 #### Scenario: 块内容为空
 - **WHEN** 某分类块文件存在但不含任何 `data:image/` 条目
 - **THEN** 构建失败并指出该块
 
 #### Scenario: 生成物超限
-- **WHEN** 产物中的预置数据合计超过 5.0MB 或单块超过 700KB
+- **WHEN** AVIF 生成物的预置数据合计超过 5.0MB 或单块超过 700KB
 - **THEN** 构建失败并打印实际体积与超限项
+
+#### Scenario: WebP 回退超限
+- **WHEN** 用 `--format webp --quality 78` 生成约 7.6MB base64 的回退产物后构建
+- **THEN** 构建打印体积超限警告但仍成功产出，产物结构与 AVIF 版本一致
 
 #### Scenario: 产物完整
 - **WHEN** 使用默认 AVIF 生成物执行 `./build.sh --zip`

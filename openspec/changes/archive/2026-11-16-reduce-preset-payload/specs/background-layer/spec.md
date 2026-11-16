@@ -5,7 +5,7 @@
 ### Requirement: 预置素材清单
 项目 SHALL 随附一份配置驱动的预置素材目录，拆为「索引」与按分类的数据块；索引 SHALL 仅在首次打开选背景弹窗时加载，MUST NOT 进入首屏；索引 SHALL 含全部分类及每张预置的稳定 ID、分类、名称、kind、建议填充色、默认定位、默认不透明度、缩略图、来源与许可；完整素材数据 SHALL 按分类分块存放，仅在需要时加载；预置 ID MUST 只增不改不删，保证目录更新不影响已使用预置的项目。
 
-完整素材 SHALL 保持长边 1400（源图小于 1400 的保持原尺寸），并 SHALL 以 AVIF 编码生成 data URL；`solid` 分类的渐变素材 SHALL 保持 WebP q78，分类块 MAY 混合 `data:image/avif` 与 `data:image/webp`。data URL 的 MIME SHALL 与实际字节格式一致。缩略图 SHALL 为 128px WebP q60（不透明图适配 160×200 框、透明图居中裁剪）。索引与全部分类块合计的 base64 体积 SHALL ≤ 5.0MB，索引 SHALL ≤ 200KB。运行时 SHALL 按 data URL 的 MIME 解码，MUST NOT 依赖格式特性检测或在运行时切换格式；目标浏览器 SHALL 为 Chrome 85+。编码格式变更 MUST NOT 影响已物化到项目中的预置（其仍是普通图片资产）。
+完整素材 SHALL 保持长边 1400（源图小于 1400 的保持原尺寸），并 SHALL 以 AVIF 编码生成 data URL；`solid` 分类的渐变素材 SHALL 保持 WebP q78，分类块 MAY 混合 `data:image/avif` 与 `data:image/webp`。data URL 的 MIME SHALL 与实际字节格式一致。缩略图 SHALL 为长边 128 的 WebP q60（不透明图等比缩放到长边 128，透明图居中裁剪为 128×128）。索引与全部分类块合计的 base64 体积 SHALL ≤ 5.0MB，索引 SHALL ≤ 200KB。运行时 SHALL 按 data URL 的 MIME 解码，MUST NOT 依赖格式特性检测或在运行时切换格式；目标浏览器 SHALL 为 Chrome 85+。编码格式变更 MUST NOT 影响已物化到项目中的预置（其仍是普通图片资产）。
 
 #### Scenario: 懒加载
 - **WHEN** 用户首次打开"选择背景图"弹窗
@@ -50,7 +50,7 @@
 ### Requirement: 预置库配置与打包
 预置库的分类、目录、显示名与素材顺序 SHALL 来自 `presets/manifest.json`，该文件 SHALL 在打包期读取并 MUST NOT 在运行期读取；分类 SHALL 对应 `presets/` 下的一层子目录，每张图片 SHALL 在配置中声明显示名，缺名或引用不存在的文件 SHALL 使打包失败并指出具体条目；目录中未在配置声明的文件 SHALL 跳过并给出警告，标记为隐藏的图片 SHALL 保留在磁盘但不进入目录；分类顺序与图片顺序 SHALL 等于配置中的声明顺序；重新打包 SHALL 是配置或素材变更生效的唯一方式。
 
-打包 SHALL 支持 `--format avif|webp` 与 `--quality <n>`，默认 SHALL 为 `avif` / `55`；`presets/` 下的 WebP 源图 SHALL 作为唯一编码源，打包 MUST NOT 用生成格式覆盖或替换源图，MUST NOT 在 `presets/` 下写入 `.avif` 文件；`solid` 分类 SHALL 忽略 `--format` 并固定使用 WebP q78。打包 SHALL 输出每类体积报告，并在总 base64 体积、单条 data URL 或单个分类块超出预算时失败；AVIF 能力缺失时 SHALL 失败并提示安装 libheif 或使用 `--format webp` 回退，MUST NOT 静默降级格式。
+打包 SHALL 支持 `--format avif|webp` 与 `--quality <n>`，默认 SHALL 为 `avif` / `58`（按本机 ImageMagick/libheif 校准的档位；`--quality` 缺省时按格式取默认值，webp 为 78）；`presets/` 下的 WebP 源图 SHALL 作为唯一编码源，打包 MUST NOT 用生成格式覆盖或替换源图，MUST NOT 在 `presets/` 下写入 `.avif` 文件；`solid` 分类 SHALL 忽略 `--format` 并固定使用 WebP q78。打包 SHALL 输出每类体积报告，并在总 base64 体积、单条 data URL 或单个分类块超出预算时失败；显式 `--format webp` 的应急回退构建 SHALL 只提示超限并继续产出，保证回退产物可加载。AVIF 能力缺失时 SHALL 失败并提示安装 libheif 或使用 `--format webp` 回退，MUST NOT 静默降级格式。
 
 #### Scenario: 改名生效
 - **WHEN** 维护者修改某张图片的显示名并重新打包
@@ -95,10 +95,10 @@
 ## ADDED Requirements
 
 ### Requirement: 预置体积与画质门禁
-打包 SHALL 在写出生成物前后执行体积与画质门禁：索引与全部分类块的 base64 字节合计 SHALL ≤ 5.0MB；单条 data URL SHALL ≤ 700KB；单个分类块 SHALL ≤ 700KB；抽样至少 6 张最大素材计算 PSNR，均值 SHALL ≥ 40 dB、单张 SHALL ≥ 28 dB。任一条件不满足 SHALL 使打包失败并打印具体超限项，MUST NOT 写出不满足门禁的生成物。打包 SHALL 输出每类原图字节、base64 字节、条目数与最大条目，便于定位体积来源。
+打包 SHALL 在写出生成物前后执行体积与画质门禁：索引与全部分类块的 base64 字节合计 SHALL ≤ 5.0MB；单条 data URL SHALL ≤ 700KB；单个分类块 SHALL ≤ 700KB；抽样至少 6 张最大素材计算 PSNR，均值 SHALL ≥ 40 dB、单张 SHALL ≥ 28 dB。默认 AVIF 路径上任一条件不满足 SHALL 使打包失败并打印具体超限项，MUST NOT 写出不满足门禁的生成物；显式 `--format webp` 的应急回退构建 SHOULD 打印同样的超限项，但不阻断产出。打包 SHALL 输出每类原图字节、base64 字节、条目数与最大条目，便于定位体积来源。
 
 #### Scenario: 总体积超限
-- **WHEN** 生成物 base64 合计超过 5.0MB
+- **WHEN** 默认 AVIF 生成物 base64 合计超过 5.0MB
 - **THEN** 打包失败并打印当前总量与超限差值，不覆盖既有生成物
 
 #### Scenario: 单条超限
@@ -119,4 +119,8 @@
 
 #### Scenario: 门禁通过
 - **WHEN** 使用默认参数打包全部 38 张素材
-- **THEN** 门禁全部通过，总 base64 体积约 4.4–4.7MB，脚本成功退出
+- **THEN** 门禁全部通过，总 base64 体积约 4.8–4.9MB、抽样 PSNR 均值约 41dB，脚本成功退出
+
+#### Scenario: WebP 回退不阻断
+- **WHEN** 以 `--format webp --quality 78` 生成约 7.6MB base64 的回退产物
+- **THEN** 打包打印体积超限警告但仍写出全部分类块与索引，回退产物可被运行时加载

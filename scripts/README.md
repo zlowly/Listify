@@ -3,26 +3,77 @@
 预置素材库的生成与打包工具，以及开发期回归检查。运行时**不依赖**这些脚本：它们只在开发期把 `presets/` 里的素材
 编译成 `js/presets-data/` 的经典脚本。仓库保持零构建，双击 `index.html` 即可使用。
 
-依赖：ImageMagick 7（`magick`，需带 WebP 支持）与 python3 标准库；不引入任何包管理器或第三方 Python 库。
+依赖：ImageMagick 7（`magick`，需带 WebP；默认输出 AVIF，还需要 libheif 支持，可用
+`magick -list format | grep -E 'WEBP|AVIF'` 检查）与 python3 标准库；不引入任何包管理器或第三方 Python 库。
+AVIF 编码器只在打包期使用，不进入 `index.html`、`js/` 或 `vendor/`。
 
 ## 目录与产物
 
 ```
 presets/manifest.json          配置（分类、显示名、来源、许可；唯一事实源）
-presets/<分类目录>/*.webp      素材（长边 ≤ 1400，透明图保留 alpha）
+presets/<分类目录>/*.webp      素材源图（长边 ≤ 1400，WebP q78，透明图保留 alpha）
 presets/SOURCES.md             逐条来源与许可
-scripts/build-presets.sh       打包入口（校验 + 归一化 + 生成）
+scripts/build-presets.sh       打包入口（校验依赖 + 能力检测 + 生成）
 scripts/build-presets.py       打包实现（唯一决策者）
 scripts/gen-selfmade.sh        只重新生成 4 张渐变 + 颗粒叠层
 scripts/gen-selfmade.py        上述素材的像素生成实现
 scripts/checks/loader.js       Node vm 沙箱与确定性 canvas 桩
 scripts/checks/*.test.js       零依赖回归测试（node --test）
 
-js/presets-data/index.js       索引（分类、条目元数据、160px 缩略图、chunks）
+js/presets-data/index.js       索引（分类、条目元数据、128px 缩略图、chunks/chunkMap）
 js/presets-data/<分类>.js      分类块（仅 id -> data URL）
 ```
 
 `js/presets-data/` 是生成物，文件头标注「请勿手改」。不要直接编辑它们。
+
+## 素材编码
+
+- **源图**：`presets/<分类目录>/*.webp`，长边 ≤1400、WebP q78。它是唯一编码源，打包**不会**改写或新增 `presets/` 下的文件。
+- **完整素材**：长边保持 1400（源更小的保持原尺寸），转码为 **AVIF** 并写成 `data:image/avif`。
+  编码参数为 `-quality 58 -define heic:speed=0 -define heic:chroma=444`。
+- **`solid` 分类**（4 张渐变）：固定 **WebP q78**，data URL 为 `data:image/webp`；同一个分类块里可以混合两种 MIME。
+- **缩略图**：**WebP q60、长边 128**（不透明图等比缩放到长边 128，透明图居中裁剪为 128×128），
+  渲染进索引，不落盘。
+- **转码只写临时目录**：每次打包都是「WebP q78 源 → AVIF q58」的一次转码，读取字节后删除临时文件；
+  `presets/` 不会出现 `.avif`，连续两次打包得到完全相同的字节，不会累积代际损失。
+
+### 参数
+
+```sh
+./scripts/build-presets.sh                             # 默认：AVIF q58
+./scripts/build-presets.sh --quality 62                # 提高质量（体积变大，可能触发门禁）
+./scripts/build-presets.sh --format webp --quality 78  # 回退到旧格式（WebP q78）
+```
+
+`--format` / `--quality` 只从命令行读取，不读环境变量；`--quality` 缺省时按格式取该格式的默认值
+（`avif=58`、`webp=78`）。`--quality` 显式给出时对两种格式都生效；WebP q78 会直接复用源图字节（不二次压缩）。
+
+### 质量档位校准
+
+ImageMagick/libheif 的 `-quality` 与 Pillow（本变更立项时的实测）不是同一刻度：直接写 55 会让抽样 PSNR 掉到
+40 dB 门禁以下。6 张最大素材实测（`heic:speed=0`、`heic:chroma=444`，PSNR 为源 WebP vs 生成 AVIF、全通道）：
+
+| quality | 6 张 base64 | PSNR 均值 | PSNR 最低 |
+| --- | --- | --- | --- |
+| 57 | 1.84 MB | 40.64 dB | 32.89 dB |
+| 58 | 1.94 MB | 41.06 dB | 33.33 dB |
+| 59 | 2.03 MB | 41.38 dB | 33.82 dB |
+
+全库 34 张非 solid 素材：q58 为 4.76 MB base64（加索引缩略图约 4.86 MB），q60 已到 5.20 MB、超出 5.0 MB 预算。
+因此默认取 **q58**：抽样 6 张 PSNR 均值 41.06 dB（门禁 ≥40 dB），全库 34 张均值 43.17 dB，base64 合计约 4.9 MB。
+
+## 体积与画质门禁
+
+`build-presets.py` 在写盘前计算全部门禁，任一不满足即失败且不覆盖既有生成物：
+
+- 索引 + 全部分类块的 base64 合计 ≤ 5.0 MB；
+- 单条 data URL ≤ 700 KB；
+- 单个分类块 ≤ 700 KB（超出预算时先按 `<分类>-N.js` 拆片）；
+- 索引 `index.js` ≤ 200 KB；
+- 抽样 6 张最大素材的 PSNR：均值 ≥ 40 dB、单张 ≥ 28 dB。
+
+默认的 AVIF 路径是硬门禁。`--format webp` 是文档记录的应急回退：WebP q78 产物约 7.6 MB base64、单块可达 900 KB，
+此时门禁只打印警告并继续写出，保证回退产物仍可加载；`build.sh` 对 WebP 生成物同样只警告，对 AVIF 生成物超限仍失败。
 
 ## 回归检查
 
@@ -63,8 +114,8 @@ node --test scripts/checks/*.test.js
    文件名用语义化英文（会成为预置 id，需全局唯一）。
 2. 在 `presets/manifest.json` 对应分类的 `images` 里加一条：`"文件名.webp": "中文显示名"`。
    配置键统一写 `.webp`；脚本会先找同名 `.webp`，找不到时按同 stem 的其他扩展名回退并转换。
-3. 运行 `./scripts/build-presets.sh`。脚本会把原图转成长边 1400 的 WebP q78（透明图保留 alpha）、
-   删除转换前的非 WebP 源文件、生成缩略图并重写 `js/presets-data/`。
+3. 运行 `./scripts/build-presets.sh`。脚本会把原图归一化为长边 1400 的 WebP q78（透明图保留 alpha）、
+   删除转换前的非 WebP 源文件，再转码为 AVIF q58、生成缩略图并重写 `js/presets-data/`。
 4. 打开页面（`file://`）检查弹窗分类与缩略图。
 
 约束：同一目录下同 stem 存在多份（如 `foo.jpg` 和 `foo.png`）会报错；配置引用不存在的文件、
@@ -73,7 +124,7 @@ node --test scripts/checks/*.test.js
 ### 替换素材
 
 用新图覆盖同名文件（或保持 stem 不变），然后运行 `./scripts/build-presets.sh`。
-已归一化（WebP 且长边 ≤ 1400）的文件会直接复用字节，不会二次压缩。
+已归一化（WebP 且长边 ≤ 1400）的文件会直接复用字节，不会二次压缩；AVIF 每次都从这份 WebP 源重新生成。
 
 ### 改名 / 暂时下架
 
@@ -100,14 +151,24 @@ node --test scripts/checks/*.test.js
 
 1. 编辑 `scripts/gen-selfmade.py`（像素参数）或 `scripts/gen-selfmade.sh`（编码参数）。
 2. 运行 `./scripts/gen-selfmade.sh`，它只写 `presets/solid/*.webp` 与 `presets/overlay/grain-overlay.webp`。
-3. 运行 `./scripts/build-presets.sh` 更新索引/分类块。
+3. 运行 `./scripts/build-presets.sh` 更新索引/分类块（`solid` 仍按 WebP q78 输出）。
 
 不要用 `gen-selfmade.sh` 生成其他素材；第三方素材一律通过 `manifest.json` 管理。
 
+### 回退到 WebP 生成物
+
+```sh
+./scripts/build-presets.sh --format webp --quality 78
+```
+
+产物恢复为 `data:image/webp`，运行时无需任何改动即可加载；因为源图就是 WebP q78，这一步直接复用源字节、不产生代际损失。
+回退产物体积约 7.6 MB base64，超出 5.0 MB 预算，脚本与 `./build.sh` 只打印警告。改回 AVIF 只需重新运行不带参数的打包。
+
 ### 发版
 
-在仓库根目录运行 `./build.sh`（需要时加 `--zip`）。发布构建会复制 `js/` 全部子目录并校验
-`index.js` 的 `chunks` 对应的分类块是否齐全；`presets/` 与 `scripts/` 不进产物。
+在仓库根目录运行 `./build.sh`（需要时加 `--zip`）。发布构建会复制 `js/` 全部子目录，校验
+`index.js` 的 `chunks` 对应的分类块是否齐全、每个分类块是否至少含一条 data URL，并校验预置数据体积
+（AVIF 生成物超限即失败，WebP 回退生成物只警告）；`presets/` 与 `scripts/` 不进产物。
 发版前请确保已经跑过 `./scripts/build-presets.sh`，且 `git status` 里的生成物是最新的。
 
 ## 从零复现
@@ -115,9 +176,9 @@ node --test scripts/checks/*.test.js
 在已 Clone 的仓库里（素材已在 `presets/` 入库）：
 
 ```sh
-./scripts/build-presets.sh      # 重写 js/presets-data/（7 个文件）
-./build.sh                      # 可选：验证发布产物包含索引与 6 个分类块
+./scripts/build-presets.sh      # 重写 js/presets-data/（索引 + 分类块；依赖 libheif，约 6 分钟）
+./build.sh                      # 可选：验证发布产物包含索引与分类块、预置体积在预算内
 ```
 
-因为已归一化的 WebP 会被直接复用，重复运行不会产生代际画质损失；生成结果应与仓库中的
-`js/presets-data/` 一致。
+因为源图会被直接复用（WebP 路径）或只做一次「WebP q78 → AVIF q58」转码（默认路径），重复运行不会累积画质损失；
+在相同的 ImageMagick/libheif 版本下，生成结果应与仓库中的 `js/presets-data/` 逐字节一致。
