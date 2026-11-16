@@ -61,54 +61,71 @@
         });
       }
     
-      function planFor(categories, mode) {
-        return L.importer.planImport(state.project, categories, mode);
+      function planFor(parsed, mode) {
+        return L.importer.planImport(state.project, parsed, mode);
       }
 
-      function replacePreviewHtml(plan) {
-        const lines = [];
-        if (plan.addedCategoryNames.length) {
-          lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(plan.addedCategoryNames.join('、')) + '</p>');
-        }
-        if (plan.removedCategoryNames.length) {
-          lines.push('<p><strong>将删除分类块：</strong>' + escapeHtml(plan.removedCategoryNames.join('、')) + '</p>');
-        }
-        if (plan.songUpdates.length) {
-          lines.push('<p><strong>将更新歌名：</strong>' +
-            escapeHtml(plan.songUpdates.map(function (item) { return item.name + '（' + item.count + ' 处）'; }).join('、')) + '</p>');
-        }
-        lines.push('<p class="hint">同名分类会保留位置、尺寸、样式、表格结构和手动列宽，只更新歌名并重新排序。</p>');
-        return lines.join('');
+      function categoryMergesHtml(plan) {
+        const merges = plan.categoryMerges || [];
+        if (!merges.length) return '';
+        return '<p><strong>同名分类已合并：</strong>' + escapeHtml(merges.map(function (item) {
+          return item.name + '（第 ' + item.lines.join('、') + ' 行）';
+        }).join('、')) + '</p>';
       }
 
-      function appendPreviewHtml(plan) {
+      function skippedHtml(plan) {
+        const list = plan.skipped || [];
+        if (!list.length) return '';
+        return '<p><strong>跳过 ' + list.length + ' 行：</strong></p>' +
+          '<ul class="import-skip-list">' + list.map(function (item) {
+            if (item.source === 'file') {
+              return '<li>「' + escapeHtml(item.song) + '」第 ' + item.line + ' 行与第 ' +
+                item.firstLine + ' 行重复（文件内重复）</li>';
+            }
+            return '<li>「' + escapeHtml(item.song) + '」已存在于「' + escapeHtml(item.category) +
+              '」（项目中已存在，不重复添加）</li>';
+          }).join('') + '</ul>';
+      }
+
+      function previewHtml(plan) {
         const lines = [];
-        const newCategories = plan.mergedCategories.filter(function (item) { return item.isNew; });
-        if (newCategories.length) {
-          lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(newCategories.map(function (item) {
-            return item.addedSongs ? item.name + '（+' + item.addedSongs + ' 首）' : item.name + '（0 首新增）';
-          }).join('、')) + '</p>');
+        if (plan.mode === 'append') {
+          const newCategories = plan.mergedCategories.filter(function (item) { return item.isNew; });
+          if (newCategories.length) {
+            lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(newCategories.map(function (item) {
+              return item.addedSongs ? item.name + '（+' + item.addedSongs + ' 首）' : item.name + '（0 首新增）';
+            }).join('、')) + '</p>');
+          }
+          const mergedCategories = plan.mergedCategories.filter(function (item) {
+            return !item.isNew && item.addedSongs > 0;
+          });
+          if (mergedCategories.length) {
+            lines.push('<p><strong>并入分类：</strong>' + escapeHtml(mergedCategories.map(function (item) {
+              return item.name + '（+' + item.addedSongs + ' 首' +
+                (item.skippedSongs ? '，跳过 ' + item.skippedSongs + ' 首' : '') + '）';
+            }).join('、')) + '</p>');
+          }
+          if (plan.unchangedCategoryNames.length) {
+            lines.push('<p><strong>无变化分类：</strong>' + escapeHtml(plan.unchangedCategoryNames.join('、')) + '</p>');
+          }
+        } else {
+          if (plan.addedCategoryNames.length) {
+            lines.push('<p><strong>新增分类（未放置）：</strong>' + escapeHtml(plan.addedCategoryNames.join('、')) + '</p>');
+          }
+          if (plan.removedCategoryNames.length) {
+            lines.push('<p><strong>将删除分类块：</strong>' + escapeHtml(plan.removedCategoryNames.join('、')) + '</p>');
+          }
+          if (plan.songUpdates.length) {
+            lines.push('<p><strong>将更新歌名：</strong>' +
+              escapeHtml(plan.songUpdates.map(function (item) { return item.name + '（' + item.count + ' 处）'; }).join('、')) + '</p>');
+          }
+          lines.push('<p class="hint">同名分类会保留位置、尺寸、样式、表格结构和手动列宽，只更新歌名并重新排序。</p>');
         }
-        const mergedCategories = plan.mergedCategories.filter(function (item) {
-          return !item.isNew && item.addedSongs > 0;
-        });
-        if (mergedCategories.length) {
-          lines.push('<p><strong>并入分类：</strong>' + escapeHtml(mergedCategories.map(function (item) {
-            return item.name + '（+' + item.addedSongs + ' 首' +
-              (item.skippedSongs ? '，跳过 ' + item.skippedSongs + ' 首' : '') + '）';
-          }).join('、')) + '</p>');
-        }
-        if (plan.unchangedCategoryNames.length) {
-          lines.push('<p><strong>无变化分类：</strong>' + escapeHtml(plan.unchangedCategoryNames.join('、')) + '</p>');
-        }
-        if (plan.skipped.length) {
-          lines.push('<p><strong>跳过 ' + plan.skipped.length + ' 首已存在歌名：</strong></p>' +
-            '<ul class="import-skip-list">' + plan.skipped.map(function (item) {
-              return '<li>「' + escapeHtml(item.song) + '」已存在于「' + escapeHtml(item.category) + '」（不重复添加）</li>';
-            }).join('') + '</ul>');
-        }
-        if (plan.stats.addedSongs === 0) {
-          lines.push('<p class="hint warn">没有新增内容：' + plan.stats.skippedSongs + ' 首歌名均已存在。</p>');
+        lines.push(categoryMergesHtml(plan));
+        lines.push(skippedHtml(plan));
+        if (plan.mode === 'append' && plan.stats.addedSongs === 0) {
+          lines.push('<p class="hint warn">没有新增内容' +
+            (plan.stats.skippedSongs ? '：跳过 ' + plan.stats.skippedSongs + ' 行重复' : '') + '。</p>');
         }
         lines.push('<p class="hint">' + escapeHtml(L.playlistCheck.HINT) + '</p>');
         return lines.join('');
@@ -116,7 +133,7 @@
 
       function confirmImport(result) {
         if (!state.project.playlist.categories.length) {
-          return Promise.resolve(planFor(result.categories, 'replace'));
+          return Promise.resolve(planFor(result, 'replace'));
         }
 
         return new Promise(function (resolve) {
@@ -158,8 +175,8 @@
           const preview = modal.body.querySelector('#import-preview');
           const continueButton = modal.footer.querySelector('.btn-primary');
           function render() {
-            plan = planFor(result.categories, mode);
-            preview.innerHTML = mode === 'append' ? appendPreviewHtml(plan) : replacePreviewHtml(plan);
+            plan = planFor(result, mode);
+            preview.innerHTML = previewHtml(plan);
             continueButton.disabled = mode === 'append' && plan.stats.addedSongs === 0;
           }
           modal.body.querySelectorAll('input[name="import-mode"]').forEach(function (radio) {
@@ -188,7 +205,8 @@
         const plan = await confirmImport(result);
         if (!plan) return;
         if (plan.mode === 'append' && plan.stats.addedSongs === 0) {
-          ui.toast('没有新增内容：' + plan.stats.skippedSongs + ' 首歌名均已存在。');
+          ui.toast('没有新增内容' +
+            (plan.stats.skippedSongs ? '：跳过 ' + plan.stats.skippedSongs + ' 行重复' : '') + '。');
           return;
         }
     
@@ -201,10 +219,12 @@
         ui.renderAll();
         if (plan.mode === 'append') {
           ui.toast('已追加 ' + plan.stats.newCategories + ' 个分类，新增 ' + plan.stats.addedSongs +
-            ' 首歌名，跳过 ' + plan.stats.skippedSongs + ' 首重复（' + result.encoding + '）。', 'success');
+            ' 首歌名' + (plan.stats.skippedSongs ? '，跳过 ' + plan.stats.skippedSongs + ' 行重复' : '') +
+            '（' + result.encoding + '）。', 'success');
         } else {
           ui.toast('已导入 ' + result.stats.categories + ' 个分类、' + result.stats.songs +
-            ' 首歌名（' + result.encoding + '）。', 'success');
+            ' 首歌名' + (plan.stats.skippedSongs ? '，跳过 ' + plan.stats.skippedSongs + ' 行重复' : '') +
+            '（' + result.encoding + '）。', 'success');
         }
       }
     

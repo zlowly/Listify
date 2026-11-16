@@ -82,6 +82,8 @@
     const categories = [];
     const byName = new Map();
     const songFirstLine = new Map();
+    const mergedCategories = [];
+    const skipped = [];
     const errors = [];
     let current = null;
     let sawContent = false;
@@ -98,16 +100,15 @@
           current = byName.get(UNCLASSIFIED).category;
         }
       }
-      const songLowerKey = song;
-      if (songFirstLine.has(songLowerKey)) {
-        const first = songFirstLine.get(songLowerKey);
-        errors.push({
-          line: lineNo,
-          message: '第 ' + lineNo + ' 行：歌名“' + song + '”与第 ' + first.line + ' 行重复'
-        });
-      } else {
-        songFirstLine.set(songLowerKey, { line: lineNo });
+      // 文件内重名不阻断导入：保留第一次出现的行，后续只记录跳过。
+      // 判定口径与追加去重一致（trim 后逐字符比较、区分大小写）。
+      const songKey = L.playlistCheck.key(song);
+      if (songFirstLine.has(songKey)) {
+        const first = songFirstLine.get(songKey);
+        skipped.push({ song: songKey, line: lineNo, firstLine: first.line });
+        return;
       }
+      songFirstLine.set(songKey, { line: lineNo });
       current.songs.push(song);
     }
 
@@ -126,10 +127,18 @@
         }
         if (byName.has(name)) {
           const first = byName.get(name);
-          errors.push({
-            line: lineNo,
-            message: '第 ' + lineNo + ' 行：分类“' + name + '”与第 ' + first.line + ' 行重复'
-          });
+          let merged = null;
+          for (let m = 0; m < mergedCategories.length; m += 1) {
+            if (mergedCategories[m].name === name) {
+              merged = mergedCategories[m];
+              break;
+            }
+          }
+          if (!merged) {
+            merged = { name: name, lines: [first.line] };
+            mergedCategories.push(merged);
+          }
+          merged.lines.push(lineNo);
           current = first.category;
           continue;
         }
@@ -151,6 +160,10 @@
       categories: errors.length === 0 ? categories : [],
       errors: errors.map(function (item) { return item.message; }),
       errorDetails: errors,
+      skipped: skipped,
+      mergedCategories: mergedCategories.map(function (item) {
+        return { name: item.name, lines: item.lines.slice() };
+      }),
       stats: {
         categories: categories.length,
         songs: categories.reduce(function (sum, category) { return sum + category.songs.length; }, 0)
@@ -193,7 +206,40 @@
     });
   }
 
-  function planReplace(project, categories) {
+  // planImport 允许直接传分类数组（既有调用与测试）或 parseText 的结果对象。
+  // 对象形态携带文件级跳过项和同名分类合并记录，数组形态视为没有重复。
+  function normalizeParsed(parsedOrCategories) {
+    if (Array.isArray(parsedOrCategories)) {
+      return { categories: parsedOrCategories, skipped: [], mergedCategories: [] };
+    }
+    const parsed = parsedOrCategories || {};
+    return {
+      categories: parsed.categories || [],
+      skipped: parsed.skipped || [],
+      mergedCategories: parsed.mergedCategories || []
+    };
+  }
+
+  function fileSkippedRecords(parsed) {
+    return parsed.skipped.map(function (item) {
+      return {
+        song: item.song,
+        source: 'file',
+        line: item.line,
+        firstLine: item.firstLine
+      };
+    });
+  }
+
+  // 计划里用 categoryMerges 区分 planAppend 既有的 mergedCategories（按分类汇总的新增/跳过统计）。
+  function copyCategoryMerges(parsed) {
+    return parsed.mergedCategories.map(function (item) {
+      return { name: item.name, lines: (item.lines || []).slice() };
+    });
+  }
+
+  function planReplace(project, parsed) {
+    const categories = parsed.categories;
     const rec = reconcile(project, categories);
     const oldByName = new Map(project.playlist.categories.map(function (category) {
       return [category.name, category];
@@ -216,6 +262,7 @@
       updateCount += count;
     });
     const updatedNames = new Set(songUpdates.map(function (item) { return item.name; }));
+    const skipped = fileSkippedRecords(parsed);
 
     return {
       mode: 'replace',
@@ -226,20 +273,22 @@
         return !updatedNames.has(name);
       }),
       mergedCategories: [],
-      skipped: [],
+      categoryMerges: copyCategoryMerges(parsed),
+      skipped: skipped,
       songUpdates: songUpdates,
       stats: {
         newCategories: rec.added.length,
         addedSongs: categories.reduce(function (total, category) {
           return total + (category.songs || []).length;
         }, 0),
-        skippedSongs: 0,
+        skippedSongs: skipped.length,
         songUpdates: updateCount
       }
     };
   }
 
-  function planAppend(project, categories) {
+  function planAppend(project, parsed) {
+    const categories = parsed.categories;
     const existing = project.playlist.categories || [];
     const planned = copyCategories(existing);
     const byName = new Map();
@@ -250,9 +299,8 @@
     const index = L.playlistCheck.index(existing);
     const addedCategoryNames = [];
     const mergedCategories = [];
-    const skipped = [];
+    const skipped = fileSkippedRecords(parsed);
     let addedSongs = 0;
-    let skippedSongs = 0;
 
     (categories || []).forEach(function (fileCategory) {
       let slot = byName.get(fileCategory.name);
@@ -271,9 +319,8 @@
         const songKey = L.playlistCheck.key(song);
         const found = index.get(songKey);
         if (found) {
-          skipped.push({ song: songKey, category: found.category });
+          skipped.push({ song: songKey, source: 'project', category: found.category });
           categorySkipped += 1;
-          skippedSongs += 1;
           return;
         }
         slot.category.songs.push(song);
@@ -310,20 +357,22 @@
       removedCategoryNames: [],
       unchangedCategoryNames: unchangedCategoryNames,
       mergedCategories: mergedCategories,
+      categoryMerges: copyCategoryMerges(parsed),
       skipped: skipped,
       songUpdates: [],
       stats: {
         newCategories: addedCategoryNames.length,
         addedSongs: addedSongs,
-        skippedSongs: skippedSongs,
+        skippedSongs: skipped.length,
         songUpdates: 0
       }
     };
   }
 
-  function planImport(project, categories, mode) {
-    if (mode === 'append') return planAppend(project, categories);
-    return planReplace(project, categories);
+  function planImport(project, parsedOrCategories, mode) {
+    const parsed = normalizeParsed(parsedOrCategories);
+    if (mode === 'append') return planAppend(project, parsed);
+    return planReplace(project, parsed);
   }
 
   function applyImport(project, plan) {

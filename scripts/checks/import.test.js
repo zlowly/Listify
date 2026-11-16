@@ -96,8 +96,8 @@ test('追加计划：同名分类并集、新分类未放置、跳过项定位',
   ]);
   assert.deepEqual(plain(plan.unchangedCategoryNames), ['摇滚']);
   assert.deepEqual(plain(plan.skipped), [
-    { song: '稻香', category: '流行' },
-    { song: '晴天', category: '流行' }
+    { song: '稻香', source: 'project', category: '流行' },
+    { song: '晴天', source: 'project', category: '流行' }
   ]);
   assert.equal(plan.stats.newCategories, 1);
   assert.equal(plan.stats.addedSongs, 2);
@@ -136,7 +136,7 @@ test('追加计划：未分类按同名分类合并', function () {
     { name: '摇滚', songs: ['后来'] },
     { name: '未分类', songs: ['晨光', '夜色'] }
   ]);
-  assert.deepEqual(plain(plan.skipped), [{ song: '晨光', category: '未分类' }]);
+  assert.deepEqual(plain(plan.skipped), [{ song: '晨光', source: 'project', category: '未分类' }]);
 });
 
 test('追加计划：大小写不同视为不同歌名', function () {
@@ -176,3 +176,102 @@ test('歌名变更计数：换序不算修改', function () {
   assert.equal(L.playlistCheck.countSongChanges(['A', 'B'], ['B', 'A']), 0);
   assert.equal(L.playlistCheck.countSongChanges(['A', 'B'], ['A', 'C']), 1);
 });
+
+test('解析：文件内重复歌名保留首行并记录跳过行', function () {
+  const parsed = importer.parseText('#流行\n晴天\n稻香\n晴天\n');
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(plain(parsed.categories), [
+    { name: '流行', songs: ['晴天', '稻香'] }
+  ]);
+  assert.deepEqual(plain(parsed.skipped), [
+    { song: '晴天', line: 4, firstLine: 2 }
+  ]);
+  assert.deepEqual(plain(parsed.mergedCategories), []);
+  assert.equal(parsed.stats.songs, 2);
+});
+
+test('解析：同名分类合并歌名并记录行号', function () {
+  const parsed = importer.parseText('#流行\n晴天\n#摇滚\n后来\n#流行\n稻香\n');
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(plain(parsed.categories), [
+    { name: '流行', songs: ['晴天', '稻香'] },
+    { name: '摇滚', songs: ['后来'] }
+  ]);
+  assert.deepEqual(plain(parsed.mergedCategories), [
+    { name: '流行', lines: [1, 5] }
+  ]);
+  assert.deepEqual(plain(parsed.skipped), []);
+});
+
+test('解析：合并后出现的重复歌名按文件内重复跳过', function () {
+  const parsed = importer.parseText('#流行\n晴天\n#流行\n晴天\n稻香\n');
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(plain(parsed.categories), [
+    { name: '流行', songs: ['晴天', '稻香'] }
+  ]);
+  assert.deepEqual(plain(parsed.skipped), [
+    { song: '晴天', line: 4, firstLine: 2 }
+  ]);
+});
+
+test('解析：大小写不同不算重复', function () {
+  const parsed = importer.parseText('#英文\nHello\nhello\n');
+
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(plain(parsed.categories), [
+    { name: '英文', songs: ['Hello', 'hello'] }
+  ]);
+  assert.deepEqual(plain(parsed.skipped), []);
+});
+
+test('解析：空分类名仍然整次失败', function () {
+  const parsed = importer.parseText('#\n晴天\n');
+
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.errors.length, 1);
+  assert.deepEqual(plain(parsed.categories), []);
+});
+
+test('替换计划：带出文件级跳过项与合成分类', function () {
+  const project = {
+    playlist: { categories: [{ name: '流行', songs: ['稻香'] }] },
+    pages: [{ elements: [] }]
+  };
+  const parsed = importer.parseText('#流行\n晴天\n#流行\n晴天\n');
+  const plan = importer.planImport(project, parsed, 'replace');
+
+  assert.deepEqual(plain(plan.categories), [
+    { name: '流行', songs: ['晴天'] }
+  ]);
+  assert.deepEqual(plain(plan.categoryMerges), [
+    { name: '流行', lines: [1, 3] }
+  ]);
+  assert.deepEqual(plain(plan.skipped), [
+    { song: '晴天', source: 'file', line: 4, firstLine: 2 }
+  ]);
+  assert.equal(plan.stats.skippedSongs, 1);
+  assert.equal(plan.stats.addedSongs, 1);
+});
+
+test('追加计划：文件级与项目级跳过项并存且来源正确', function () {
+  const project = {
+    playlist: { categories: [{ name: '流行', songs: ['晴天'] }] },
+    pages: [{ elements: [] }]
+  };
+  const parsed = importer.parseText('#流行\n晴天\n夜曲\n夜曲\n');
+  const plan = importer.planImport(project, parsed, 'append');
+
+  assert.deepEqual(plain(plan.categories), [
+    { name: '流行', songs: ['晴天', '夜曲'] }
+  ]);
+  assert.deepEqual(plain(plan.skipped), [
+    { song: '夜曲', source: 'file', line: 4, firstLine: 3 },
+    { song: '晴天', source: 'project', category: '流行' }
+  ]);
+  assert.equal(plan.stats.addedSongs, 1);
+  assert.equal(plan.stats.skippedSongs, 2);
+});
+
