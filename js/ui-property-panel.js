@@ -26,6 +26,33 @@
   const setGroupCollapsed = ui.setGroupCollapsed;
   const openPresetPicker = ui.openPresetPicker;
   const openBackgroundLibrary = ui.openBackgroundLibrary;
+  const advancedToggle = ui.advancedToggle;
+  const bindAdvancedToggle = ui.bindAdvancedToggle;
+
+  /* 图片效果：范围与默认值统一取自 model，面板只做格式化和夹取 */
+  function effectNumber(value, fallback) {
+    return typeof value === 'number' && isFinite(value) ? value : fallback;
+  }
+
+  function clampEffect(raw, min, max, fallback) {
+    if (raw == null || raw === '') return fallback;
+    const value = Number(raw);
+    if (!isFinite(value)) return fallback;
+    return model.clamp(value, min, max);
+  }
+
+  function updateRangeLabel(id, text) {
+    const label = document.getElementById(id + '-value');
+    if (label) label.textContent = text;
+  }
+
+  function percentLabel(value) {
+    return Math.round(value * 100) + '%';
+  }
+
+  function degreeLabel(value) {
+    return value + '°';
+  }
 
   /* 页面边距十字：上(1,2) 左(2,1) 右(2,3) 下(3,2)，中心页面示意 */
   function marginCross(margins, idPrefix) {
@@ -211,6 +238,49 @@
     return '最适合';
   }
 
+  /* 高级图片效果字段：背景图与自由图片共用同一组名字、范围与展示格式 */
+  function imageEffectFields(prefix, item) {
+    const brightness = effectNumber(item.brightness, 1);
+    const hue = effectNumber(item.hue, 0);
+    const fadeMode = model.FADE_MODES.indexOf(item.fadeMode) >= 0 ? item.fadeMode : 'off';
+    const fadeAngle = effectNumber(item.fadeAngle, 0);
+    return field('亮度', rangeInput(prefix + '-brightness', brightness,
+        model.BRIGHTNESS_MIN, model.BRIGHTNESS_MAX, 0.01, percentLabel)) +
+      field('色相', rangeInput(prefix + '-hue', hue, model.HUE_MIN, model.HUE_MAX, 1, degreeLabel)) +
+      field('渐隐模式', selectInput(prefix + '-fade-mode', [
+        { value: 'off', label: '关闭' },
+        { value: 'single', label: '单向' },
+        { value: 'double', label: '双向' }
+      ], fadeMode)) +
+      field('渐隐角度', rangeInput(prefix + '-fade-angle', fadeAngle,
+        model.FADE_ANGLE_MIN, model.FADE_ANGLE_MAX, 1, degreeLabel, fadeMode === 'off'));
+  }
+
+  /* 效果控件绑定：写入统一走 write(key, value) 意图动作，标签文本同步格式化 */
+  function bindImageEffectFields(prefix, write) {
+    bind(prefix + '-brightness', 'input', function () {
+      const value = clampEffect(valueOf(prefix + '-brightness'), model.BRIGHTNESS_MIN, model.BRIGHTNESS_MAX, 1);
+      write('brightness', value);
+      updateRangeLabel(prefix + '-brightness', percentLabel(value));
+    });
+    bind(prefix + '-hue', 'input', function () {
+      const value = clampEffect(valueOf(prefix + '-hue'), model.HUE_MIN, model.HUE_MAX, 0);
+      write('hue', value);
+      updateRangeLabel(prefix + '-hue', degreeLabel(value));
+    });
+    bind(prefix + '-fade-mode', 'change', function () {
+      const raw = valueOf(prefix + '-fade-mode');
+      write('fadeMode', model.FADE_MODES.indexOf(raw) >= 0 ? raw : 'off');
+      // 模式变化会影响角度控件的禁用状态，重渲染面板但不重绘画布
+      ui.renderPropertyPanel();
+    });
+    bind(prefix + '-fade-angle', 'input', function () {
+      const value = clampEffect(valueOf(prefix + '-fade-angle'), model.FADE_ANGLE_MIN, model.FADE_ANGLE_MAX, 0);
+      write('fadeAngle', value);
+      updateRangeLabel(prefix + '-fade-angle', degreeLabel(value));
+    });
+  }
+
   function renderBackgroundSetProperties(set) {
     const project = L.app.state.project;
     const page = L.app.currentPage();
@@ -296,7 +366,9 @@
           : '')) +
       propGroup('display', '显示',
         field('透明度', rangeInput('prop-bg-opacity', image.opacity == null ? 1 : image.opacity, 0, 1, 0.01)) +
-        field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>')) +
+        field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
+        (ui.advancedImage ? imageEffectFields('prop-bg', image) : ''),
+        { right: advancedToggle(model.hasImageEffects(image)) }) +
       propGroup('actions', '',
         '<div class="inline-actions">' +
           '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= set.images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
@@ -327,6 +399,12 @@
       const label = document.getElementById('prop-bg-blur-value');
       if (label) label.textContent = value;
     });
+    bindAdvancedToggle();
+    if (ui.advancedImage) {
+      bindImageEffectFields('prop-bg', function (key, value) {
+        L.app.setBackgroundImageValue(set.id, image.id, key, value);
+      });
+    }
     bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(set.id, image.id); });
     bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, 1); });
     bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, -1); });
@@ -849,7 +927,9 @@
         field('旋转', numberInput('prop-img-rotation', Math.round(element.rotation || 0), -180, 180, 1, false, 45) +
           '<span class="unit">°</span>') +
         field('透明度', rangeInput('prop-img-opacity', element.opacity == null ? 1 : element.opacity, 0, 1, 0.01)) +
-        field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>')) +
+        field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
+        (ui.advancedImage ? imageEffectFields('prop-img', element) : ''),
+        { right: advancedToggle(model.hasImageEffects(element)) }) +
       propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除图片</button>', { plain: true });
 
     bind('prop-img-replace', 'click', function () { L.app.pickFreeImage(element.id); });
@@ -885,6 +965,12 @@
       L.app.setElementField('blur', value);
       document.getElementById('prop-img-blur-value').textContent = value;
     });
+    bindAdvancedToggle();
+    if (ui.advancedImage) {
+      bindImageEffectFields('prop-img', function (key, value) {
+        L.app.setElementField(key, value);
+      });
+    }
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
   }
 

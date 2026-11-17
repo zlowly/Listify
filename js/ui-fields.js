@@ -136,10 +136,36 @@
     }).join('') + '</select>';
   }
 
-  function rangeInput(id, value, min, max, step) {
+  function rangeInput(id, value, min, max, step, display, disabled) {
+    const text = typeof display === 'function' ? display(value) : value;
     return '<div class="range-row"><input id="' + id + '" type="range" min="' + min + '" max="' + max +
-      '" step="' + step + '" value="' + esc(value) + '"><span class="range-value" id="' + id + '-value">' +
-      esc(value) + '</span></div>';
+      '" step="' + step + '" value="' + esc(value) + '"' + (disabled ? ' disabled' : '') +
+      '><span class="range-value" id="' + id + '-value">' + esc(text) + '</span></div>';
+  }
+
+  /* 图片效果高级选项：应用级会话状态，背景图与自由图片面板共享，不写入项目或存储 */
+  ui.advancedImage = false;
+
+  /* 分组标题右侧的「高级」开关；必须带 btn，命中 ui.js 的 summary .btn 拦截，避免点击折叠分组 */
+  function advancedToggle(adjusted) {
+    return '<button type="button" id="prop-advanced" class="btn pill" aria-pressed="' +
+      (ui.advancedImage ? 'true' : 'false') + '">高级</button>' +
+      (adjusted ? '<span class="prop-adjusted">已调整</span>' : '');
+  }
+
+  /* 仅切换可见性并就地重渲染面板，不改动模型、不触发画布重绘 */
+  function bindAdvancedToggle() {
+    bind('prop-advanced', 'click', function (event) {
+      event.preventDefault();
+      // 键盘触发（Enter/空格）时保留焦点，重渲染后回到开关本身
+      const fromKeyboard = event.detail === 0;
+      ui.advancedImage = !ui.advancedImage;
+      ui.renderPropertyPanel();
+      if (fromKeyboard) {
+        const next = document.getElementById('prop-advanced');
+        if (next) next.focus();
+      }
+    });
   }
 
   function weightOptions() {
@@ -217,6 +243,8 @@
   ui.colorInput = colorInput;
   ui.selectInput = selectInput;
   ui.rangeInput = rangeInput;
+  ui.advancedToggle = advancedToggle;
+  ui.bindAdvancedToggle = bindAdvancedToggle;
   ui.weightOptions = weightOptions;
   ui.alignOptions = alignOptions;
   ui.bind = bind;

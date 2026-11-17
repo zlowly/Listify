@@ -93,7 +93,11 @@
       keepRatio: element.keepRatio !== false,
       rotation: Number(element.rotation) || 0,
       opacity: element.opacity,
-      blur: Number(element.blur) || 0
+      blur: Number(element.blur) || 0,
+      brightness: element.brightness == null ? 1 : element.brightness,
+      hue: element.hue == null ? 0 : element.hue,
+      fadeMode: L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off',
+      fadeAngle: Number(element.fadeAngle) || 0
     };
   }
 
@@ -109,7 +113,11 @@
       rotation: Number(image.rotation) || 0,
       keepRatio: image.keepRatio !== false,
       opacity: image.opacity == null ? 1 : image.opacity,
-      blur: image.blur == null ? 0 : image.blur
+      blur: image.blur == null ? 0 : image.blur,
+      brightness: image.brightness == null ? 1 : image.brightness,
+      hue: image.hue == null ? 0 : image.hue,
+      fadeMode: L.model.FADE_MODES.indexOf(image.fadeMode) >= 0 ? image.fadeMode : 'off',
+      fadeAngle: Number(image.fadeAngle) || 0
     };
   }
 
@@ -304,7 +312,11 @@
                 keepRatio: element.keepRatio !== false,
                 rotation: L.projectSchema.isFiniteNumber(element.rotation) ? element.rotation : 0,
                 opacity: element.opacity,
-                blur: L.projectSchema.isFiniteNumber(element.blur) ? element.blur : 0
+                blur: L.projectSchema.isFiniteNumber(element.blur) ? element.blur : 0,
+                brightness: L.projectSchema.isFiniteNumber(element.brightness) ? element.brightness : 1,
+                hue: L.projectSchema.isFiniteNumber(element.hue) ? element.hue : 0,
+                fadeMode: L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off',
+                fadeAngle: L.projectSchema.isFiniteNumber(element.fadeAngle) ? element.fadeAngle : 0
               };
             }
             const decoded = tempImages.get(element.assetId);
@@ -328,7 +340,11 @@
               keepRatio: rect.keepRatio,
               rotation: 0,
               opacity: element.opacity,
-              blur: 0
+              blur: 0,
+              brightness: 1,
+              hue: 0,
+              fadeMode: 'off',
+              fadeAngle: 0
             };
           })
         };

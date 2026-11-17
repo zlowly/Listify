@@ -20,17 +20,18 @@
     return { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
   }
 
-  // 模糊位图缓存：ctx.filter 的模糊按设备像素计算，且每次绘制都会重新执行。
+  // 图片处理缓存：模糊、调色与渐隐一次烘焙，缓存命中后每帧只是一次 drawImage。
   // 拖拽图片只改变位置时缓存可命中；尺寸按 64px 分桶，缩放时仅跨桶才重建。
-  const BLUR_CACHE_BUCKET = 64;
-  const BLUR_CACHE_MAX_PIXELS = 12 * 1024 * 1024;
-  const BLUR_CACHE_MAX_ENTRY_PIXELS = 8 * 1024 * 1024;
-  const blurredImages = new Map();
-  let blurredImagePixels = 0;
-  let blurCacheFrozen = false;
+  const PROCESSED_CACHE_BUCKET = 64;
+  const PROCESSED_CACHE_MAX_PIXELS = 12 * 1024 * 1024;
+  const PROCESSED_CACHE_MAX_ENTRY_PIXELS = 8 * 1024 * 1024;
+  const processedImages = new Map();
+  let processedImagePixels = 0;
+  let processedCacheFrozen = false;
 
+  // 兼容既有调用点（app-interactions 在拖拽开始/结束时切换冻结）。
   function setBlurCacheFrozen(frozen) {
-    blurCacheFrozen = !!frozen;
+    processedCacheFrozen = !!frozen;
   }
 
   function contextRatio(ctx) {
@@ -38,28 +39,81 @@
     return Math.max(0.1, Math.hypot(matrix.a, matrix.b));
   }
 
-  function blurredImage(assetId, blur, width, height, ratio) {
+  function finiteOr(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function imageEffects(item) {
+    const source = item || {};
+    return {
+      blur: Math.max(0, finiteOr(source.blur, 0)),
+      brightness: finiteOr(source.brightness, 1),
+      hue: finiteOr(source.hue, 0),
+      fadeMode: model.FADE_MODES.indexOf(source.fadeMode) >= 0 ? source.fadeMode : 'off',
+      fadeAngle: finiteOr(source.fadeAngle, 0)
+    };
+  }
+
+  function effectSignature(effects) {
+    return effects.blur + '|' + effects.brightness + '|' + effects.hue + '|' +
+      effects.fadeMode + '|' + effects.fadeAngle;
+  }
+
+  // 滤镜串只在非默认时列出对应项；模糊半径由调用方按位图比例换算。
+  function filterString(effects, blurScale) {
+    const parts = [];
+    if (effects.blur > 0) parts.push('blur(' + Math.max(0.5, effects.blur * blurScale) + 'px)');
+    if (effects.brightness !== 1) parts.push('brightness(' + effects.brightness + ')');
+    if (effects.hue !== 0) parts.push('hue-rotate(' + effects.hue + 'deg)');
+    return parts.length ? parts.join(' ') : 'none';
+  }
+
+  // 用 destination-in 把渐变乘进位图 alpha：只改透明度，不改颜色。
+  // originX/originY 是位图左上角对应的局部坐标（局部坐标以图片中心为原点），
+  // 因此缓存位图与导出掩膜可以共用同一套渐变几何。
+  function fillFadeMask(ctx, effects, width, height, scaleX, scaleY, originX, originY) {
+    if (effects.fadeMode === 'off') return;
+    const points = model.fadeGradientPoints(effects.fadeAngle, width, height);
+    const gradient = ctx.createLinearGradient(
+      (points.x1 - originX) * scaleX,
+      (points.y1 - originY) * scaleY,
+      (points.x2 - originX) * scaleX,
+      (points.y2 - originY) * scaleY
+    );
+    gradient.addColorStop(0, effects.fadeMode === 'single' ? 'rgba(0,0,0,1)' : 'rgba(0,0,0,0)');
+    if (effects.fadeMode === 'double') gradient.addColorStop(0.5, 'rgba(0,0,0,1)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    const previous = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.globalCompositeOperation = previous;
+  }
+
+  function processedImage(assetId, effects, width, height, ratio) {
     const img = L.assets.getCachedImage(assetId);
     if (!img || !(width > 0) || !(height > 0)) return null;
     const deviceWidth = width * ratio;
     const deviceHeight = height * ratio;
     // 超大图片按像素预算降采样缓存；绘制时放大，模糊半径按同比例缩放，
     // 使最终显示半径仍等于 blur。
-    const budgetScale = Math.min(1, Math.sqrt(BLUR_CACHE_MAX_ENTRY_PIXELS / (deviceWidth * deviceHeight)));
-    const bucketWidth = Math.max(1, Math.ceil(deviceWidth * budgetScale / BLUR_CACHE_BUCKET) * BLUR_CACHE_BUCKET);
-    const bucketHeight = Math.max(1, Math.ceil(deviceHeight * budgetScale / BLUR_CACHE_BUCKET) * BLUR_CACHE_BUCKET);
-    const key = assetId + '|' + blur + '|' + bucketWidth + 'x' + bucketHeight;
-    const cached = blurredImages.get(key);
+    const budgetScale = Math.min(1, Math.sqrt(PROCESSED_CACHE_MAX_ENTRY_PIXELS / (deviceWidth * deviceHeight)));
+    const bucketWidth = Math.max(1, Math.ceil(deviceWidth * budgetScale / PROCESSED_CACHE_BUCKET) * PROCESSED_CACHE_BUCKET);
+    const bucketHeight = Math.max(1, Math.ceil(deviceHeight * budgetScale / PROCESSED_CACHE_BUCKET) * PROCESSED_CACHE_BUCKET);
+    const signature = effectSignature(effects);
+    const key = assetId + '|' + signature + '|' + bucketWidth + 'x' + bucketHeight;
+    const cached = processedImages.get(key);
     if (cached) {
-      blurredImages.delete(key);
-      blurredImages.set(key, cached);
+      processedImages.delete(key);
+      processedImages.set(key, cached);
       return cached;
     }
-    // 交互（拖拽缩放）期间复用已有位图，避免每次跨尺寸桶都重新执行模糊；
-    // 拖拽结束后由上层重绘，生成与最终尺寸一致的缓存。
-    if (blurCacheFrozen) {
-      const prefix = assetId + '|' + blur + '|';
-      for (const [cachedKey, canvas] of blurredImages) {
+    // 交互（拖拽缩放）期间复用已有位图，避免每次跨尺寸桶都重新烘焙；
+    // 前缀必须覆盖全部效果参数，否则会复用另一套效果的位图。
+    if (processedCacheFrozen) {
+      const prefix = assetId + '|' + signature + '|';
+      for (const [cachedKey, canvas] of processedImages) {
         if (cachedKey.indexOf(prefix) === 0) return canvas;
       }
     }
@@ -67,31 +121,71 @@
     canvas.width = bucketWidth;
     canvas.height = bucketHeight;
     const cacheContext = canvas.getContext('2d');
+    if (!cacheContext) return null;
     const blurScale = Math.min(1, bucketWidth / deviceWidth);
-    cacheContext.filter = 'blur(' + Math.max(0.5, blur * blurScale) + 'px)';
+    cacheContext.filter = filterString(effects, blurScale);
     cacheContext.drawImage(img, 0, 0, bucketWidth, bucketHeight);
+    cacheContext.filter = 'none';
+    fillFadeMask(
+      cacheContext, effects, width, height,
+      bucketWidth / width, bucketHeight / height,
+      -width / 2, -height / 2
+    );
     const pixels = bucketWidth * bucketHeight;
-    blurredImages.set(key, canvas);
-    blurredImagePixels += pixels;
-    while (blurredImagePixels > BLUR_CACHE_MAX_PIXELS && blurredImages.size > 1) {
-      const oldestKey = blurredImages.keys().next().value;
-      const oldest = blurredImages.get(oldestKey);
-      blurredImagePixels -= oldest.width * oldest.height;
-      blurredImages.delete(oldestKey);
+    processedImages.set(key, canvas);
+    processedImagePixels += pixels;
+    while (processedImagePixels > PROCESSED_CACHE_MAX_PIXELS && processedImages.size > 1) {
+      const oldestKey = processedImages.keys().next().value;
+      const oldest = processedImages.get(oldestKey);
+      processedImagePixels -= oldest.width * oldest.height;
+      processedImages.delete(oldestKey);
     }
     return canvas;
   }
 
-  function drawImageWithBlur(ctx, assetId, img, blur, x, y, width, height) {
-    if (blur > 0) {
-      const cached = blurredImage(assetId, blur, width, height, contextRatio(ctx));
-      if (cached) {
-        ctx.drawImage(cached, x, y, width, height);
-        return;
-      }
-      ctx.filter = 'blur(' + blur + 'px)';
+  function drawProcessedImage(ctx, assetId, img, item, x, y, width, height) {
+    if (!img) return;
+    const effects = imageEffects(item);
+    // 无效果快速路径：完全不分配离屏画布，保持现有绘制成本。
+    if (effects.blur === 0 && !model.hasImageEffects(item)) {
+      ctx.drawImage(img, x, y, width, height);
+      return;
     }
+    const cached = processedImage(assetId, effects, width, height, contextRatio(ctx));
+    if (cached) {
+      ctx.drawImage(cached, x, y, width, height);
+      return;
+    }
+    ctx.filter = filterString(effects, 1);
     ctx.drawImage(img, x, y, width, height);
+    ctx.filter = 'none';
+  }
+
+  // 导出保真分支：无模糊时按全分辨率一次性出图（不进缓存），
+  // 掩膜只覆盖传入的局部矩形，4K 导出不会分配整张超大位图。
+  function drawOneShotImage(ctx, img, effects, width, height, originX, originY, maskWidth, maskHeight) {
+    if (!img || !(maskWidth > 0) || !(maskHeight > 0)) return;
+    const ratio = contextRatio(ctx);
+    const pixelWidth = Math.max(1, Math.ceil(maskWidth * ratio));
+    const pixelHeight = Math.max(1, Math.ceil(maskHeight * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+    const offscreen = canvas.getContext('2d');
+    if (!offscreen) return;
+    const scaleX = pixelWidth / maskWidth;
+    const scaleY = pixelHeight / maskHeight;
+    offscreen.filter = filterString(effects, 1);
+    offscreen.drawImage(
+      img,
+      (-width / 2 - originX) * scaleX,
+      (-height / 2 - originY) * scaleY,
+      width * scaleX,
+      height * scaleY
+    );
+    offscreen.filter = 'none';
+    fillFadeMask(offscreen, effects, width, height, scaleX, scaleY, originX, originY);
+    ctx.drawImage(canvas, originX, originY, maskWidth, maskHeight);
   }
 
   function backgroundGeometry(pageSize, img, fit) {
@@ -127,7 +221,8 @@
     return backgroundGeometry(pageSize, img, image.fit || 'cover');
   }
 
-  function drawBackground(ctx, project, page) {
+  function drawBackground(ctx, project, page, options) {
+    const opts = options || {};
     const background = model.effectiveBackground(project, page);
     const pageSize = project.pageSize;
     const pw = pageSize.width;
@@ -145,13 +240,24 @@
         if (!img) return;
         const rect = backgroundImageRect(pageSize, image, img);
         if (!(rect.width > 0) || !(rect.height > 0)) return;
+        const effects = imageEffects(image);
+        const needsHighRes = opts.exportMode && effects.blur === 0 && model.hasImageEffects(image);
+        // 掩膜只需覆盖“图片矩形 ∩ 页面”，避免超大 cover 图在 4K 导出时分配整张位图。
+        const mask = needsHighRes ? model.fadeMaskRect(rect, pageSize, image.rotation) : null;
+        if (needsHighRes && !mask) return;
         ctx.save();
         ctx.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
         ctx.rotate(model.rotationRadians(image));
         ctx.globalAlpha = model.clamp(Number(image.opacity), 0, 1);
-        const blur = Number(image.blur);
-        drawImageWithBlur(ctx, image.assetId, img, blur,
-          -rect.width / 2, -rect.height / 2, rect.width, rect.height);
+        if (needsHighRes) {
+          drawOneShotImage(
+            ctx, img, effects, rect.width, rect.height,
+            mask.x, mask.y, mask.width, mask.height
+          );
+        } else {
+          drawProcessedImage(ctx, image.assetId, img, image,
+            -rect.width / 2, -rect.height / 2, rect.width, rect.height);
+        }
         ctx.restore();
       });
     }
@@ -246,12 +352,14 @@
     ctx.restore();
   }
 
-  function drawFreeImage(ctx, element) {
+  function drawFreeImage(ctx, element, options) {
     if (!element.assetId) return;
     const img = L.assets.getCachedImage(element.assetId);
     if (!img) return;
+    const opts = options || {};
     const width = element.width;
     const height = element.height;
+    const effects = imageEffects(element);
     ctx.save();
     ctx.translate(element.x + width / 2, element.y + height / 2);
     ctx.rotate(model.rotationRadians(element));
@@ -259,8 +367,14 @@
     ctx.rect(-width / 2, -height / 2, width, height);
     ctx.clip();
     ctx.globalAlpha = model.clamp(Number(element.opacity), 0, 1);
-    const blur = Number(element.blur);
-    drawImageWithBlur(ctx, element.assetId, img, blur, -width / 2, -height / 2, width, height);
+    if (opts.exportMode && effects.blur === 0 && model.hasImageEffects(element)) {
+      // 自由图片自身就是矩形，无需页面交集；一次性全分辨率出图避免缓存降采样。
+      drawOneShotImage(ctx, img, effects, width, height,
+        -width / 2, -height / 2, width, height);
+    } else {
+      drawProcessedImage(ctx, element.assetId, img, element,
+        -width / 2, -height / 2, width, height);
+    }
     ctx.restore();
   }
 
@@ -423,7 +537,7 @@
     ctx.beginPath();
     ctx.rect(0, 0, pageW, pageH);
     ctx.clip();
-    if (includeBackground) drawBackground(ctx, project, page, editMode);
+    if (includeBackground) drawBackground(ctx, project, page, opts);
     page.elements.forEach(function (element) {
       if (includeElementTypes && includeElementTypes.indexOf(element.type) === -1) return;
       if (element.type === 'category') {
@@ -431,7 +545,7 @@
       } else if (element.type === 'text') {
         drawFreeText(ctx, element, editMode);
       } else if (element.type === 'image') {
-        drawFreeImage(ctx, element);
+        drawFreeImage(ctx, element, opts);
       }
     });
     ctx.restore();
@@ -588,6 +702,9 @@
     pageOverflow: pageOverflow,
     pageAssets: pageAssets,
     allBackgroundAssets: allBackgroundAssets,
-    setBlurCacheFrozen: setBlurCacheFrozen
+    setBlurCacheFrozen: setBlurCacheFrozen,
+    cacheStats: function () {
+      return { entries: processedImages.size, pixels: processedImagePixels, frozen: processedCacheFrozen };
+    }
   };
 })();

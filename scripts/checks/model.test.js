@@ -470,3 +470,152 @@ test('图层顺序：moveItem 越界/相同下标返回 false，成功移动后�
   assert.deepEqual(ids(list), ['a', 'b', 'c']);
 });
 
+
+/* ---------- 图片调色与渐隐 ---------- */
+
+function closeTo(actual, expected, message) {
+  assert.ok(Math.abs(actual - expected) < 1e-6, message + '：期望 ' + expected + '，实际 ' + actual);
+}
+
+test('图片效果：默认字段与范围常量', function () {
+  assert.equal(model.BRIGHTNESS_MIN, 0.5);
+  assert.equal(model.BRIGHTNESS_MAX, 1.5);
+  assert.equal(model.HUE_MIN, -180);
+  assert.equal(model.HUE_MAX, 180);
+  assert.deepEqual(plain(model.FADE_MODES), ['off', 'single', 'double']);
+  assert.equal(model.FADE_ANGLE_MIN, 0);
+  assert.equal(model.FADE_ANGLE_MAX, 360);
+
+  const project = model.createDefaultProject();
+  const free = plain(model.createImageElement(project, 'asset-1', 400, 300));
+  assert.equal(free.brightness, 1);
+  assert.equal(free.hue, 0);
+  assert.equal(free.fadeMode, 'off');
+  assert.equal(free.fadeAngle, 0);
+
+  const background = plain(model.createBackgroundImage('asset-1', 'cover'));
+  assert.equal(background.brightness, 1);
+  assert.equal(background.hue, 0);
+  assert.equal(background.fadeMode, 'off');
+  assert.equal(background.fadeAngle, 0);
+
+  // 默认值不改变像素，因此不算“已调整”。
+  assert.equal(model.hasImageEffects(background), false);
+  assert.equal(model.hasImageEffects({}), false);
+  assert.equal(model.hasImageEffects(null), false);
+});
+
+test('图片效果：hasImageEffects 任一字段非默认即 true', function () {
+  assert.equal(model.hasImageEffects({ brightness: 1.2 }), true);
+  assert.equal(model.hasImageEffects({ hue: -30 }), true);
+  assert.equal(model.hasImageEffects({ fadeMode: 'single' }), true);
+  assert.equal(model.hasImageEffects({ fadeMode: 'double' }), true);
+  assert.equal(model.hasImageEffects({ fadeAngle: 30 }), true);
+  // 未知渐隐模式按默认“关闭”处理，不制造假提示。
+  assert.equal(model.hasImageEffects({ fadeMode: 'x' }), false);
+});
+
+test('图片效果：fadeGradientPoints 0° 自上而下', function () {
+  const points = plain(model.fadeGradientPoints(0, 200, 100));
+  closeTo(points.x1, 0, '0° 起点 x');
+  closeTo(points.x2, 0, '0° 终点 x');
+  closeTo(points.y1, -50, '0° 起点 y');
+  closeTo(points.y2, 50, '0° 终点 y');
+});
+
+test('图片效果：fadeGradientPoints 90° 自左向右', function () {
+  const points = plain(model.fadeGradientPoints(90, 200, 100));
+  closeTo(points.x1, -100, '90° 起点 x');
+  closeTo(points.x2, 100, '90° 终点 x');
+  closeTo(points.y1, 0, '90° 起点 y');
+  closeTo(points.y2, 0, '90° 终点 y');
+});
+
+test('图片效果：fadeGradientPoints 45° 端点落在矩形半投影上', function () {
+  const width = 200;
+  const height = 100;
+  const points = plain(model.fadeGradientPoints(45, width, height));
+  const half = (width / 2) * Math.SQRT1_2 + (height / 2) * Math.SQRT1_2;
+  closeTo(points.x1, -half * Math.SQRT1_2, '45° 起点 x');
+  closeTo(points.y1, -half * Math.SQRT1_2, '45° 起点 y');
+  closeTo(points.x2, half * Math.SQRT1_2, '45° 终点 x');
+  closeTo(points.y2, half * Math.SQRT1_2, '45° 终点 y');
+  // 宽高不等时两端点距离等于盒子在该方向上的投影长度。
+  closeTo(Math.hypot(points.x2 - points.x1, points.y2 - points.y1), half * 2, '45° 端点距离');
+});
+
+test('图片效果：fadeMaskRect 完全在页面内时等于图片矩形', function () {
+  const mask = plain(model.fadeMaskRect(
+    { x: 100, y: 200, width: 400, height: 300 },
+    { width: 1080, height: 1920 },
+    0
+  ));
+  assert.deepEqual(mask, { x: -200, y: -150, width: 400, height: 300 });
+});
+
+test('图片效果：fadeMaskRect cover 矩形大于页面时裁到页面', function () {
+  const mask = plain(model.fadeMaskRect(
+    { x: -420, y: 0, width: 1920, height: 1920 },
+    { width: 1080, height: 1920 },
+    0
+  ));
+  assert.deepEqual(mask, { x: -540, y: -960, width: 1080, height: 1920 });
+});
+
+test('图片效果：fadeMaskRect 旋转 30° 后取交集在局部坐标的外接矩形', function () {
+  const mask = plain(model.fadeMaskRect(
+    { x: -100, y: 900, width: 200, height: 100 },
+    { width: 1080, height: 1920 },
+    30
+  ));
+  // 旋转后左侧两角越出页面，裁剪后的局部包围盒比整张图窄。
+  closeTo(mask.x, -28.8675134595, '旋转 30° 掩膜左边界');
+  closeTo(mask.y, -50, '旋转 30° 掩膜上边界');
+  closeTo(mask.width, 128.8675134595, '旋转 30° 掩膜宽度');
+  closeTo(mask.height, 100, '旋转 30° 掩膜高度');
+  assert.equal(model.fadeMaskRect(
+    { x: -500, y: 900, width: 100, height: 100 },
+    { width: 1080, height: 1920 },
+    0
+  ), null);
+});
+
+test('图片效果：复制背景集保留效果字段', function () {
+  const set = model.createBackgroundSet('原背景');
+  const image = model.createBackgroundImage('asset-1', 'cover');
+  image.brightness = 1.2;
+  image.hue = -30;
+  image.fadeMode = 'double';
+  image.fadeAngle = 120;
+  set.images.push(image);
+
+  const copy = model.cloneBackgroundSet(set);
+  assert.notEqual(copy.id, set.id);
+  assert.equal(copy.images.length, 1);
+  assert.notEqual(copy.images[0].id, image.id);
+  assert.equal(copy.images[0].brightness, 1.2);
+  assert.equal(copy.images[0].hue, -30);
+  assert.equal(copy.images[0].fadeMode, 'double');
+  assert.equal(copy.images[0].fadeAngle, 120);
+
+  // 副本与原图互不共享对象。
+  copy.images[0].brightness = 0.8;
+  assert.equal(image.brightness, 1.2);
+});
+
+test('图片效果：替换图片只改 assetId，效果字段保持不变', function () {
+  const image = model.createBackgroundImage('asset-old', 'cover');
+  image.brightness = 1.3;
+  image.hue = 45;
+  image.fadeMode = 'single';
+  image.fadeAngle = 30;
+
+  const replaced = model.cloneBackgroundImage(image);
+  replaced.assetId = 'asset-new';
+  assert.equal(replaced.assetId, 'asset-new');
+  assert.equal(replaced.brightness, 1.3);
+  assert.equal(replaced.hue, 45);
+  assert.equal(replaced.fadeMode, 'single');
+  assert.equal(replaced.fadeAngle, 30);
+  assert.equal(image.assetId, 'asset-old');
+});

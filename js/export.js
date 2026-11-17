@@ -67,6 +67,7 @@
     ctx.scale(outWidth / project.pageSize.width, outHeight / project.pageSize.height);
     L.render.drawPage(ctx, project, page, {
       editMode: false,
+      exportMode: true,
       includeBackground: mode !== MODE_PLAYLIST,
       includeElementTypes: mode === MODE_PLAYLIST ? ['category'] : null
     });

@@ -13,6 +13,29 @@
     return typeof value === 'number' && Number.isFinite(value);
   }
 
+  // 调色与渐隐字段是可选增量：缺失合法，存在则必须落在范围内。
+  // 不在这里收敛数值，越界必须让用户看到项目无效，避免“静默改数”。
+  function validateImageEffects(item, label, fail) {
+    if (item.brightness !== undefined &&
+        (!isFiniteNumber(item.brightness) ||
+          item.brightness < L.model.BRIGHTNESS_MIN || item.brightness > L.model.BRIGHTNESS_MAX)) {
+      fail(label + '的亮度无效。');
+    }
+    if (item.hue !== undefined &&
+        (!isFiniteNumber(item.hue) ||
+          item.hue < L.model.HUE_MIN || item.hue > L.model.HUE_MAX)) {
+      fail(label + '的色相无效。');
+    }
+    if (item.fadeMode !== undefined && L.model.FADE_MODES.indexOf(item.fadeMode) < 0) {
+      fail(label + '的渐隐模式无效。');
+    }
+    if (item.fadeAngle !== undefined &&
+        (!isFiniteNumber(item.fadeAngle) ||
+          item.fadeAngle < L.model.FADE_ANGLE_MIN || item.fadeAngle > L.model.FADE_ANGLE_MAX)) {
+      fail(label + '的渐隐角度无效。');
+    }
+  }
+
   function validateProject(raw) {
     const errors = [];
     function fail(message) {
@@ -144,6 +167,7 @@
             if (image.keepRatio !== undefined && typeof image.keepRatio !== 'boolean') {
               fail(imageLabel + '等比设置无效。');
             }
+            validateImageEffects(image, imageLabel, fail);
           });
         });
       }
@@ -307,6 +331,7 @@
                   (!isFiniteNumber(element.blur) || element.blur < L.model.BLUR_MIN)) {
                 fail(label + '的模糊值无效。');
               }
+              validateImageEffects(element, label, fail);
             }
             if (!isFiniteNumber(element.opacity) ||
                 element.opacity < L.model.OPACITY_MIN || element.opacity > L.model.OPACITY_MAX) {
@@ -363,6 +388,10 @@
       image.keepRatio = rawImage.keepRatio !== false;
       image.opacity = rawImage.opacity == null ? 1 : rawImage.opacity;
       image.blur = Number(rawImage.blur) || 0;
+      image.brightness = rawImage.brightness == null ? 1 : rawImage.brightness;
+      image.hue = rawImage.hue == null ? 0 : rawImage.hue;
+      image.fadeMode = rawImage.fadeMode == null ? 'off' : rawImage.fadeMode;
+      image.fadeAngle = rawImage.fadeAngle == null ? 0 : rawImage.fadeAngle;
       return image;
     });
     return set;

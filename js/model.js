@@ -39,6 +39,14 @@
   const OPACITY_MIN = 0;
   const OPACITY_MAX = 1;
   const BLUR_MIN = 0;
+  // 图片调色与渐隐：属性面板、校验与渲染共用同一份范围定义。
+  const BRIGHTNESS_MIN = 0.5;
+  const BRIGHTNESS_MAX = 1.5;
+  const HUE_MIN = -180;
+  const HUE_MAX = 180;
+  const FADE_MODES = ['off', 'single', 'double'];
+  const FADE_ANGLE_MIN = 0;
+  const FADE_ANGLE_MAX = 360;
   const MARGIN_MIN = 0;
   // 页面尺寸的输入范围与预设；属性面板、setPageSize 与校验共用同一份定义。
   const PAGE_SIZE_MIN = 320;
@@ -62,7 +70,11 @@
     rotation: 0,
     keepRatio: true,
     opacity: 1,
-    blur: 0
+    blur: 0,
+    brightness: 1,
+    hue: 0,
+    fadeMode: 'off',
+    fadeAngle: 0
   };
   const DEFAULT_TABLE_MARGINS = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -74,6 +86,36 @@
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  /* ---------- 图片调色与渐隐 ---------- */
+
+  function effectNumber(value, fallback) {
+    return typeof value === 'number' && isFinite(value) ? value : fallback;
+  }
+
+  // 任一效果字段非默认即视为“已调整”，供面板提示使用。
+  function hasImageEffects(item) {
+    if (!item) return false;
+    const brightness = effectNumber(item.brightness, 1);
+    const hue = effectNumber(item.hue, 0);
+    const fadeAngle = effectNumber(item.fadeAngle, 0);
+    const fadeMode = FADE_MODES.indexOf(item.fadeMode) >= 0 ? item.fadeMode : 'off';
+    return brightness !== 1 || hue !== 0 || fadeMode !== 'off' || fadeAngle !== 0;
+  }
+
+  // 渐隐渐变两端点（相对图片矩形中心的局部坐标）。
+  // 0° 自上而下、顺时针递增；half 为盒子在渐变方向上的半投影长度，
+  // 保证任意角度下渐变恰好铺满矩形而不提前截断。
+  function fadeGradientPoints(angle, width, height) {
+    const degrees = effectNumber(Number(angle), 0);
+    const radians = degrees * Math.PI / 180;
+    const dx = Math.sin(radians);
+    const dy = Math.cos(radians);
+    const w = Math.max(0, effectNumber(Number(width), 0));
+    const h = Math.max(0, effectNumber(Number(height), 0));
+    const half = Math.abs((w / 2) * dx) + Math.abs((h / 2) * dy);
+    return { x1: -dx * half, y1: -dy * half, x2: dx * half, y2: dy * half };
   }
 
   function matchPageSizePreset(width, height) {
@@ -545,7 +587,11 @@
       keepRatio: true,
       rotation: 0,
       opacity: 1,
-      blur: 0
+      blur: 0,
+      brightness: 1,
+      hue: 0,
+      fadeMode: 'off',
+      fadeAngle: 0
     };
   }
 
@@ -558,6 +604,89 @@
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
     return { x: x * cos - y * sin, y: x * sin + y * cos };
+  }
+
+  /* Sutherland–Hodgman：把多边形裁到轴对齐矩形内（只保留内部部分）。 */
+  function clipPolygonToRect(points, rect) {
+    const EPSILON = 1e-9;
+    function clip(polygon, axis, limit, keepGreater) {
+      if (!polygon.length) return polygon;
+      const result = [];
+      function inside(point) {
+        return keepGreater ? point[axis] >= limit - EPSILON : point[axis] <= limit + EPSILON;
+      }
+      function cut(from, to) {
+        const fromDelta = from[axis] - limit;
+        const toDelta = to[axis] - limit;
+        const t = fromDelta === toDelta ? 0 : fromDelta / (fromDelta - toDelta);
+        return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+      }
+      for (let i = 0; i < polygon.length; i += 1) {
+        const current = polygon[i];
+        const previous = polygon[(i + polygon.length - 1) % polygon.length];
+        const currentInside = inside(current);
+        const previousInside = inside(previous);
+        if (currentInside) {
+          if (!previousInside) result.push(cut(previous, current));
+          result.push(current);
+        } else if (previousInside) {
+          result.push(cut(previous, current));
+        }
+      }
+      return result;
+    }
+    let polygon = points;
+    polygon = clip(polygon, 'x', rect.x, true);
+    polygon = clip(polygon, 'x', rect.x + rect.width, false);
+    polygon = clip(polygon, 'y', rect.y, true);
+    polygon = clip(polygon, 'y', rect.y + rect.height, false);
+    return polygon;
+  }
+
+  // 图片矩形（页面坐标，可旋转）与页面的交集，换算成图片局部坐标的外接矩形。
+  // 返回相对图片中心的 { x, y, width, height }；完全在页面外时返回 null。
+  // 掩膜只需覆盖可见部分，避免 4K 导出时分配整张超大位图。
+  function fadeMaskRect(rect, pageSize, rotation) {
+    if (!rect || !pageSize) return null;
+    const width = Number(rect.width);
+    const height = Number(rect.height);
+    const pageWidth = Number(pageSize.width);
+    const pageHeight = Number(pageSize.height);
+    if (!(width > 0) || !(height > 0) || !(pageWidth > 0) || !(pageHeight > 0)) return null;
+    const centerX = (Number(rect.x) || 0) + width / 2;
+    const centerY = (Number(rect.y) || 0) + height / 2;
+    const radians = (Number(rotation) || 0) * Math.PI / 180;
+    const corners = [
+      [-width / 2, -height / 2],
+      [width / 2, -height / 2],
+      [width / 2, height / 2],
+      [-width / 2, height / 2]
+    ].map(function (point) {
+      const rotated = rotateVector(point[0], point[1], radians);
+      return { x: centerX + rotated.x, y: centerY + rotated.y };
+    });
+    const clipped = clipPolygonToRect(corners, {
+      x: 0,
+      y: 0,
+      width: pageWidth,
+      height: pageHeight
+    });
+    if (clipped.length < 3) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    clipped.forEach(function (point) {
+      const local = rotateVector(point.x - centerX, point.y - centerY, -radians);
+      if (local.x < minX) minX = local.x;
+      if (local.y < minY) minY = local.y;
+      if (local.x > maxX) maxX = local.x;
+      if (local.y > maxY) maxY = local.y;
+    });
+    const maskWidth = maxX - minX;
+    const maskHeight = maxY - minY;
+    if (!(maskWidth > 0) || !(maskHeight > 0)) return null;
+    return { x: minX, y: minY, width: maskWidth, height: maskHeight };
   }
 
   // 把任意角度归一到 [-halfRange, halfRange]（0.1 精度），作为旋转角度的规范存储值。
@@ -867,6 +996,13 @@
     OPACITY_MIN: OPACITY_MIN,
     OPACITY_MAX: OPACITY_MAX,
     BLUR_MIN: BLUR_MIN,
+    BRIGHTNESS_MIN: BRIGHTNESS_MIN,
+    BRIGHTNESS_MAX: BRIGHTNESS_MAX,
+    HUE_MIN: HUE_MIN,
+    HUE_MAX: HUE_MAX,
+    FADE_MODES: FADE_MODES,
+    FADE_ANGLE_MIN: FADE_ANGLE_MIN,
+    FADE_ANGLE_MAX: FADE_ANGLE_MAX,
     MARGIN_MIN: MARGIN_MIN,
     PAGE_SIZE_MIN: PAGE_SIZE_MIN,
     PAGE_SIZE_MAX: PAGE_SIZE_MAX,
@@ -909,6 +1045,9 @@
     createImageElement: createImageElement,
     rotationRadians: rotationRadians,
     rotateVector: rotateVector,
+    hasImageEffects: hasImageEffects,
+    fadeGradientPoints: fadeGradientPoints,
+    fadeMaskRect: fadeMaskRect,
     wrapAngle: wrapAngle,
     angleDeltaDeg: angleDeltaDeg,
     snapAngle: snapAngle,

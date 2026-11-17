@@ -343,3 +343,125 @@ test('createDraftEnvelope：包含 schema/ui/结构，不含 base64 资产数据
   assert.equal(text.indexOf('base64'), -1);
   assert.equal(text.indexOf('data:image'), -1);
 });
+
+/* ---------- 图片调色与渐隐字段 ---------- */
+
+test('validateProject：图片效果字段缺失合法、存在且在范围内合法', function () {
+  assert.deepEqual(errorsOf(validRaw()), { ok: true, errors: [] });
+
+  const raw = mutated(function (value) {
+    const image = value.backgrounds[0].images[0];
+    image.brightness = 1.3;
+    image.hue = -45;
+    image.fadeMode = 'double';
+    image.fadeAngle = 120;
+    const free = value.pages[0].elements[2];
+    free.brightness = 0.8;
+    free.hue = 60;
+    free.fadeMode = 'single';
+    free.fadeAngle = 30;
+  });
+  assert.deepEqual(errorsOf(raw), { ok: true, errors: [] });
+});
+
+test('validateProject：背景图效果字段越界报错', function () {
+  assert.deepEqual(errorsOf(mutated(function (value) {
+    value.backgrounds[0].images[0].brightness = 2.4;
+  })), {
+    ok: false,
+    errors: ['第 1 个背景第 1 张图片的亮度无效。']
+  });
+
+  assert.deepEqual(errorsOf(mutated(function (value) {
+    value.backgrounds[0].images[0].fadeMode = 'x';
+  })), {
+    ok: false,
+    errors: ['第 1 个背景第 1 张图片的渐隐模式无效。']
+  });
+
+  assert.deepEqual(errorsOf(mutated(function (value) {
+    value.backgrounds[0].images[0].fadeAngle = 400;
+  })), {
+    ok: false,
+    errors: ['第 1 个背景第 1 张图片的渐隐角度无效。']
+  });
+});
+
+test('validateProject：自由图片效果字段越界报错', function () {
+  assert.deepEqual(errorsOf(mutated(function (value) {
+    value.pages[0].elements[2].hue = 200;
+  })), {
+    ok: false,
+    errors: ['第 1 页第 3 个元素的色相无效。']
+  });
+});
+
+test('buildProject：旧对象缺少效果字段时取默认值，序列化后补齐', async function () {
+  const raw = validRaw();
+  // 不加载任何资产：本用例只关心字段归一化，跳过图片解码。
+  raw.assets = [];
+  assert.deepEqual(
+    Object.prototype.hasOwnProperty.call(raw.backgrounds[0].images[0], 'brightness'),
+    false
+  );
+
+  const built = await io.buildProject(raw);
+  const backgroundImage = built.project.backgrounds[0].images[0];
+  assert.equal(backgroundImage.brightness, 1);
+  assert.equal(backgroundImage.hue, 0);
+  assert.equal(backgroundImage.fadeMode, 'off');
+  assert.equal(backgroundImage.fadeAngle, 0);
+
+  const freeImage = built.project.pages[0].elements.find(function (element) {
+    return element.type === 'image';
+  });
+  assert.equal(freeImage.brightness, 1);
+  assert.equal(freeImage.hue, 0);
+  assert.equal(freeImage.fadeMode, 'off');
+  assert.equal(freeImage.fadeAngle, 0);
+
+  const structure = plain(io.serializeProjectStructure(built.project));
+  const serializedBackground = structure.backgrounds[0].images[0];
+  assert.equal(serializedBackground.brightness, 1);
+  assert.equal(serializedBackground.hue, 0);
+  assert.equal(serializedBackground.fadeMode, 'off');
+  assert.equal(serializedBackground.fadeAngle, 0);
+  const serializedFree = structure.pages[0].elements.find(function (element) {
+    return element.type === 'image';
+  });
+  assert.equal(serializedFree.brightness, 1);
+  assert.equal(serializedFree.hue, 0);
+  assert.equal(serializedFree.fadeMode, 'off');
+  assert.equal(serializedFree.fadeAngle, 0);
+});
+
+test('buildProject：非默认效果字段往返后逐字段相等', async function () {
+  const raw = validRaw();
+  raw.assets = [];
+  const backgroundImage = raw.backgrounds[0].images[0];
+  backgroundImage.brightness = 1.3;
+  backgroundImage.hue = 60;
+  backgroundImage.fadeMode = 'double';
+  backgroundImage.fadeAngle = 120;
+  const freeImage = raw.pages[0].elements[2];
+  freeImage.brightness = 0.8;
+  freeImage.hue = -45;
+  freeImage.fadeMode = 'single';
+  freeImage.fadeAngle = 30;
+
+  const built = await io.buildProject(raw);
+  const structure = plain(io.serializeProjectStructure(built.project));
+  const serializedBackground = structure.backgrounds[0].images[0];
+  const serializedFree = structure.pages[0].elements[2];
+
+  [
+    [serializedBackground, backgroundImage],
+    [serializedFree, freeImage]
+  ].forEach(function (pair) {
+    const actual = pair[0];
+    const expected = pair[1];
+    ['brightness', 'hue', 'fadeMode', 'fadeAngle'].forEach(function (key) {
+      assert.equal(actual[key], expected[key], key + ' 应往返一致');
+    });
+  });
+});
