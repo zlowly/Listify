@@ -128,6 +128,19 @@
     });
   }
 
+  // 草稿恢复只接受纯 base64（buildProject 会直接 atob）。
+  // 二进制分支与历史记录都可能带 data URL 前缀，这里统一剥除。
+  function stripDataUrlPrefix(value) {
+    if (typeof value !== 'string') return '';
+    const comma = value.indexOf(',');
+    if (value.slice(0, 5) !== 'data:' || comma < 0) return value;
+    return value.slice(comma + 1);
+  }
+
+  async function blobToDraftBase64(blob) {
+    return stripDataUrlPrefix(await blobToDataUrl(blob));
+  }
+
   async function draftAssetGet(id) {
     const db = await openDraftDb();
     const tx = db.transaction([DRAFT_DB_STORE, DRAFT_DB_BLOB_STORE], 'readonly');
@@ -137,7 +150,7 @@
         id: binary.id,
         name: binary.name,
         mime: binary.mime,
-        data: await blobToDataUrl(binary.blob)
+        data: await blobToDraftBase64(binary.blob)
       };
     }
     return requestResult(tx.objectStore(DRAFT_DB_STORE).get(id));
@@ -158,7 +171,7 @@
         id: record.id,
         name: record.name,
         mime: record.mime,
-        data: await blobToDataUrl(record.blob)
+        data: await blobToDraftBase64(record.blob)
       });
     }
     return Array.from(byId.values());
@@ -173,6 +186,32 @@
       (legacyKeys || []).concat(binaryKeys || [])
     );
     return Array.from(knownDraftAssetIds);
+  }
+
+  // 旧格式（base64 记录）的 id 集合：恢复成功后要把它们改写成二进制。
+  async function draftLegacyAssetKeys() {
+    const db = await openDraftDb();
+    const tx = db.transaction([DRAFT_DB_STORE], 'readonly');
+    const keys = await requestResult(tx.objectStore(DRAFT_DB_STORE).getAllKeys());
+    return new Set(Array.isArray(keys) ? keys : []);
+  }
+
+  // 把仍以 base64 保存的资产改写成二进制记录；失败不影响恢复结果。
+  async function migrateLegacyAssets(legacyIds, byId) {
+    if (!legacyIds || !legacyIds.size) return 0;
+    let migrated = 0;
+    for (const id of legacyIds) {
+      const record = byId.get(id);
+      if (!record || typeof record.data !== 'string' || !record.data) continue;
+      try {
+        const blob = L.assets.base64ToBlob(stripDataUrlPrefix(record.data), record.mime);
+        await draftAssetPut(draftAssetRecord(id, blob, { name: record.name, mime: record.mime }));
+        migrated += 1;
+      } catch (err) {
+        /* 单条失败保持旧记录，下次恢复再试 */
+      }
+    }
+    return migrated;
   }
 
   function draftAssetPut(record) {
@@ -429,9 +468,11 @@
     }
 
     const byId = new Map();
+    let legacyAssetIds = new Set();
     if (raw.assets.length) {
       let records;
       try {
+        legacyAssetIds = await draftLegacyAssetKeys();
         records = await draftAssetGetAll();
       } catch (err) {
         return {
@@ -454,7 +495,7 @@
         missing.add(asset.id);
         return false;
       }
-      asset.data = record.data;
+      asset.data = stripDataUrlPrefix(record.data);
       if (!asset.mime && record.mime) asset.mime = record.mime;
       if (!asset.name && record.name) asset.name = record.name;
       return true;
@@ -477,6 +518,7 @@
 
     try {
       const built = await L.projectIo.buildProject(raw);
+      await migrateLegacyAssets(legacyAssetIds, byId);
       return {
         ok: true,
         project: built.project,
@@ -500,6 +542,8 @@
     draftWriteTransaction: draftWriteTransaction,
     draftAssetGet: draftAssetGet,
     draftAssetGetAll: draftAssetGetAll,
+    draftLegacyAssetKeys: draftLegacyAssetKeys,
+    stripDataUrlPrefix: stripDataUrlPrefix,
     draftAssetKeys: draftAssetKeys,
     draftAssetPut: draftAssetPut,
     draftAssetDelete: draftAssetDelete,
