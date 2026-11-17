@@ -342,9 +342,43 @@ button { cursor: pointer; }
   background: #fff;
   cursor: pointer;
   user-select: none;
+  position: relative;
 }
 .layer-row:hover { border-color: #b7c3d4; background: #fbfdff; }
 .layer-row.selected { border-color: var(--blue); background: #eff6ff; box-shadow: 0 0 0 1px #bfdbfe inset; }
+/* 行内主控件：承载焦点、选中与拖拽起点，动作按钮是它的兄弟节点 */
+.layer-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.layer-row-main[draggable="true"] { cursor: grab; }
+.layer-row.dragging .layer-row-main { cursor: grabbing; }
+.layer-row.dragging { opacity: 0.5; }
+/* 插入线用伪元素：与 .selected 的 box-shadow 互不覆盖 */
+.layer-row.drop-before::before,
+.layer-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--blue);
+  border-radius: 2px;
+  z-index: 1;
+}
+.layer-row.drop-before::before { top: -3px; }
+.layer-row.drop-after::after { bottom: -3px; }
 .layer-icon {
   width: 22px;
   height: 22px;

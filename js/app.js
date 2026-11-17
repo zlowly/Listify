@@ -43,6 +43,21 @@
     if (ctx.undo.stack.length > ctx.undo.max) ctx.undo.stack.shift();
   }
 
+  // 撤销后按快照里的 id 重新命中；失效则退回页面选区
+  function restoredSelection(selection) {
+    if (!selection) return { type: 'page' };
+    if (selection.type === 'element' && findElementAnywhere(selection.id)) return selection;
+    if (selection.type === 'backgroundSet' && model.findBackground(state.project, selection.setId)) return selection;
+    if (selection.type === 'backgroundImage') {
+      const set = model.findBackground(state.project, selection.setId);
+      const exists = set && (set.images || []).some(function (image) {
+        return image.id === selection.imageId;
+      });
+      if (exists) return selection;
+    }
+    return { type: 'page' };
+  }
+
   function performUndo() {
     const entry = ctx.undo.stack.pop();
     if (!entry) {
@@ -56,9 +71,7 @@
     state.currentPageId = model.getPage(state.project, entry.currentPageId)
       ? entry.currentPageId
       : state.project.pages[0].id;
-    state.selection = entry.selection && entry.selection.type === 'element' && findElementAnywhere(entry.selection.id)
-      ? entry.selection
-      : { type: 'page' };
+    state.selection = restoredSelection(entry.selection);
     ui.renderAll();
     ctx.draft.scheduleDraftSave();
     ui.toast('已撤销：' + entry.label + '。');
@@ -400,6 +413,17 @@ const viewport = {
     page.elements.splice(index, 1);
     page.elements.splice(target, 0, element);
     ui.renderAll();
+  }
+
+  function moveLayerTo(id, targetId, placement) {
+    const page = currentPage();
+    if (!page) return false;
+    const plan = model.planDisplayMove(page.elements, id, targetId, placement);
+    if (!plan) return false;
+    pushUndo('调整图层顺序');
+    model.moveItem(page.elements, plan.from, plan.to);
+    ui.renderAll();
+    return true;
   }
 
   function jumpToCategory(name) {
@@ -1038,6 +1062,7 @@ const viewport = {
     applyPreset: ctx.presets.applyPreset,
     deleteBackgroundImage: ctx.backgrounds.deleteBackgroundImage,
     moveBackgroundImage: ctx.backgrounds.moveBackgroundImage,
+    moveBackgroundImageTo: ctx.backgrounds.moveBackgroundImageTo,
     setBackgroundImageFit: ctx.backgrounds.setBackgroundImageFit,
     restoreBackgroundImageFit: ctx.backgrounds.restoreBackgroundImageFit,
     setBackgroundImageValue: ctx.backgrounds.setBackgroundImageValue,
@@ -1058,6 +1083,7 @@ const viewport = {
     openLoadProject: ctx.importExport.openImportProject,
     handleLoadFile: ctx.importExport.handleImportProject,
     moveLayer: moveLayer,
+    moveLayerTo: moveLayerTo,
     deleteSelection: deleteSelection
   };
 

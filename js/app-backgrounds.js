@@ -174,13 +174,22 @@
       function moveBackgroundImage(setId, imageId, delta) {
         const set = model.findBackground(state.project, setId);
         if (!set) return;
-        const index = set.images.findIndex(function (image) { return image.id === imageId; });
-        const target = index + delta;
-        if (index < 0 || target < 0 || target >= set.images.length) return;
-        const image = set.images[index];
-        set.images.splice(index, 1);
-        set.images.splice(target, 0, image);
+        const plan = model.planStepMove(set.images, imageId, delta);
+        if (!plan) return;
+        actions.pushUndo('调整背景图片顺序');
+        model.moveItem(set.images, plan.from, plan.to);
         ui.renderAll();
+      }
+
+      function moveBackgroundImageTo(setId, imageId, targetId, placement) {
+        const set = model.findBackground(state.project, setId);
+        if (!set) return false;
+        const plan = model.planDisplayMove(set.images, imageId, targetId, placement);
+        if (!plan) return false;
+        actions.pushUndo('调整背景图片顺序');
+        model.moveItem(set.images, plan.from, plan.to);
+        ui.renderAll();
+        return true;
       }
     
       function setBackgroundImageFit(setId, imageId, fit) {
@@ -270,7 +279,7 @@
       }
 
       return {
-        addBackgroundSet, duplicateBackgroundSet, renameBackgroundSet, deleteBackgroundSet, setPageBackground, pickBackgroundImage, handleBackgroundFile, pickBackgroundImageWhole, handleDroppedBackgroundFile, deleteBackgroundImage, moveBackgroundImage, setBackgroundImageFit, restoreBackgroundImageFit, setBackgroundImageValue, toggleUnifiedBackground, setUnifiedBackground, bakeUnifiedBackground, copyUnifiedBackgroundToPage
+        addBackgroundSet, duplicateBackgroundSet, renameBackgroundSet, deleteBackgroundSet, setPageBackground, pickBackgroundImage, handleBackgroundFile, pickBackgroundImageWhole, handleDroppedBackgroundFile, deleteBackgroundImage, moveBackgroundImage, moveBackgroundImageTo, setBackgroundImageFit, restoreBackgroundImageFit, setBackgroundImageValue, toggleUnifiedBackground, setUnifiedBackground, bakeUnifiedBackground, copyUnifiedBackgroundToPage
       };
     }
   };

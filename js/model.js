@@ -732,6 +732,62 @@
     return project.pages.findIndex(function (page) { return page.id === pageId; });
   }
 
+  /* ---------- 图层顺序（模型序与显示序相反：模型下标 0 = 最底/最后绘制） ---------- */
+
+  // 返回显示顺序（最顶层在前）的新数组，不改动入参。
+  function displayOrder(list) {
+    return Array.isArray(list) ? list.slice().reverse() : [];
+  }
+
+  // 把 id 拖到 targetId 的显示序「上方/下方」后应做的移动计划。
+  // placement: 'before' = 显示序中位于 target 之上（更靠顶层）；'after' = 位于 target 之下。
+  // 返回模型下标 { from, to }；无需移动或参数非法时返回 null。
+  function planDisplayMove(list, id, targetId, placement) {
+    if (!Array.isArray(list)) return null;
+    if (placement !== 'before' && placement !== 'after') return null;
+    if (!id || !targetId || id === targetId) return null;
+    const from = list.findIndex(function (item) { return item && item.id === id; });
+    const targetModelIndex = list.findIndex(function (item) { return item && item.id === targetId; });
+    if (from < 0 || targetModelIndex < 0) return null;
+    // 先按显示序取下标，移除后再插回：移除会让目标之后的下标前移，直接算会错位
+    const displayIds = list.map(function (item) { return item.id; }).reverse();
+    const fromDisplayIndex = displayIds.indexOf(id);
+    const reduced = displayIds.slice();
+    reduced.splice(fromDisplayIndex, 1);
+    const targetDisplayIndex = reduced.indexOf(targetId);
+    const insertAt = targetDisplayIndex + (placement === 'before' ? 0 : 1);
+    reduced.splice(insertAt, 0, id);
+    // 落点与当前显示位置一致时无需移动
+    const toDisplayIndex = reduced.indexOf(id);
+    if (toDisplayIndex === fromDisplayIndex) return null;
+    // 显示下标换算回模型下标（模型序是显示序的反转）
+    return { from: from, to: list.length - 1 - toDisplayIndex };
+  }
+
+  // 步进移动计划：id 在模型数组中移动 delta 位（+1 更靠顶层，-1 更靠底层）。
+  // 越界或非法返回 null。
+  function planStepMove(list, id, delta) {
+    if (!Array.isArray(list)) return null;
+    const step = Number(delta);
+    if (!Number.isInteger(step) || step === 0) return null;
+    const from = list.findIndex(function (item) { return item && item.id === id; });
+    if (from < 0) return null;
+    const to = from + step;
+    if (to < 0 || to >= list.length) return null;
+    return { from: from, to: to };
+  }
+
+  // 按模型下标移动元素并就地修改 list；from===to 或下标越界返回 false。
+  function moveItem(list, from, to) {
+    if (!Array.isArray(list)) return false;
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return false;
+    if (from < 0 || from >= list.length || to < 0 || to >= list.length) return false;
+    if (from === to) return false;
+    const item = list.splice(from, 1)[0];
+    list.splice(to, 0, item);
+    return true;
+  }
+
   function isCjkCodePoint(cp) {
     return (
       (cp >= 0x1100 && cp <= 0x11ff) ||
@@ -864,6 +920,10 @@
     allCategoryBlocks: allCategoryBlocks,
     unplacedCategories: unplacedCategories,
     findElement: findElement,
+    displayOrder: displayOrder,
+    planDisplayMove: planDisplayMove,
+    planStepMove: planStepMove,
+    moveItem: moveItem,
     ensureAssetMeta: ensureAssetMeta,
     pageIndexOf: pageIndexOf,
     virtualWidth: virtualWidth,

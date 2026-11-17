@@ -357,3 +357,116 @@ test('旋转角度：snapAngle 吸附到 step 整数倍', function () {
   assert.equal(model.snapAngle(7), 7);          // 默认 step=1
   assert.equal(model.snapAngle(NaN, 15), 0);
 });
+
+/* ---------- 图层顺序：显示序与模型序相反 ---------- */
+
+function ids(list) {
+  return list.map(function (item) { return item.id; });
+}
+
+function moveByName(list, plan) {
+  assert.ok(plan, '计划不应为 null');
+  assert.equal(model.moveItem(list, plan.from, plan.to), true);
+  return ids(list);
+}
+
+test('图层顺序：displayOrder 返回显示序（最顶层在前）的新数组', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.deepEqual(ids(model.displayOrder(list)), ['c', 'b', 'a']);
+  // 不改动入参，且返回的是新数组
+  assert.deepEqual(ids(list), ['a', 'b', 'c']);
+  assert.notEqual(model.displayOrder(list), list);
+  assert.deepEqual(ids(model.displayOrder([])), []);
+});
+
+test('图层顺序：拖到最顶（显示序第 0 行）', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const plan = model.planDisplayMove(list, 'a', 'c', 'before');
+  assert.deepEqual(plain(plan), { from: 0, to: 2 });
+  assert.deepEqual(moveByName(list, plan), ['b', 'c', 'a']);
+});
+
+test('图层顺序：拖到最底（显示序最后一行）', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const plan = model.planDisplayMove(list, 'c', 'a', 'after');
+  assert.deepEqual(plain(plan), { from: 2, to: 0 });
+  assert.deepEqual(moveByName(list, plan), ['c', 'a', 'b']);
+});
+
+test('图层顺序：相邻互换', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const plan = model.planDisplayMove(list, 'b', 'c', 'before');
+  assert.deepEqual(plain(plan), { from: 1, to: 2 });
+  assert.deepEqual(moveByName(list, plan), ['a', 'c', 'b']);
+});
+
+test('图层顺序：落回原位返回 null 且不压栈（计划为 null）', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.equal(model.planDisplayMove(list, 'c', 'b', 'before'), null);
+  assert.equal(model.planDisplayMove(list, 'b', 'b', 'before'), null);
+  // 非法 placement 与不存在的 id
+  assert.equal(model.planDisplayMove(list, 'a', 'c', 'above'), null);
+  assert.equal(model.planDisplayMove(list, 'a', 'zzz', 'before'), null);
+  assert.equal(model.planDisplayMove(list, 'zzz', 'c', 'before'), null);
+  assert.deepEqual(ids(list), ['a', 'b', 'c']);
+});
+
+test('图层顺序：单元素与空列表一律返回 null', function () {
+  const single = [{ id: 'only' }];
+  assert.equal(model.planDisplayMove(single, 'only', 'only', 'before'), null);
+  assert.equal(model.planStepMove(single, 'only', 1), null);
+  assert.equal(model.planStepMove(single, 'only', -1), null);
+  assert.equal(model.planDisplayMove([], 'a', 'b', 'before'), null);
+  assert.equal(model.planStepMove([], 'a', 1), null);
+  assert.equal(model.moveItem([], 0, 0), false);
+});
+
+test('图层顺序：显示下标映射回模型下标', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  // 显示序是 [c,b,a]：拖到最顶 = 模型下标 2，必须由计划换算得到
+  assert.equal(model.planDisplayMove(list, 'a', 'c', 'before').to, 2);
+  // 拖到最底 = 模型下标 0
+  assert.equal(model.planDisplayMove(list, 'c', 'a', 'after').to, 0);
+  // 计划里的 from 是模型下标，与显示序无关
+  assert.equal(model.planDisplayMove(list, 'a', 'c', 'before').from, 0);
+});
+
+test('图层顺序：planDisplayMove 不修改入参（计划阶段无副作用）', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const snapshot = JSON.parse(JSON.stringify(list));
+  model.planDisplayMove(list, 'a', 'c', 'before');
+  model.planDisplayMove(list, 'c', 'a', 'after');
+  assert.deepEqual(plain(list), snapshot);
+});
+
+test('图层顺序：planStepMove 步进与越界', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  // +1 更靠顶层
+  assert.deepEqual(plain(model.planStepMove(list, 'a', 1)), { from: 0, to: 1 });
+  assert.deepEqual(plain(model.planStepMove(list, 'b', 1)), { from: 1, to: 2 });
+  assert.deepEqual(plain(model.planStepMove(list, 'c', -1)), { from: 2, to: 1 });
+  // 越界
+  assert.equal(model.planStepMove(list, 'a', -1), null);
+  assert.equal(model.planStepMove(list, 'c', 1), null);
+  // 非法步长与不存在的 id
+  assert.equal(model.planStepMove(list, 'a', 0), null);
+  assert.equal(model.planStepMove(list, 'a', 1.5), null);
+  assert.equal(model.planStepMove(list, 'a', NaN), null);
+  assert.equal(model.planStepMove(list, 'zzz', 1), null);
+  assert.deepEqual(ids(list), ['a', 'b', 'c']);
+});
+
+test('图层顺序：moveItem 越界/相同下标返回 false，成功移动后顺序正确', function () {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.equal(model.moveItem(list, 0, 0), false);
+  assert.equal(model.moveItem(list, -1, 1), false);
+  assert.equal(model.moveItem(list, 0, 3), false);
+  assert.equal(model.moveItem(list, 3, 0), false);
+  assert.equal(model.moveItem(list, 0.5, 1), false);
+  assert.deepEqual(ids(list), ['a', 'b', 'c']);
+  assert.equal(model.moveItem(list, 2, 0), true);
+  assert.deepEqual(ids(list), ['c', 'a', 'b']);
+  assert.equal(model.moveItem(list, 0, 2), true);
+  assert.deepEqual(ids(list), ['a', 'b', 'c']);
+});
+

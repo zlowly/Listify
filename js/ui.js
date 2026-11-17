@@ -17,6 +17,8 @@
   ui.activePanel = 'categories';
   ui.els = {};
   ui.initialized = false;
+  /* 图层拖拽状态：{ kind: 'element' | 'bgImage', id, setId }，拖拽结束即清空 */
+  let layerDrag = null;
   /* 分组折叠状态：<selectionKey>::<groupKey> → 是否收起，仅本页会话内记忆 */
   ui.groupCollapse = Object.create(null);
 
@@ -462,6 +464,41 @@
     });
   };
 
+  /* 清除面板内所有插入线指示类（每次落点变化只保留目标行一个） */
+  function clearLayerDropCues() {
+    if (!ui.els.layerPanel) return;
+    ui.els.layerPanel.querySelectorAll('.drop-before, .drop-after').forEach(function (row) {
+      row.classList.remove('drop-before', 'drop-after');
+    });
+  }
+
+  /* 清空拖拽载荷、拖拽中原行与所有插入线 */
+  function clearLayerDragState() {
+    layerDrag = null;
+    if (!ui.els.layerPanel) return;
+    ui.els.layerPanel.querySelectorAll('.dragging').forEach(function (row) {
+      row.classList.remove('dragging');
+    });
+    clearLayerDropCues();
+  }
+
+  /* 合法落点返回目标图层 id：同列表、非自身；背景集行与跨列表一律不是落点 */
+  function layerDropTargetId(row, drag) {
+    if (!drag) return null;
+    const kind = row.getAttribute('data-layer-kind');
+    if (kind !== drag.kind) return null;
+    if (kind === 'element') {
+      const id = row.getAttribute('data-layer-id');
+      return id && id !== drag.id ? id : null;
+    }
+    if (kind === 'bgImage') {
+      const parts = (row.getAttribute('data-bg-image') || '').split(':');
+      if (parts[0] !== drag.setId || parts[1] === drag.id) return null;
+      return parts[1];
+    }
+    return null;
+  }
+
   ui.renderLayerPanel = function () {
     const project = L.app.state.project;
     const page = L.app.currentPage();
@@ -489,13 +526,17 @@
         name = '图片';
         sub = element.rotation ? '旋转 ' + normalizeAngle(element.rotation) + '°' : '自由图片';
       }
-      rows.push('<div class="layer-row' + (selected ? ' selected' : '') + '" data-layer-id="' + esc(element.id) + '">' +
-        '<span class="layer-icon">' + icon + '</span>' +
+      rows.push('<div class="layer-row' + (selected ? ' selected' : '') +
+        '" data-layer-kind="element" data-layer-id="' + esc(element.id) + '">' +
+        '<button type="button" class="layer-row-main" draggable="true" aria-label="' +
+          esc(name + '，' + sub + '，拖动可调整层级') + '">' +
+        '<span class="layer-icon" aria-hidden="true">' + icon + '</span>' +
         '<span class="layer-name">' + esc(name) + '<span class="layer-sub"> ' + esc(sub) + '</span></span>' +
+        '</button>' +
         '<span class="row-actions">' +
-        '<button class="icon-btn" data-layer-move="' + realIndex + ':-1" title="下移一层" aria-label="下移一层"' +
+        '<button class="icon-btn" type="button" data-layer-move="' + realIndex + ':-1" title="下移一层" aria-label="下移一层"' +
         (realIndex === 0 ? ' disabled' : '') + '>↓</button>' +
-        '<button class="icon-btn" data-layer-move="' + realIndex + ':1" title="上移一层" aria-label="上移一层"' +
+        '<button class="icon-btn" type="button" data-layer-move="' + realIndex + ':1" title="上移一层" aria-label="上移一层"' +
         (realIndex === page.elements.length - 1 ? ' disabled' : '') + '>↑</button>' +
         '</span></div>');
     });
@@ -507,13 +548,16 @@
       const subParts = [referenceCount + ' 页使用'];
       if (isGlobal) subParts.push('全局背景');
       rows.push('<div class="layer-row layer-bg-row' + (bgSelected ? ' selected' : '') +
-        '" data-bg-set="' + esc(set.id) + '">' +
-        '<span class="layer-icon">▦</span>' +
+        '" data-layer-kind="bgSet" data-bg-set="' + esc(set.id) + '">' +
+        '<button type="button" class="layer-row-main" aria-label="' +
+          esc('背景 · ' + set.name + '，' + subParts.join(' · ')) + '">' +
+        '<span class="layer-icon" aria-hidden="true">▦</span>' +
         '<span class="layer-name">' + esc(set.name) +
           '<span class="layer-sub"> ' + esc(subParts.join(' · ')) + '</span></span>' +
         (isGlobal ? '<span class="pill pill-blue">全局</span>' : '') +
         '<span class="pill pill-blue">底层</span>' +
-        '<button class="icon-btn" data-bg-add="' + esc(set.id) + '" title="添加背景图片" aria-label="添加背景图片">＋</button>' +
+        '</button>' +
+        '<button class="icon-btn" type="button" data-bg-add="' + esc(set.id) + '" title="添加背景图片" aria-label="添加背景图片">＋</button>' +
         '</div>');
       const images = (set.images || []).slice().reverse();
       images.forEach(function (image, reverseIndex) {
@@ -521,33 +565,90 @@
         const imageSelected = selection.type === 'backgroundImage' &&
           selection.setId === set.id && selection.imageId === image.id;
         const fitText = image.fit === 'none' ? '自定义' : fitLabel(image.fit);
+        const moveBase = esc(set.id) + ':' + esc(image.id);
         rows.push('<div class="layer-row layer-bg-image-row' + (imageSelected ? ' selected' : '') +
-          '" data-bg-image="' + esc(set.id) + ':' + esc(image.id) + '">' +
-          '<span class="layer-icon">▧</span>' +
+          '" data-layer-kind="bgImage" data-bg-image="' + esc(set.id) + ':' + esc(image.id) + '">' +
+          '<button type="button" class="layer-row-main" draggable="true" aria-label="' +
+            esc('图片 ' + (realIndex + 1) + '，' + fitText + '，拖动可调整顺序') + '">' +
+          '<span class="layer-icon" aria-hidden="true">▧</span>' +
           '<span class="layer-name">图片 ' + (realIndex + 1) +
             '<span class="layer-sub"> ' + esc(fitText) + '</span></span>' +
-          '</div>');
+          '</button>' +
+          '<span class="row-actions">' +
+          '<button class="icon-btn" type="button" data-bg-move="' + moveBase + ':-1" title="下移一层" aria-label="下移一层"' +
+          (realIndex === 0 ? ' disabled' : '') + '>↓</button>' +
+          '<button class="icon-btn" type="button" data-bg-move="' + moveBase + ':1" title="上移一层" aria-label="上移一层"' +
+          (realIndex === set.images.length - 1 ? ' disabled' : '') + '>↑</button>' +
+          '</span></div>');
       });
     }
     ui.els.layerPanel.innerHTML = rows.join('');
     ui.els.layerPanel.querySelectorAll('.layer-row').forEach(function (row) {
-      row.addEventListener('click', function (event) {
-        if (event.target.closest('[data-layer-move]')) return;
-        const bgAddBtn = event.target.closest('[data-bg-add]');
-        if (bgAddBtn) {
-          openPresetPicker('add', { setId: bgAddBtn.getAttribute('data-bg-add') });
+      const kind = row.getAttribute('data-layer-kind');
+      const main = row.querySelector('.layer-row-main');
+      main.addEventListener('click', function () {
+        if (kind === 'element') {
+          L.app.selectElement(row.getAttribute('data-layer-id'));
           return;
         }
-        if (row.hasAttribute('data-bg-set')) {
+        if (kind === 'bgSet') {
           L.app.selectBackgroundSet(row.getAttribute('data-bg-set'));
           return;
         }
-        if (row.hasAttribute('data-bg-image')) {
-          const parts = row.getAttribute('data-bg-image').split(':');
-          L.app.selectBackgroundImage(parts[0], parts[1]);
+        const parts = row.getAttribute('data-bg-image').split(':');
+        L.app.selectBackgroundImage(parts[0], parts[1]);
+      });
+      if (main.getAttribute('draggable') === 'true') {
+        main.addEventListener('dragstart', function (event) {
+          if (kind === 'element') {
+            layerDrag = { kind: 'element', id: row.getAttribute('data-layer-id'), setId: null };
+          } else {
+            const parts = row.getAttribute('data-bg-image').split(':');
+            layerDrag = { kind: 'bgImage', id: parts[1], setId: parts[0] };
+          }
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', layerDrag.id);
+          }
+          row.classList.add('dragging');
+        });
+        main.addEventListener('dragend', clearLayerDragState);
+      }
+      row.addEventListener('dragover', function (event) {
+        if (!layerDropTargetId(row, layerDrag)) {
+          clearLayerDropCues();
           return;
         }
-        L.app.selectElement(row.getAttribute('data-layer-id'));
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        const rect = row.getBoundingClientRect();
+        const before = event.clientY < rect.top + rect.height / 2;
+        ui.els.layerPanel.querySelectorAll('.drop-before, .drop-after').forEach(function (other) {
+          if (other !== row) other.classList.remove('drop-before', 'drop-after');
+        });
+        row.classList.toggle('drop-before', before);
+        row.classList.toggle('drop-after', !before);
+      });
+      row.addEventListener('dragleave', function (event) {
+        if (event.relatedTarget && row.contains(event.relatedTarget)) return;
+        row.classList.remove('drop-before', 'drop-after');
+      });
+      row.addEventListener('drop', function (event) {
+        const targetId = layerDropTargetId(row, layerDrag);
+        if (!targetId) {
+          clearLayerDropCues();
+          return;
+        }
+        event.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+        const drag = layerDrag;
+        clearLayerDragState();
+        if (drag.kind === 'element') {
+          L.app.moveLayerTo(drag.id, targetId, placement);
+        } else {
+          L.app.moveBackgroundImageTo(drag.setId, drag.id, targetId, placement);
+        }
       });
     });
     ui.els.layerPanel.querySelectorAll('[data-layer-move]').forEach(function (button) {
@@ -555,6 +656,19 @@
         event.stopPropagation();
         const parts = button.getAttribute('data-layer-move').split(':');
         L.app.moveLayer(Number(parts[0]), Number(parts[1]));
+      });
+    });
+    ui.els.layerPanel.querySelectorAll('[data-bg-move]').forEach(function (button) {
+      button.addEventListener('click', function (event) {
+        event.stopPropagation();
+        const parts = button.getAttribute('data-bg-move').split(':');
+        L.app.moveBackgroundImage(parts[0], parts[1], Number(parts[2]));
+      });
+    });
+    ui.els.layerPanel.querySelectorAll('[data-bg-add]').forEach(function (button) {
+      button.addEventListener('click', function (event) {
+        event.stopPropagation();
+        openPresetPicker('add', { setId: button.getAttribute('data-bg-add') });
       });
     });
   };
