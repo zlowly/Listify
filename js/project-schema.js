@@ -34,6 +34,19 @@
           item.fadeAngle < L.model.FADE_ANGLE_MIN || item.fadeAngle > L.model.FADE_ANGLE_MAX)) {
       fail(label + '的渐隐角度无效。');
     }
+    const ranges = [
+      ['fadePosition', L.model.FADE_POSITION_MIN, L.model.FADE_POSITION_MAX, '渐隐位置'],
+      ['fadeWidth', L.model.FADE_WIDTH_MIN, L.model.FADE_WIDTH_MAX, '转场宽度'],
+      ['fadeTop', L.model.FADE_TRANSPARENCY_MIN, L.model.FADE_TRANSPARENCY_MAX, '顶部透明度'],
+      ['fadeBottom', L.model.FADE_TRANSPARENCY_MIN, L.model.FADE_TRANSPARENCY_MAX, '底部透明度']
+    ];
+    ranges.forEach(function (range) {
+      const value = item[range[0]];
+      if (value !== undefined &&
+          (!isFiniteNumber(value) || value < range[1] || value > range[2])) {
+        fail(label + '的' + range[3] + '无效。');
+      }
+    });
   }
 
   function validateProject(raw) {
@@ -392,6 +405,11 @@
       image.hue = rawImage.hue == null ? 0 : rawImage.hue;
       image.fadeMode = rawImage.fadeMode == null ? 'off' : rawImage.fadeMode;
       image.fadeAngle = rawImage.fadeAngle == null ? 0 : rawImage.fadeAngle;
+      const fadeDefaults = L.model.fadeDefaults(image.fadeMode);
+      image.fadePosition = rawImage.fadePosition == null ? fadeDefaults.fadePosition : rawImage.fadePosition;
+      image.fadeWidth = rawImage.fadeWidth == null ? fadeDefaults.fadeWidth : rawImage.fadeWidth;
+      image.fadeTop = rawImage.fadeTop == null ? fadeDefaults.fadeTop : rawImage.fadeTop;
+      image.fadeBottom = rawImage.fadeBottom == null ? fadeDefaults.fadeBottom : rawImage.fadeBottom;
       return image;
     });
     return set;

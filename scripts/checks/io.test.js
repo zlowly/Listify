@@ -355,11 +355,19 @@ test('validateProject：图片效果字段缺失合法、存在且在范围内�
     image.hue = -45;
     image.fadeMode = 'double';
     image.fadeAngle = 120;
+    image.fadePosition = 0.4;
+    image.fadeWidth = 0.2;
+    image.fadeTop = 0.75;
+    image.fadeBottom = 0.5;
     const free = value.pages[0].elements[2];
     free.brightness = 0.8;
     free.hue = 60;
     free.fadeMode = 'single';
     free.fadeAngle = 30;
+    free.fadePosition = 0.1;
+    free.fadeWidth = 0.8;
+    free.fadeTop = 0.25;
+    free.fadeBottom = 0.9;
   });
   assert.deepEqual(errorsOf(raw), { ok: true, errors: [] });
 });
@@ -384,6 +392,20 @@ test('validateProject：背景图效果字段越界报错', function () {
   })), {
     ok: false,
     errors: ['第 1 个背景第 1 张图片的渐隐角度无效。']
+  });
+
+  [
+    ['fadePosition', 1.4, '渐隐位置'],
+    ['fadeWidth', -0.1, '转场宽度'],
+    ['fadeTop', 1.2, '顶部透明度'],
+    ['fadeBottom', -1, '底部透明度']
+  ].forEach(function (item) {
+    assert.deepEqual(errorsOf(mutated(function (value) {
+      value.backgrounds[0].images[0][item[0]] = item[1];
+    })), {
+      ok: false,
+      errors: ['第 1 个背景第 1 张图片的' + item[2] + '无效。']
+    });
   });
 });
 
@@ -411,6 +433,10 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
   assert.equal(backgroundImage.hue, 0);
   assert.equal(backgroundImage.fadeMode, 'off');
   assert.equal(backgroundImage.fadeAngle, 0);
+  assert.equal(backgroundImage.fadePosition, 0);
+  assert.equal(backgroundImage.fadeWidth, 1);
+  assert.equal(backgroundImage.fadeTop, 0);
+  assert.equal(backgroundImage.fadeBottom, 1);
 
   const freeImage = built.project.pages[0].elements.find(function (element) {
     return element.type === 'image';
@@ -419,6 +445,10 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
   assert.equal(freeImage.hue, 0);
   assert.equal(freeImage.fadeMode, 'off');
   assert.equal(freeImage.fadeAngle, 0);
+  assert.equal(freeImage.fadePosition, 0);
+  assert.equal(freeImage.fadeWidth, 1);
+  assert.equal(freeImage.fadeTop, 0);
+  assert.equal(freeImage.fadeBottom, 1);
 
   const structure = plain(io.serializeProjectStructure(built.project));
   const serializedBackground = structure.backgrounds[0].images[0];
@@ -426,6 +456,10 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
   assert.equal(serializedBackground.hue, 0);
   assert.equal(serializedBackground.fadeMode, 'off');
   assert.equal(serializedBackground.fadeAngle, 0);
+  assert.equal(serializedBackground.fadePosition, 0);
+  assert.equal(serializedBackground.fadeWidth, 1);
+  assert.equal(serializedBackground.fadeTop, 0);
+  assert.equal(serializedBackground.fadeBottom, 1);
   const serializedFree = structure.pages[0].elements.find(function (element) {
     return element.type === 'image';
   });
@@ -433,6 +467,10 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
   assert.equal(serializedFree.hue, 0);
   assert.equal(serializedFree.fadeMode, 'off');
   assert.equal(serializedFree.fadeAngle, 0);
+  assert.equal(serializedFree.fadePosition, 0);
+  assert.equal(serializedFree.fadeWidth, 1);
+  assert.equal(serializedFree.fadeTop, 0);
+  assert.equal(serializedFree.fadeBottom, 1);
 });
 
 test('buildProject：非默认效果字段往返后逐字段相等', async function () {
@@ -443,11 +481,19 @@ test('buildProject：非默认效果字段往返后逐字段相等', async funct
   backgroundImage.hue = 60;
   backgroundImage.fadeMode = 'double';
   backgroundImage.fadeAngle = 120;
+  backgroundImage.fadePosition = 0.4;
+  backgroundImage.fadeWidth = 0.2;
+  backgroundImage.fadeTop = 0.75;
+  backgroundImage.fadeBottom = 0.5;
   const freeImage = raw.pages[0].elements[2];
   freeImage.brightness = 0.8;
   freeImage.hue = -45;
   freeImage.fadeMode = 'single';
   freeImage.fadeAngle = 30;
+  freeImage.fadePosition = 0.1;
+  freeImage.fadeWidth = 0.8;
+  freeImage.fadeTop = 0.25;
+  freeImage.fadeBottom = 0.9;
 
   const built = await io.buildProject(raw);
   const structure = plain(io.serializeProjectStructure(built.project));
@@ -460,8 +506,30 @@ test('buildProject：非默认效果字段往返后逐字段相等', async funct
   ].forEach(function (pair) {
     const actual = pair[0];
     const expected = pair[1];
-    ['brightness', 'hue', 'fadeMode', 'fadeAngle'].forEach(function (key) {
+    ['brightness', 'hue', 'fadeMode', 'fadeAngle',
+      'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom'].forEach(function (key) {
       assert.equal(actual[key], expected[key], key + ' 应往返一致');
     });
   });
+});
+
+test('buildProject：渐隐字段缺失时按模式预设补齐', async function () {
+  const raw = validRaw();
+  raw.assets = [];
+  raw.backgrounds[0].images[0].fadeMode = 'double';
+  raw.pages[0].elements[2].fadeMode = 'single';
+
+  const built = await io.buildProject(raw);
+  const backgroundImage = built.project.backgrounds[0].images[0];
+  assert.deepEqual(
+    [backgroundImage.fadePosition, backgroundImage.fadeWidth,
+      backgroundImage.fadeTop, backgroundImage.fadeBottom],
+    [0.5, 0, 1, 1]
+  );
+  const freeImage = built.project.pages[0].elements[2];
+  assert.deepEqual(
+    [freeImage.fadePosition, freeImage.fadeWidth,
+      freeImage.fadeTop, freeImage.fadeBottom],
+    [0, 1, 0, 1]
+  );
 });

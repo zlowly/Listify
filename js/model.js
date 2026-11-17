@@ -47,6 +47,22 @@
   const FADE_MODES = ['off', 'single', 'double'];
   const FADE_ANGLE_MIN = 0;
   const FADE_ANGLE_MAX = 360;
+  // 渐隐额外参数（比照 Kdenlive 的 Alpha Gradient）：
+  // 位置与转场宽度都按“沿角度轴的图片投影长度”归一化，透明度 0 = 不透明、1 = 全透明。
+  // 双向下位置是不透明带中心、宽度是不透明带宽度；平台被夹到图片内，贴边的一端没有过渡坡。
+  const FADE_POSITION_MIN = 0;
+  const FADE_POSITION_MAX = 1;
+  const FADE_WIDTH_MIN = 0;
+  const FADE_WIDTH_MAX = 1;
+  const FADE_TRANSPARENCY_MIN = 0;
+  const FADE_TRANSPARENCY_MAX = 1;
+  // 单向转场宽度为 0 时退化成硬边；给一个极窄的坡避免零长度渐变。
+  const FADE_MIN_SPAN = 0.0001;
+  const FADE_MODE_DEFAULTS = {
+    off: { fadePosition: 0, fadeWidth: 1, fadeTop: 0, fadeBottom: 1 },
+    single: { fadePosition: 0, fadeWidth: 1, fadeTop: 0, fadeBottom: 1 },
+    double: { fadePosition: 0.5, fadeWidth: 0, fadeTop: 1, fadeBottom: 1 }
+  };
   const MARGIN_MIN = 0;
   // 页面尺寸的输入范围与预设；属性面板、setPageSize 与校验共用同一份定义。
   const PAGE_SIZE_MIN = 320;
@@ -74,7 +90,11 @@
     brightness: 1,
     hue: 0,
     fadeMode: 'off',
-    fadeAngle: 0
+    fadeAngle: 0,
+    fadePosition: 0,
+    fadeWidth: 1,
+    fadeTop: 0,
+    fadeBottom: 1
   };
   const DEFAULT_TABLE_MARGINS = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -94,14 +114,50 @@
     return typeof value === 'number' && isFinite(value) ? value : fallback;
   }
 
+  function fadeModeOf(item) {
+    const mode = item && item.fadeMode;
+    return FADE_MODES.indexOf(mode) >= 0 ? mode : 'off';
+  }
+
+  // 模式预设：切换模式时面板会用目标模式的预设重置渐隐参数，
+  // 避免把“单向的 100% 坡长”直接当成“双向的 100% 不透明带”。
+  function fadeDefaults(mode) {
+    const preset = FADE_MODE_DEFAULTS[fadeModeOf({ fadeMode: mode })] || FADE_MODE_DEFAULTS.off;
+    return {
+      fadePosition: preset.fadePosition,
+      fadeWidth: preset.fadeWidth,
+      fadeTop: preset.fadeTop,
+      fadeBottom: preset.fadeBottom
+    };
+  }
+
+  // 把图片条目上的渐隐字段归一成渲染/面板共用的一组数值。
+  // 字段缺失时按当前模式的预设补齐，旧项目因此保持原观感。
+  function fadeValues(item) {
+    const source = item || {};
+    const mode = fadeModeOf(source);
+    const preset = FADE_MODE_DEFAULTS[mode];
+    return {
+      mode: mode,
+      angle: clamp(effectNumber(source.fadeAngle, 0), FADE_ANGLE_MIN, FADE_ANGLE_MAX),
+      position: clamp(effectNumber(source.fadePosition, preset.fadePosition), FADE_POSITION_MIN, FADE_POSITION_MAX),
+      width: clamp(effectNumber(source.fadeWidth, preset.fadeWidth), FADE_WIDTH_MIN, FADE_WIDTH_MAX),
+      top: clamp(effectNumber(source.fadeTop, preset.fadeTop), FADE_TRANSPARENCY_MIN, FADE_TRANSPARENCY_MAX),
+      bottom: clamp(effectNumber(source.fadeBottom, preset.fadeBottom), FADE_TRANSPARENCY_MIN, FADE_TRANSPARENCY_MAX)
+    };
+  }
+
   // 任一效果字段非默认即视为“已调整”，供面板提示使用。
   function hasImageEffects(item) {
     if (!item) return false;
     const brightness = effectNumber(item.brightness, 1);
     const hue = effectNumber(item.hue, 0);
-    const fadeAngle = effectNumber(item.fadeAngle, 0);
-    const fadeMode = FADE_MODES.indexOf(item.fadeMode) >= 0 ? item.fadeMode : 'off';
-    return brightness !== 1 || hue !== 0 || fadeMode !== 'off' || fadeAngle !== 0;
+    const fade = fadeValues(item);
+    return brightness !== 1 || hue !== 0 || fade.mode !== 'off' || fade.angle !== 0 ||
+      fade.position !== FADE_MODE_DEFAULTS.off.fadePosition ||
+      fade.width !== FADE_MODE_DEFAULTS.off.fadeWidth ||
+      fade.top !== FADE_MODE_DEFAULTS.off.fadeTop ||
+      fade.bottom !== FADE_MODE_DEFAULTS.off.fadeBottom;
   }
 
   // 渐隐渐变两端点（相对图片矩形中心的局部坐标）。
@@ -116,6 +172,51 @@
     const h = Math.max(0, effectNumber(Number(height), 0));
     const half = Math.abs((w / 2) * dx) + Math.abs((h / 2) * dy);
     return { x1: -dx * half, y1: -dy * half, x2: dx * half, y2: dy * half };
+  }
+
+  function pushFadeStop(stops, t, alpha) {
+    const rounded = Math.round(t * 1e6) / 1e6;
+    const last = stops[stops.length - 1];
+    if (last && last.t === rounded) {
+      last.alpha = alpha;
+      return;
+    }
+    stops.push({ t: rounded, alpha: alpha });
+  }
+
+  // 沿角度轴（0 = 起点边，1 = 终点边）把渐隐描述成“渐变向量 + 色标”。
+  // 单向：位置是渐变起点、宽度是坡长；坡可以伸出图片外，图片只采样其中一段。
+  // 双向：位置是不透明带中心、宽度是不透明带宽度；不透明带被夹到图片内，
+  //       贴边的一端自然没有过渡坡（该端的透明度不再可见）。
+  // stops.t 使用与 from/to 相同的轴向坐标；渲染时再换算成 0–1 的色标偏移。
+  function fadeProfile(item) {
+    const fade = fadeValues(item);
+    if (fade.mode === 'double') {
+      const alphaTop = 1 - fade.top;
+      const alphaBottom = 1 - fade.bottom;
+      const start = clamp(fade.position - fade.width / 2, 0, 1 - fade.width);
+      const end = start + fade.width;
+      const stops = [];
+      if (start > 0) {
+        pushFadeStop(stops, 0, alphaTop);
+        pushFadeStop(stops, start, 1);
+      } else {
+        pushFadeStop(stops, 0, 1);
+      }
+      if (end < 1) {
+        pushFadeStop(stops, end, 1);
+        pushFadeStop(stops, 1, alphaBottom);
+      } else {
+        pushFadeStop(stops, 1, 1);
+      }
+      return { from: 0, to: 1, stops: stops };
+    }
+    const from = fade.position;
+    const to = from + Math.max(fade.width, FADE_MIN_SPAN);
+    const stops = [];
+    pushFadeStop(stops, from, 1 - fade.top);
+    pushFadeStop(stops, to, 1 - fade.bottom);
+    return { from: from, to: to, stops: stops };
   }
 
   function matchPageSizePreset(width, height) {
@@ -591,7 +692,11 @@
       brightness: 1,
       hue: 0,
       fadeMode: 'off',
-      fadeAngle: 0
+      fadeAngle: 0,
+      fadePosition: 0,
+      fadeWidth: 1,
+      fadeTop: 0,
+      fadeBottom: 1
     };
   }
 
@@ -1003,6 +1108,12 @@
     FADE_MODES: FADE_MODES,
     FADE_ANGLE_MIN: FADE_ANGLE_MIN,
     FADE_ANGLE_MAX: FADE_ANGLE_MAX,
+    FADE_POSITION_MIN: FADE_POSITION_MIN,
+    FADE_POSITION_MAX: FADE_POSITION_MAX,
+    FADE_WIDTH_MIN: FADE_WIDTH_MIN,
+    FADE_WIDTH_MAX: FADE_WIDTH_MAX,
+    FADE_TRANSPARENCY_MIN: FADE_TRANSPARENCY_MIN,
+    FADE_TRANSPARENCY_MAX: FADE_TRANSPARENCY_MAX,
     MARGIN_MIN: MARGIN_MIN,
     PAGE_SIZE_MIN: PAGE_SIZE_MIN,
     PAGE_SIZE_MAX: PAGE_SIZE_MAX,
@@ -1046,6 +1157,9 @@
     rotationRadians: rotationRadians,
     rotateVector: rotateVector,
     hasImageEffects: hasImageEffects,
+    fadeDefaults: fadeDefaults,
+    fadeValues: fadeValues,
+    fadeProfile: fadeProfile,
     fadeGradientPoints: fadeGradientPoints,
     fadeMaskRect: fadeMaskRect,
     wrapAngle: wrapAngle,

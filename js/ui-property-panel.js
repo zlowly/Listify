@@ -238,22 +238,37 @@
     return '最适合';
   }
 
-  /* 高级图片效果字段：背景图与自由图片共用同一组名字、范围与展示格式 */
+  /* 高级图片效果字段：背景图与自由图片共用同一组名字、范围与展示格式。
+     渐隐参数比照 Kdenlive 的 Alpha Gradient：位置、转场宽度、角度、顶部/底部透明度。 */
   function imageEffectFields(prefix, item) {
     const brightness = effectNumber(item.brightness, 1);
     const hue = effectNumber(item.hue, 0);
-    const fadeMode = model.FADE_MODES.indexOf(item.fadeMode) >= 0 ? item.fadeMode : 'off';
-    const fadeAngle = effectNumber(item.fadeAngle, 0);
+    const fade = model.fadeValues(item);
+    const fadeDisabled = fade.mode === 'off';
+    const widthLabel = fade.mode === 'double' ? '不透明区宽度' : '转场宽度';
     return field('亮度', rangeInput(prefix + '-brightness', brightness,
         model.BRIGHTNESS_MIN, model.BRIGHTNESS_MAX, 0.01, percentLabel)) +
       field('色相', rangeInput(prefix + '-hue', hue, model.HUE_MIN, model.HUE_MAX, 1, degreeLabel)) +
-      field('渐隐模式', selectInput(prefix + '-fade-mode', [
+      fieldHelp('渐隐模式', selectInput(prefix + '-fade-mode', [
         { value: 'off', label: '关闭' },
         { value: 'single', label: '单向' },
         { value: 'double', label: '双向' }
-      ], fadeMode)) +
-      field('渐隐角度', rangeInput(prefix + '-fade-angle', fadeAngle,
-        model.FADE_ANGLE_MIN, model.FADE_ANGLE_MAX, 1, degreeLabel, fadeMode === 'off'));
+      ], fade.mode), '切换模式会把位置、转场宽度与两端透明度重置为该模式的默认值。') +
+      field('渐隐位置', rangeInput(prefix + '-fade-position', fade.position,
+        model.FADE_POSITION_MIN, model.FADE_POSITION_MAX, 0.01, percentLabel, fadeDisabled)) +
+      field(widthLabel, rangeInput(prefix + '-fade-width', fade.width,
+        model.FADE_WIDTH_MIN, model.FADE_WIDTH_MAX, 0.01, percentLabel, fadeDisabled)) +
+      field('渐隐角度', rangeInput(prefix + '-fade-angle', fade.angle,
+        model.FADE_ANGLE_MIN, model.FADE_ANGLE_MAX, 1, degreeLabel, fadeDisabled)) +
+      field('顶部透明度', rangeInput(prefix + '-fade-top', fade.top,
+        model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, 0.01, percentLabel, fadeDisabled)) +
+      field('底部透明度', rangeInput(prefix + '-fade-bottom', fade.bottom,
+        model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, 0.01, percentLabel, fadeDisabled));
+  }
+
+  function panelFadeDefaults(prefix) {
+    const raw = valueOf(prefix + '-fade-mode');
+    return model.fadeDefaults(model.FADE_MODES.indexOf(raw) >= 0 ? raw : 'off');
   }
 
   /* 效果控件绑定：写入统一走 write(key, value) 意图动作，标签文本同步格式化 */
@@ -270,14 +285,49 @@
     });
     bind(prefix + '-fade-mode', 'change', function () {
       const raw = valueOf(prefix + '-fade-mode');
-      write('fadeMode', model.FADE_MODES.indexOf(raw) >= 0 ? raw : 'off');
-      // 模式变化会影响角度控件的禁用状态，重渲染面板但不重绘画布
+      const mode = model.FADE_MODES.indexOf(raw) >= 0 ? raw : 'off';
+      const defaults = model.fadeDefaults(mode);
+      // 模式即预设：几何含义在单向/双向之间不同，沿用旧数值会把两端淡出变成全不透明。
+      write('fadeMode', mode);
+      write('fadePosition', defaults.fadePosition);
+      write('fadeWidth', defaults.fadeWidth);
+      write('fadeTop', defaults.fadeTop);
+      write('fadeBottom', defaults.fadeBottom);
+      // 模式变化会影响控件标签、禁用状态与数值，重渲染面板但不额外重绘画布
       ui.renderPropertyPanel();
+    });
+    bind(prefix + '-fade-position', 'input', function () {
+      const defaults = panelFadeDefaults(prefix);
+      const value = clampEffect(valueOf(prefix + '-fade-position'),
+        model.FADE_POSITION_MIN, model.FADE_POSITION_MAX, defaults.fadePosition);
+      write('fadePosition', value);
+      updateRangeLabel(prefix + '-fade-position', percentLabel(value));
+    });
+    bind(prefix + '-fade-width', 'input', function () {
+      const defaults = panelFadeDefaults(prefix);
+      const value = clampEffect(valueOf(prefix + '-fade-width'),
+        model.FADE_WIDTH_MIN, model.FADE_WIDTH_MAX, defaults.fadeWidth);
+      write('fadeWidth', value);
+      updateRangeLabel(prefix + '-fade-width', percentLabel(value));
     });
     bind(prefix + '-fade-angle', 'input', function () {
       const value = clampEffect(valueOf(prefix + '-fade-angle'), model.FADE_ANGLE_MIN, model.FADE_ANGLE_MAX, 0);
       write('fadeAngle', value);
       updateRangeLabel(prefix + '-fade-angle', degreeLabel(value));
+    });
+    bind(prefix + '-fade-top', 'input', function () {
+      const defaults = panelFadeDefaults(prefix);
+      const value = clampEffect(valueOf(prefix + '-fade-top'),
+        model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, defaults.fadeTop);
+      write('fadeTop', value);
+      updateRangeLabel(prefix + '-fade-top', percentLabel(value));
+    });
+    bind(prefix + '-fade-bottom', 'input', function () {
+      const defaults = panelFadeDefaults(prefix);
+      const value = clampEffect(valueOf(prefix + '-fade-bottom'),
+        model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, defaults.fadeBottom);
+      write('fadeBottom', value);
+      updateRangeLabel(prefix + '-fade-bottom', percentLabel(value));
     });
   }
 

@@ -485,6 +485,12 @@ test('图片效果：默认字段与范围常量', function () {
   assert.deepEqual(plain(model.FADE_MODES), ['off', 'single', 'double']);
   assert.equal(model.FADE_ANGLE_MIN, 0);
   assert.equal(model.FADE_ANGLE_MAX, 360);
+  assert.equal(model.FADE_POSITION_MIN, 0);
+  assert.equal(model.FADE_POSITION_MAX, 1);
+  assert.equal(model.FADE_WIDTH_MIN, 0);
+  assert.equal(model.FADE_WIDTH_MAX, 1);
+  assert.equal(model.FADE_TRANSPARENCY_MIN, 0);
+  assert.equal(model.FADE_TRANSPARENCY_MAX, 1);
 
   const project = model.createDefaultProject();
   const free = plain(model.createImageElement(project, 'asset-1', 400, 300));
@@ -492,12 +498,20 @@ test('图片效果：默认字段与范围常量', function () {
   assert.equal(free.hue, 0);
   assert.equal(free.fadeMode, 'off');
   assert.equal(free.fadeAngle, 0);
+  assert.equal(free.fadePosition, 0);
+  assert.equal(free.fadeWidth, 1);
+  assert.equal(free.fadeTop, 0);
+  assert.equal(free.fadeBottom, 1);
 
   const background = plain(model.createBackgroundImage('asset-1', 'cover'));
   assert.equal(background.brightness, 1);
   assert.equal(background.hue, 0);
   assert.equal(background.fadeMode, 'off');
   assert.equal(background.fadeAngle, 0);
+  assert.equal(background.fadePosition, 0);
+  assert.equal(background.fadeWidth, 1);
+  assert.equal(background.fadeTop, 0);
+  assert.equal(background.fadeBottom, 1);
 
   // 默认值不改变像素，因此不算“已调整”。
   assert.equal(model.hasImageEffects(background), false);
@@ -511,8 +525,96 @@ test('图片效果：hasImageEffects 任一字段非默认即 true', function ()
   assert.equal(model.hasImageEffects({ fadeMode: 'single' }), true);
   assert.equal(model.hasImageEffects({ fadeMode: 'double' }), true);
   assert.equal(model.hasImageEffects({ fadeAngle: 30 }), true);
+  assert.equal(model.hasImageEffects({ fadePosition: 0.4 }), true);
+  assert.equal(model.hasImageEffects({ fadeWidth: 0.4 }), true);
+  assert.equal(model.hasImageEffects({ fadeTop: 0.4 }), true);
+  assert.equal(model.hasImageEffects({ fadeBottom: 0.4 }), true);
   // 未知渐隐模式按默认“关闭”处理，不制造假提示。
   assert.equal(model.hasImageEffects({ fadeMode: 'x' }), false);
+});
+
+test('图片效果：fadeValues 按模式补齐预设并夹取范围', function () {
+  assert.deepEqual(plain(model.fadeValues({})), {
+    mode: 'off', angle: 0, position: 0, width: 1, top: 0, bottom: 1
+  });
+  assert.deepEqual(plain(model.fadeValues({ fadeMode: 'single' })), {
+    mode: 'single', angle: 0, position: 0, width: 1, top: 0, bottom: 1
+  });
+  assert.deepEqual(plain(model.fadeValues({ fadeMode: 'double' })), {
+    mode: 'double', angle: 0, position: 0.5, width: 0, top: 1, bottom: 1
+  });
+  assert.deepEqual(plain(model.fadeValues({
+    fadeMode: 'single',
+    fadeAngle: 500,
+    fadePosition: 2,
+    fadeWidth: -1,
+    fadeTop: 1.4,
+    fadeBottom: -0.2
+  })), {
+    mode: 'single', angle: 360, position: 1, width: 0, top: 1, bottom: 0
+  });
+  assert.deepEqual(plain(model.fadeDefaults('double')), {
+    fadePosition: 0.5, fadeWidth: 0, fadeTop: 1, fadeBottom: 1
+  });
+  assert.deepEqual(plain(model.fadeDefaults('unknown')), {
+    fadePosition: 0, fadeWidth: 1, fadeTop: 0, fadeBottom: 1
+  });
+});
+
+test('图片效果：fadeProfile 单向使用位置/宽度/两端透明度', function () {
+  const profile = plain(model.fadeProfile({
+    fadeMode: 'single',
+    fadePosition: 0.25,
+    fadeWidth: 0.5,
+    fadeTop: 0.4,
+    fadeBottom: 1
+  }));
+  closeTo(profile.from, 0.25, '单向渐变起点');
+  closeTo(profile.to, 0.75, '单向渐变终点');
+  assert.deepEqual(profile.stops, [
+    { t: 0.25, alpha: 0.6 },
+    { t: 0.75, alpha: 0 }
+  ]);
+
+  // 宽度为 0 时退化为极窄的坡，避免零长度渐变。
+  const hard = plain(model.fadeProfile({
+    fadeMode: 'single', fadePosition: 0.5, fadeWidth: 0, fadeTop: 0, fadeBottom: 1
+  }));
+  closeTo(hard.from, 0.5, '硬边起点');
+  assert.ok(hard.to > hard.from);
+  assert.ok(hard.to - hard.from < 0.001);
+});
+
+test('图片效果：fadeProfile 双向把不透明带夹在图片内', function () {
+  const centered = plain(model.fadeProfile({
+    fadeMode: 'double', fadePosition: 0.5, fadeWidth: 0.4, fadeTop: 1, fadeBottom: 1
+  }));
+  closeTo(centered.from, 0, '双向向量起点');
+  closeTo(centered.to, 1, '双向向量终点');
+  assert.deepEqual(centered.stops, [
+    { t: 0, alpha: 0 },
+    { t: 0.3, alpha: 1 },
+    { t: 0.7, alpha: 1 },
+    { t: 1, alpha: 0 }
+  ]);
+
+  // 不透明带超出起点时贴边，一端没有过渡坡，对应端透明度不再可见。
+  const nearTop = plain(model.fadeProfile({
+    fadeMode: 'double', fadePosition: 0.1, fadeWidth: 0.4, fadeTop: 1, fadeBottom: 0.2
+  }));
+  assert.deepEqual(nearTop.stops, [
+    { t: 0, alpha: 1 },
+    { t: 0.4, alpha: 1 },
+    { t: 1, alpha: 0.8 }
+  ]);
+
+  // 默认双向与旧观感一致：两端全透明、中点不透明。
+  const legacy = plain(model.fadeProfile({ fadeMode: 'double' }));
+  assert.deepEqual(legacy.stops, [
+    { t: 0, alpha: 0 },
+    { t: 0.5, alpha: 1 },
+    { t: 1, alpha: 0 }
+  ]);
 });
 
 test('图片效果：fadeGradientPoints 0° 自上而下', function () {
@@ -587,6 +689,10 @@ test('图片效果：复制背景集保留效果字段', function () {
   image.hue = -30;
   image.fadeMode = 'double';
   image.fadeAngle = 120;
+  image.fadePosition = 0.4;
+  image.fadeWidth = 0.2;
+  image.fadeTop = 0.75;
+  image.fadeBottom = 0.5;
   set.images.push(image);
 
   const copy = model.cloneBackgroundSet(set);
@@ -597,6 +703,10 @@ test('图片效果：复制背景集保留效果字段', function () {
   assert.equal(copy.images[0].hue, -30);
   assert.equal(copy.images[0].fadeMode, 'double');
   assert.equal(copy.images[0].fadeAngle, 120);
+  assert.equal(copy.images[0].fadePosition, 0.4);
+  assert.equal(copy.images[0].fadeWidth, 0.2);
+  assert.equal(copy.images[0].fadeTop, 0.75);
+  assert.equal(copy.images[0].fadeBottom, 0.5);
 
   // 副本与原图互不共享对象。
   copy.images[0].brightness = 0.8;
@@ -609,6 +719,10 @@ test('图片效果：替换图片只改 assetId，效果字段保持不变', fun
   image.hue = 45;
   image.fadeMode = 'single';
   image.fadeAngle = 30;
+  image.fadePosition = 0.1;
+  image.fadeWidth = 0.8;
+  image.fadeTop = 0.3;
+  image.fadeBottom = 0.9;
 
   const replaced = model.cloneBackgroundImage(image);
   replaced.assetId = 'asset-new';
@@ -617,5 +731,9 @@ test('图片效果：替换图片只改 assetId，效果字段保持不变', fun
   assert.equal(replaced.hue, 45);
   assert.equal(replaced.fadeMode, 'single');
   assert.equal(replaced.fadeAngle, 30);
+  assert.equal(replaced.fadePosition, 0.1);
+  assert.equal(replaced.fadeWidth, 0.8);
+  assert.equal(replaced.fadeTop, 0.3);
+  assert.equal(replaced.fadeBottom, 0.9);
   assert.equal(image.assetId, 'asset-old');
 });

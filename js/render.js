@@ -46,18 +46,25 @@
 
   function imageEffects(item) {
     const source = item || {};
+    const fade = model.fadeValues(source);
     return {
       blur: Math.max(0, finiteOr(source.blur, 0)),
       brightness: finiteOr(source.brightness, 1),
       hue: finiteOr(source.hue, 0),
-      fadeMode: model.FADE_MODES.indexOf(source.fadeMode) >= 0 ? source.fadeMode : 'off',
-      fadeAngle: finiteOr(source.fadeAngle, 0)
+      fadeMode: fade.mode,
+      fadeAngle: fade.angle,
+      fadePosition: fade.position,
+      fadeWidth: fade.width,
+      fadeTop: fade.top,
+      fadeBottom: fade.bottom
     };
   }
 
   function effectSignature(effects) {
     return effects.blur + '|' + effects.brightness + '|' + effects.hue + '|' +
-      effects.fadeMode + '|' + effects.fadeAngle;
+      effects.fadeMode + '|' + effects.fadeAngle + '|' +
+      effects.fadePosition + '|' + effects.fadeWidth + '|' +
+      effects.fadeTop + '|' + effects.fadeBottom;
   }
 
   // 滤镜串只在非默认时列出对应项；模糊半径由调用方按位图比例换算。
@@ -75,15 +82,28 @@
   function fillFadeMask(ctx, effects, width, height, scaleX, scaleY, originX, originY) {
     if (effects.fadeMode === 'off') return;
     const points = model.fadeGradientPoints(effects.fadeAngle, width, height);
+    const profile = model.fadeProfile(effects);
+    const span = profile.to - profile.from;
+    // 轴向坐标 t 沿 fadeGradientPoints 给出的整条投影轴线性映射；
+    // 单向的坡可以伸出图片，画布会把图片外的那段裁掉。
+    function axisPoint(t) {
+      return {
+        x: points.x1 + (points.x2 - points.x1) * t,
+        y: points.y1 + (points.y2 - points.y1) * t
+      };
+    }
+    const start = axisPoint(profile.from);
+    const end = axisPoint(profile.to);
     const gradient = ctx.createLinearGradient(
-      (points.x1 - originX) * scaleX,
-      (points.y1 - originY) * scaleY,
-      (points.x2 - originX) * scaleX,
-      (points.y2 - originY) * scaleY
+      (start.x - originX) * scaleX,
+      (start.y - originY) * scaleY,
+      (end.x - originX) * scaleX,
+      (end.y - originY) * scaleY
     );
-    gradient.addColorStop(0, effects.fadeMode === 'single' ? 'rgba(0,0,0,1)' : 'rgba(0,0,0,0)');
-    if (effects.fadeMode === 'double') gradient.addColorStop(0.5, 'rgba(0,0,0,1)');
-    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    profile.stops.forEach(function (stop) {
+      const offset = span > 0 ? (stop.t - profile.from) / span : 0;
+      gradient.addColorStop(model.clamp(offset, 0, 1), 'rgba(0,0,0,' + stop.alpha + ')');
+    });
     const previous = ctx.globalCompositeOperation;
     ctx.globalCompositeOperation = 'destination-in';
     ctx.fillStyle = gradient;

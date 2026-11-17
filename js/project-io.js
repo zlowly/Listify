@@ -82,6 +82,7 @@
         style: serializeStyle(element.style)
       };
     }
+    const fade = L.model.fadeValues(element);
     return {
       id: element.id,
       type: 'image',
@@ -96,12 +97,17 @@
       blur: Number(element.blur) || 0,
       brightness: element.brightness == null ? 1 : element.brightness,
       hue: element.hue == null ? 0 : element.hue,
-      fadeMode: L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off',
-      fadeAngle: Number(element.fadeAngle) || 0
+      fadeMode: fade.mode,
+      fadeAngle: fade.angle,
+      fadePosition: fade.position,
+      fadeWidth: fade.width,
+      fadeTop: fade.top,
+      fadeBottom: fade.bottom
     };
   }
 
   function serializeBackgroundImage(image) {
+    const fade = L.model.fadeValues(image);
     return {
       id: image.id,
       assetId: image.assetId || null,
@@ -116,8 +122,12 @@
       blur: image.blur == null ? 0 : image.blur,
       brightness: image.brightness == null ? 1 : image.brightness,
       hue: image.hue == null ? 0 : image.hue,
-      fadeMode: L.model.FADE_MODES.indexOf(image.fadeMode) >= 0 ? image.fadeMode : 'off',
-      fadeAngle: Number(image.fadeAngle) || 0
+      fadeMode: fade.mode,
+      fadeAngle: fade.angle,
+      fadePosition: fade.position,
+      fadeWidth: fade.width,
+      fadeTop: fade.top,
+      fadeBottom: fade.bottom
     };
   }
 
@@ -301,6 +311,8 @@
               };
             }
             if (!isV1) {
+              const fadeMode = L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off';
+              const fadeDefaults = L.model.fadeDefaults(fadeMode);
               return {
                 id: element.id,
                 type: 'image',
@@ -315,8 +327,16 @@
                 blur: L.projectSchema.isFiniteNumber(element.blur) ? element.blur : 0,
                 brightness: L.projectSchema.isFiniteNumber(element.brightness) ? element.brightness : 1,
                 hue: L.projectSchema.isFiniteNumber(element.hue) ? element.hue : 0,
-                fadeMode: L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off',
-                fadeAngle: L.projectSchema.isFiniteNumber(element.fadeAngle) ? element.fadeAngle : 0
+                fadeMode: fadeMode,
+                fadeAngle: L.projectSchema.isFiniteNumber(element.fadeAngle) ? element.fadeAngle : 0,
+                fadePosition: L.projectSchema.isFiniteNumber(element.fadePosition)
+                  ? element.fadePosition : fadeDefaults.fadePosition,
+                fadeWidth: L.projectSchema.isFiniteNumber(element.fadeWidth)
+                  ? element.fadeWidth : fadeDefaults.fadeWidth,
+                fadeTop: L.projectSchema.isFiniteNumber(element.fadeTop)
+                  ? element.fadeTop : fadeDefaults.fadeTop,
+                fadeBottom: L.projectSchema.isFiniteNumber(element.fadeBottom)
+                  ? element.fadeBottom : fadeDefaults.fadeBottom
               };
             }
             const decoded = tempImages.get(element.assetId);
@@ -344,7 +364,11 @@
               brightness: 1,
               hue: 0,
               fadeMode: 'off',
-              fadeAngle: 0
+              fadeAngle: 0,
+              fadePosition: 0,
+              fadeWidth: 1,
+              fadeTop: 0,
+              fadeBottom: 1
             };
           })
         };

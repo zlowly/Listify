@@ -561,7 +561,8 @@ const viewport = {
   /* ---------- 属性意图动作（供 UI 面板写入） ---------- */
 
   const ELEMENT_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'blur', 'text', 'showTitle',
-    'brightness', 'hue', 'fadeMode', 'fadeAngle'];
+    'brightness', 'hue', 'fadeMode', 'fadeAngle',
+    'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom'];
   const ELEMENT_STYLE_FIELDS = ['fontSize', 'fontWeight', 'color', 'lineHeight', 'align', 'fontFamily', 'fontFamilies'];
 
   function setElementField(field, value) {
