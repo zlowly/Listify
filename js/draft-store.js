@@ -399,14 +399,14 @@
   }
 
   function pruneMissingAssets(raw, missing) {
-    (raw.backgrounds || []).forEach(function (background) {
-      if (!background || !Array.isArray(background.images)) return;
-      background.images = background.images.filter(function (image) {
-        return !image || !image.assetId || !missing.has(image.assetId);
-      });
-    });
     (raw.pages || []).forEach(function (page) {
-      if (!page || !Array.isArray(page.elements)) return;
+      if (!page) return;
+      if (page.background && Array.isArray(page.background.images)) {
+        page.background.images = page.background.images.filter(function (image) {
+          return !image || !image.assetId || !missing.has(image.assetId);
+        });
+      }
+      if (!Array.isArray(page.elements)) return;
       page.elements = page.elements.filter(function (element) {
         return !(element && element.type === 'image' &&
           element.assetId && missing.has(element.assetId));
@@ -449,7 +449,7 @@
         error: '草稿版本不受支持。'
       };
     }
-    if (typeof envelope.project.version === 'number' && envelope.project.version > 3) {
+    if (typeof envelope.project.version === 'number' && envelope.project.version > 4) {
       backupCorruptDraft(text);
       return { ok: false, reason: 'version', error: '草稿项目版本高于当前支持版本。' };
     }

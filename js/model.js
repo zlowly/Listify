@@ -516,10 +516,8 @@
     });
   }
 
-  function createBackgroundSet(name, color) {
+  function createPageBackground(color) {
     return {
-      id: uid('bg'),
-      name: name || '背景',
       color: color || DEFAULT_BACKGROUND_COLOR,
       images: []
     };
@@ -529,90 +527,71 @@
     return Object.assign({}, DEFAULT_BACKGROUND_IMAGE, image, { id: uid('bgimg') });
   }
 
-  function cloneBackgroundSet(set) {
+  // 页面背景是纯值：复制时图片条目换新 ID，assetId 继续共享同一图片资产。
+  function clonePageBackground(background) {
     return {
-      id: uid('bg'),
-      name: set && set.name ? set.name : '背景',
-      color: set && set.color ? set.color : DEFAULT_BACKGROUND_COLOR,
-      images: (set && Array.isArray(set.images) ? set.images : []).map(cloneBackgroundImage)
+      color: background && background.color ? background.color : DEFAULT_BACKGROUND_COLOR,
+      images: (background && Array.isArray(background.images) ? background.images : []).map(cloneBackgroundImage)
     };
   }
 
-  function createPage(backgroundId) {
+  function createPage(background) {
     return {
       id: uid('page'),
-      backgroundId: backgroundId || null,
+      background: clonePageBackground(background),
       elements: []
     };
   }
 
-  function findBackground(project, id) {
-    if (!project || !id) return null;
-    return project.backgrounds.find(function (item) { return item.id === id; }) || null;
+  function findGlobalBackgroundPage(project) {
+    if (!project || !project.globalBackgroundPageId || !Array.isArray(project.pages)) return null;
+    return project.pages.find(function (page) {
+      return page.id === project.globalBackgroundPageId;
+    }) || null;
   }
 
   function effectiveBackground(project, page) {
-    if (!project) return null;
-    if (project.unifiedBackground) {
-      const unified = findBackground(project, project.unifiedBackgroundId);
-      if (unified) return unified;
-    }
-    if (!page) return null;
-    return findBackground(project, page.backgroundId);
+    const source = findGlobalBackgroundPage(project);
+    if (source && source.background) return source.background;
+    return page && page.background ? page.background : null;
   }
 
-  function backgroundReferenceCount(project, setId) {
-    if (!project) return 0;
-    return project.pages.filter(function (page) { return page.backgroundId === setId; }).length;
+  // 当前页显示的是否来自另一页的全局背景。悬空指针按“无全局”处理。
+  function isBackgroundCovered(project, page) {
+    if (!project || !page || !project.globalBackgroundPageId) return false;
+    const source = findGlobalBackgroundPage(project);
+    return !!source && source.id !== page.id;
   }
 
-  function canDeleteBackground(project, setId) {
-    if (!project) return { ok: false, reason: '项目不存在。' };
-    if (project.backgrounds.length <= 1) {
-      return { ok: false, reason: '项目至少需要保留一个背景。' };
-    }
-    const references = backgroundReferenceCount(project, setId);
-    if (references > 0) {
-      return { ok: false, reason: '有 ' + references + ' 个页面正在使用该背景，请先改派。' };
-    }
-    if (project.unifiedBackground && project.unifiedBackgroundId === setId) {
-      return { ok: false, reason: '该背景正在作为全局背景使用，请先更换或关闭全局背景。' };
-    }
-    return { ok: true, reason: '' };
+  function canEditPageBackground(project, page) {
+    return !!page && !!page.background && !isBackgroundCovered(project, page);
   }
 
-  function resolveBackgroundOwner(project, page) {
-    if (!project || !page) return null;
-    let cursor = page;
-    const seen = new Set();
-    while (cursor) {
-      if (!cursor.backgroundRef) return cursor;
-      if (seen.has(cursor.id) || seen.has(cursor.backgroundRef)) return null;
-      seen.add(cursor.id);
-      cursor = project.pages.find(function (item) { return item.id === cursor.backgroundRef; }) || null;
+  function setGlobalBackgroundPage(project, page) {
+    if (!project || !page || !Array.isArray(project.pages) ||
+        !project.pages.some(function (item) { return item.id === page.id; })) {
+      return false;
     }
-    return null;
+    project.globalBackgroundPageId = page.id;
+    return true;
   }
 
-  function referencingPages(project, page) {
-    if (!project || !page) return [];
-    return project.pages.filter(function (item) { return item.backgroundRef === page.id; });
+  function clearGlobalBackground(project) {
+    if (!project) return;
+    project.globalBackgroundPageId = null;
   }
 
   function createDefaultProject() {
-    const background = createBackgroundSet('背景 1', DEFAULT_BACKGROUND_COLOR);
+    const page = createPage(createPageBackground(DEFAULT_BACKGROUND_COLOR));
     const project = {
-      version: 3,
+      version: 4,
       pageSize: { width: 1080, height: 1920 },
       margins: { top: 60, right: 60, bottom: 60, left: 60 },
       playlist: { categories: [] },
       assets: [],
-      backgrounds: [background],
-      unifiedBackground: false,
-      unifiedBackgroundId: null,
-      pages: []
+      globalBackgroundPageId: null,
+      pages: [page]
     };
-    project.pages.push(createPage(background.id));
     return project;
   }
 
@@ -1138,16 +1117,16 @@
     normalizeShadow: normalizeShadow,
     normalizeOutline: normalizeOutline,
     createBackgroundImage: createBackgroundImage,
-    createBackgroundSet: createBackgroundSet,
     cloneBackgroundImage: cloneBackgroundImage,
-    cloneBackgroundSet: cloneBackgroundSet,
+    createPageBackground: createPageBackground,
+    clonePageBackground: clonePageBackground,
     createPage: createPage,
-    findBackground: findBackground,
+    findGlobalBackgroundPage: findGlobalBackgroundPage,
     effectiveBackground: effectiveBackground,
-    backgroundReferenceCount: backgroundReferenceCount,
-    canDeleteBackground: canDeleteBackground,
-    resolveBackgroundOwner: resolveBackgroundOwner,
-    referencingPages: referencingPages,
+    isBackgroundCovered: isBackgroundCovered,
+    canEditPageBackground: canEditPageBackground,
+    setGlobalBackgroundPage: setGlobalBackgroundPage,
+    clearGlobalBackground: clearGlobalBackground,
     createDefaultProject: createDefaultProject,
     createTable: createTable,
     normalizeMargins: normalizeMargins,

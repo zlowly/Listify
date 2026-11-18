@@ -47,10 +47,12 @@
   function restoredSelection(selection) {
     if (!selection) return { type: 'page' };
     if (selection.type === 'element' && findElementAnywhere(selection.id)) return selection;
-    if (selection.type === 'backgroundSet' && model.findBackground(state.project, selection.setId)) return selection;
-    if (selection.type === 'backgroundImage') {
-      const set = model.findBackground(state.project, selection.setId);
-      const exists = set && (set.images || []).some(function (image) {
+    const page = currentPage();
+    if (selection.type === 'background' && page && model.canEditPageBackground(state.project, page)) {
+      return selection;
+    }
+    if (selection.type === 'backgroundImage' && page && model.canEditPageBackground(state.project, page)) {
+      const exists = (page.background.images || []).some(function (image) {
         return image.id === selection.imageId;
       });
       if (exists) return selection;
@@ -153,21 +155,17 @@ const viewport = {
   }
 
   function editingBackground() {
-    return state.selection.type === 'backgroundSet' || state.selection.type === 'backgroundImage';
-  }
-
-  function selectedBackgroundSet() {
-    if (!editingBackground()) return null;
-    return model.findBackground(state.project, state.selection.setId);
+    return (state.selection.type === 'background' || state.selection.type === 'backgroundImage') &&
+      model.canEditPageBackground(state.project, currentPage());
   }
 
   // 选中者优先：指针位于当前选中元素范围内（图片用旋转后矩形）时返回该元素
 
   function selectedBackgroundImage() {
     if (state.selection.type !== 'backgroundImage') return null;
-    const set = model.findBackground(state.project, state.selection.setId);
-    if (!set) return null;
-    return (set.images || []).find(function (image) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return null;
+    return (page.background.images || []).find(function (image) {
       return image.id === state.selection.imageId;
     }) || null;
   }
@@ -272,25 +270,20 @@ const viewport = {
     else ui.renderAll();
   }
 
-  function selectBackgroundSet(setId) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    state.selection = { type: 'backgroundSet', setId: setId };
-    ui.renderAll();
-  }
-
-  function selectBackgroundImage(setId, imageId) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    const image = (set.images || []).find(function (item) { return item.id === imageId; });
-    if (!image) return;
-    state.selection = { type: 'backgroundImage', setId: setId, imageId: imageId };
-    ui.renderAll();
-  }
-
   function selectBackground() {
-    const set = model.effectiveBackground(state.project, currentPage());
-    if (set) selectBackgroundSet(set.id);
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    state.selection = { type: 'background' };
+    ui.renderAll();
+  }
+
+  function selectBackgroundImage(imageId) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
+    if (!image) return;
+    state.selection = { type: 'backgroundImage', imageId: imageId };
+    ui.renderAll();
   }
 
   function selectElement(id) {
@@ -316,9 +309,10 @@ const viewport = {
         key = 'el:' + target.id;
         label = '微调元素';
       }
-    } else if (state.selection.type === 'backgroundImage') {
-      const set = model.findBackground(state.project, state.selection.setId);
-      target = set ? (set.images || []).find(function (img) { return img && img.id === state.selection.imageId; }) : null;
+    } else if (state.selection.type === 'backgroundImage' && model.canEditPageBackground(state.project, page)) {
+      target = (page.background.images || []).find(function (img) {
+        return img && img.id === state.selection.imageId;
+      }) || null;
       if (target) {
         key = 'bg:' + target.id;
         label = '微调背景图片';
@@ -348,10 +342,7 @@ const viewport = {
 
   function addPageDialog() {
     const current = currentPage();
-    const backgroundId = state.project.unifiedBackground && state.project.unifiedBackgroundId
-      ? state.project.unifiedBackgroundId
-      : (current && current.backgroundId) || (state.project.backgrounds[0] || {}).id || null;
-    const page = model.createPage(backgroundId);
+    const page = model.createPage(model.effectiveBackground(state.project, current));
     pushUndo('新增页面');
     state.project.pages.push(page);
     state.currentPageId = page.id;
@@ -375,6 +366,9 @@ const viewport = {
       if (!ok) return;
       pushUndo('删除页面');
       state.project.pages.splice(index, 1);
+      if (state.project.globalBackgroundPageId === page.id) {
+        model.clearGlobalBackground(state.project);
+      }
       const next = state.project.pages[Math.min(index, state.project.pages.length - 1)];
       state.currentPageId = next.id;
       state.selection = { type: 'page' };
@@ -579,16 +573,17 @@ const viewport = {
     changed({ property: false });
   }
 
-  function setBackgroundColor(setId, color) {
-    const set = model.findBackground(state.project, setId);
-    if (!set) return;
-    set.color = color;
+  function setBackgroundColor(color) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    page.background.color = color;
     changed({ property: false, layers: ['bg', 'overlay'] });
   }
 
-  function setBackgroundImageField(setId, imageId, field, value) {
-    const set = model.findBackground(state.project, setId);
-    const image = set && (set.images || []).find(function (item) { return item.id === imageId; });
+  function setBackgroundImageField(imageId, field, value) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
     if (!image || field !== 'keepRatio') return;
     image.keepRatio = !!value;
     changed({ property: false, layers: ['bg', 'overlay'] });
@@ -615,14 +610,14 @@ const viewport = {
 
   function assetIsReferenced(assetId) {
     if (!assetId) return false;
-    return (state.project.backgrounds || []).some(function (background) {
-      return (background.images || []).some(function (image) {
+    return state.project.pages.some(function (page) {
+      const backgroundReferenced = (page.background.images || []).some(function (image) {
         return image.assetId === assetId;
       });
-    }) || state.project.pages.some(function (page) {
-      return page.elements.some(function (element) {
+      const elementReferenced = page.elements.some(function (element) {
         return element.type === 'image' && element.assetId === assetId;
       });
+      return backgroundReferenced || elementReferenced;
     });
   }
 
@@ -848,29 +843,6 @@ const viewport = {
 
 
 
-  // 整套模式本地链路：先新建背景集，再选图；选图后 handleBackgroundFile 加图并把该集指派当前页。
-
-  // 预置弹窗拖入的图片文件：按模式直接处理（不走文件选择框）。
-
-  // 预置素材应用处理器：base64 物化进现有资产管线（addFile 内容哈希去重），再按模式写入。
-
-  // 预置图片加入背景集：同内容哈希复用已有层，避免重复。
-
-  // 整套模式：建/复用「预置 · X」背景集（同名指派、异名新建，新建时取建议填充色），
-  // 全局开启 → 指派 unifiedBackgroundId（不覆写各页 backgroundId），关闭 → 指派当前页。
-
-  // 加图模式：追加到入口指定的背景集（缺失时回退当前页生效背景）。
-
-  // 替换模式：换 assetId，保留 fit/自定义矩形/不透明度/模糊/顺序。
-
-  // 建议填充色相对亮度（sRGB → 线性）；深色预置应用后仅提示，不改数据。
-
-
-
-
-
-
-
   /* ---------- import ---------- */
 
 
@@ -967,6 +939,9 @@ const viewport = {
     selectedElement: selectedElement,
     editingBackground: editingBackground,
     selectedBackgroundImage: selectedBackgroundImage,
+    canEditPageBackground: function (page) {
+      return model.canEditPageBackground(state.project, page);
+    },
     backgroundImageBounds: backgroundImageBounds,
     switchPage: switchPage,
     ensureCustomBackgroundImage: ensureCustomBackgroundImage,
@@ -977,7 +952,6 @@ const viewport = {
     selectPage: selectPage,
     selectElement: selectElement,
     selectBackground: selectBackground,
-    selectBackgroundSet: selectBackgroundSet,
     selectBackgroundImage: selectBackgroundImage,
     placeCategory: placeCategory,
     openPlaylistEditor: openPlaylistEditor,
@@ -1006,6 +980,13 @@ const viewport = {
   Object.assign(ctx.viewport, L.appViewport.create(ctx));
   ctx.interactions = L.appInteractions.create(ctx);
   ctx.backgrounds = L.appBackgrounds.create(ctx);
+  Object.assign(ctx.actions, {
+    setGlobalBackgroundPage: ctx.backgrounds.setGlobalBackgroundPage,
+    clearGlobalBackground: ctx.backgrounds.clearGlobalBackground,
+    copyBackgroundFromPage: ctx.backgrounds.copyBackgroundFromPage,
+    clearPageBackground: ctx.backgrounds.clearPageBackground,
+    replacePageBackground: ctx.backgrounds.replacePageBackground
+  });
   ctx.presets = L.appPresets.create(ctx);
   ctx.importExport = L.appImportExport.create(ctx);
 
@@ -1016,7 +997,6 @@ const viewport = {
     selectedElement: selectedElement,
     selectPage: selectPage,
     selectBackground: selectBackground,
-    selectBackgroundSet: selectBackgroundSet,
     selectBackgroundImage: selectBackgroundImage,
     selectElement: selectElement,
     nudgeSelection: nudgeSelection,
@@ -1052,11 +1032,11 @@ const viewport = {
     setElementStyleField: setElementStyleField,
     setBackgroundColor: setBackgroundColor,
     setBackgroundImageField: setBackgroundImageField,
-    addBackgroundSet: ctx.backgrounds.addBackgroundSet,
-    duplicateBackgroundSet: ctx.backgrounds.duplicateBackgroundSet,
-    renameBackgroundSet: ctx.backgrounds.renameBackgroundSet,
-    deleteBackgroundSet: ctx.backgrounds.deleteBackgroundSet,
-    setPageBackground: ctx.backgrounds.setPageBackground,
+    setGlobalBackgroundPage: ctx.backgrounds.setGlobalBackgroundPage,
+    clearGlobalBackground: ctx.backgrounds.clearGlobalBackground,
+    copyBackgroundFromPage: ctx.backgrounds.copyBackgroundFromPage,
+    clearPageBackground: ctx.backgrounds.clearPageBackground,
+    replacePageBackground: ctx.backgrounds.replacePageBackground,
     pickBackgroundImage: ctx.backgrounds.pickBackgroundImage,
     pickBackgroundImageWhole: ctx.backgrounds.pickBackgroundImageWhole,
     handleBackgroundFile: ctx.backgrounds.handleBackgroundFile,
@@ -1068,10 +1048,6 @@ const viewport = {
     setBackgroundImageFit: ctx.backgrounds.setBackgroundImageFit,
     restoreBackgroundImageFit: ctx.backgrounds.restoreBackgroundImageFit,
     setBackgroundImageValue: ctx.backgrounds.setBackgroundImageValue,
-    toggleUnifiedBackground: ctx.backgrounds.toggleUnifiedBackground,
-    setUnifiedBackground: ctx.backgrounds.setUnifiedBackground,
-    bakeUnifiedBackground: ctx.backgrounds.bakeUnifiedBackground,
-    copyUnifiedBackgroundToPage: ctx.backgrounds.copyUnifiedBackgroundToPage,
     openImport: ctx.importExport.openImport,
     exportPlaylist: ctx.importExport.exportPlaylist,
     handleImportFile: ctx.importExport.handleImportFile,

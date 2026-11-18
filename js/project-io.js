@@ -10,13 +10,12 @@
 
   function collectReferencedAssetIds(project) {
     const ids = new Set();
-    (project.backgrounds || []).forEach(function (background) {
-      (background.images || []).forEach(function (image) {
+    (project.pages || []).forEach(function (page) {
+      const background = page && page.background;
+      (background && background.images || []).forEach(function (image) {
         if (image && image.assetId) ids.add(image.assetId);
       });
-    });
-    project.pages.forEach(function (page) {
-      page.elements.forEach(function (element) {
+      (page.elements || []).forEach(function (element) {
         if (element.type === 'image' && element.assetId) ids.add(element.assetId);
       });
     });
@@ -131,12 +130,11 @@
     };
   }
 
-  function serializeBackgroundSet(background) {
+  function serializePageBackground(background) {
+    const source = background || {};
     return {
-      id: background.id,
-      name: background.name || '背景',
-      color: background.color || L.model.DEFAULT_BACKGROUND_COLOR,
-      images: (background.images || []).map(serializeBackgroundImage)
+      color: source.color || L.model.DEFAULT_BACKGROUND_COLOR,
+      images: (source.images || []).map(serializeBackgroundImage)
     };
   }
 
@@ -155,7 +153,7 @@
     });
 
     return {
-      version: 3,
+      version: 4,
       pageSize: {
         width: project.pageSize.width,
         height: project.pageSize.height
@@ -172,13 +170,11 @@
         })
       },
       assets: assets,
-      backgrounds: (project.backgrounds || []).map(serializeBackgroundSet),
-      unifiedBackground: !!project.unifiedBackground,
-      unifiedBackgroundId: project.unifiedBackgroundId || null,
+      globalBackgroundPageId: project.globalBackgroundPageId || null,
       pages: project.pages.map(function (page) {
         return {
           id: page.id,
-          backgroundId: page.backgroundId || null,
+          background: serializePageBackground(page.background),
           elements: page.elements.map(serializeElement)
         };
       })
@@ -249,9 +245,8 @@
     }
 
     const isV1 = raw.version === 1;
-    const isV3 = raw.version === 3;
     const project = {
-      version: 3,
+      version: 4,
       pageSize: { width: raw.pageSize.width, height: raw.pageSize.height },
       margins: {
         top: raw.margins.top,
@@ -267,13 +262,11 @@
       assets: raw.assets.map(function (asset) {
         return { id: asset.id, name: asset.name || 'image', mime: asset.mime || 'image/png' };
       }),
-      backgrounds: [],
-      unifiedBackground: false,
-      unifiedBackgroundId: null,
+      globalBackgroundPageId: null,
       pages: raw.pages.map(function (page) {
         return {
           id: page.id,
-          backgroundId: null,
+          background: null,
           elements: page.elements.map(function (element) {
             if (element.type === 'category') {
               return {
@@ -375,16 +368,11 @@
       })
     };
 
-    if (isV3) {
-      project.backgrounds = raw.backgrounds.map(L.projectSchema.buildBackgroundSet);
-      project.unifiedBackground = !!raw.unifiedBackground;
-      project.unifiedBackgroundId = raw.unifiedBackgroundId || null;
-      project.pages.forEach(function (page, index) {
-        page.backgroundId = raw.pages[index].backgroundId;
-      });
-    } else {
-      L.projectSchema.migrateLegacyBackgrounds(project, raw, isV1);
-    }
+    const resolved = L.projectSchema.resolvePageBackgrounds(raw);
+    project.pages.forEach(function (page, index) {
+      page.background = resolved.backgrounds[index];
+    });
+    project.globalBackgroundPageId = resolved.globalBackgroundPageId;
 
     return {
       project: project,

@@ -407,9 +407,11 @@
     const current = L.app.state.currentPageId;
     ui.els.pageTabs.innerHTML = project.pages.map(function (page, index) {
       const active = page.id === current;
-      return '<button class="page-tab' + (active ? ' active' : '') + '"' +
-        (active ? ' aria-current="page"' : '') + ' aria-label="第 ' + (index + 1) + ' 页" data-page-id="' +
-        esc(page.id) + '">' + (index + 1) + '</button>';
+      const isGlobal = project.globalBackgroundPageId === page.id;
+      return '<button class="page-tab' + (active ? ' active' : '') + (isGlobal ? ' global-source' : '') + '"' +
+        (active ? ' aria-current="page"' : '') + ' aria-label="第 ' + (index + 1) + ' 页' +
+        (isGlobal ? '，全局背景来源' : '') + '" data-page-id="' +
+        esc(page.id) + '">' + (index + 1) + (isGlobal ? '<span class="page-tab-dot" aria-hidden="true"></span>' : '') + '</button>';
     }).join('');
     ui.els.pageTabs.querySelectorAll('.page-tab').forEach(function (button) {
       button.addEventListener('click', function () {
@@ -492,9 +494,8 @@
       return id && id !== drag.id ? id : null;
     }
     if (kind === 'bgImage') {
-      const parts = (row.getAttribute('data-bg-image') || '').split(':');
-      if (parts[0] !== drag.setId || parts[1] === drag.id) return null;
-      return parts[1];
+      const id = row.getAttribute('data-bg-image');
+      return id && id !== drag.id ? id : null;
     }
     return null;
   }
@@ -540,34 +541,43 @@
         (realIndex === page.elements.length - 1 ? ' disabled' : '') + '>↑</button>' +
         '</span></div>');
     });
-    const set = model.effectiveBackground(project, page);
-    if (set) {
-      const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
-      const bgSelected = selection.type === 'backgroundSet' && selection.setId === set.id;
-      const referenceCount = model.backgroundReferenceCount(project, set.id);
-      const subParts = [referenceCount + ' 页使用'];
-      if (isGlobal) subParts.push('全局背景');
-      rows.push('<div class="layer-row layer-bg-row' + (bgSelected ? ' selected' : '') +
-        '" data-layer-kind="bgSet" data-bg-set="' + esc(set.id) + '">' +
+    const source = model.findGlobalBackgroundPage(project);
+    if (model.isBackgroundCovered(project, page) && source) {
+      rows.push('<div class="layer-row layer-bg-row" data-layer-kind="bgGlobal" data-bg-source="' +
+        esc(source.id) + '">' +
         '<button type="button" class="layer-row-main" aria-label="' +
-          esc('背景 · ' + set.name + '，' + subParts.join(' · ')) + '">' +
+          esc('全局背景，来自第 ' + (project.pages.indexOf(source) + 1) + ' 页，点击前往') + '">' +
         '<span class="layer-icon" aria-hidden="true">▦</span>' +
-        '<span class="layer-name">' + esc(set.name) +
-          '<span class="layer-sub"> ' + esc(subParts.join(' · ')) + '</span></span>' +
-        (isGlobal ? '<span class="pill pill-blue">全局</span>' : '') +
+        '<span class="layer-name">全局背景<span class="layer-sub"> 来自第 ' +
+          (project.pages.indexOf(source) + 1) + ' 页</span></span>' +
+        '<span class="pill pill-blue">全局</span>' +
+        '</button>' +
+        '<span class="row-actions"><span class="layer-jump" aria-hidden="true">→</span></span>' +
+        '</div>');
+    } else {
+      const background = page.background;
+      const isSource = !!(source && source.id === page.id);
+      const bgSelected = selection.type === 'background';
+      const imageCount = (background.images || []).length;
+      rows.push('<div class="layer-row layer-bg-row' + (bgSelected ? ' selected' : '') +
+        '" data-layer-kind="bgSet">' +
+        '<button type="button" class="layer-row-main" aria-label="' +
+          esc('背景，' + imageCount + ' 张图片' + (isSource ? '，全局来源' : '')) + '">' +
+        '<span class="layer-icon" aria-hidden="true">▦</span>' +
+        '<span class="layer-name">背景' +
+          '<span class="layer-sub"> ' + imageCount + ' 张图' + (isSource ? ' · 全局来源' : '') + '</span></span>' +
+        (isSource ? '<span class="pill pill-blue">全局</span>' : '') +
         '<span class="pill pill-blue">底层</span>' +
         '</button>' +
-        '<button class="icon-btn" type="button" data-bg-add="' + esc(set.id) + '" title="添加背景图片" aria-label="添加背景图片">＋</button>' +
+        '<button class="icon-btn" type="button" data-bg-add title="添加背景图片" aria-label="添加背景图片">＋</button>' +
         '</div>');
-      const images = (set.images || []).slice().reverse();
+      const images = (background.images || []).slice().reverse();
       images.forEach(function (image, reverseIndex) {
-        const realIndex = set.images.length - 1 - reverseIndex;
-        const imageSelected = selection.type === 'backgroundImage' &&
-          selection.setId === set.id && selection.imageId === image.id;
+        const realIndex = background.images.length - 1 - reverseIndex;
+        const imageSelected = selection.type === 'backgroundImage' && selection.imageId === image.id;
         const fitText = image.fit === 'none' ? '自定义' : fitLabel(image.fit);
-        const moveBase = esc(set.id) + ':' + esc(image.id);
         rows.push('<div class="layer-row layer-bg-image-row' + (imageSelected ? ' selected' : '') +
-          '" data-layer-kind="bgImage" data-bg-image="' + esc(set.id) + ':' + esc(image.id) + '">' +
+          '" data-layer-kind="bgImage" data-bg-image="' + esc(image.id) + '">' +
           '<button type="button" class="layer-row-main" draggable="true" aria-label="' +
             esc('图片 ' + (realIndex + 1) + '，' + fitText + '，拖动可调整顺序') + '">' +
           '<span class="layer-icon" aria-hidden="true">▧</span>' +
@@ -575,10 +585,10 @@
             '<span class="layer-sub"> ' + esc(fitText) + '</span></span>' +
           '</button>' +
           '<span class="row-actions">' +
-          '<button class="icon-btn" type="button" data-bg-move="' + moveBase + ':-1" title="下移一层" aria-label="下移一层"' +
+          '<button class="icon-btn" type="button" data-bg-move="' + esc(image.id) + ':-1" title="下移一层" aria-label="下移一层"' +
           (realIndex === 0 ? ' disabled' : '') + '>↓</button>' +
-          '<button class="icon-btn" type="button" data-bg-move="' + moveBase + ':1" title="上移一层" aria-label="上移一层"' +
-          (realIndex === set.images.length - 1 ? ' disabled' : '') + '>↑</button>' +
+          '<button class="icon-btn" type="button" data-bg-move="' + esc(image.id) + ':1" title="上移一层" aria-label="上移一层"' +
+          (realIndex === background.images.length - 1 ? ' disabled' : '') + '>↑</button>' +
           '</span></div>');
       });
     }
@@ -592,19 +602,22 @@
           return;
         }
         if (kind === 'bgSet') {
-          L.app.selectBackgroundSet(row.getAttribute('data-bg-set'));
+          L.app.selectBackground();
           return;
         }
-        const parts = row.getAttribute('data-bg-image').split(':');
-        L.app.selectBackgroundImage(parts[0], parts[1]);
+        if (kind === 'bgGlobal') {
+          L.app.switchPage(row.getAttribute('data-bg-source'));
+          L.app.selectBackground();
+          return;
+        }
+        L.app.selectBackgroundImage(row.getAttribute('data-bg-image'));
       });
       if (main.getAttribute('draggable') === 'true') {
         main.addEventListener('dragstart', function (event) {
           if (kind === 'element') {
-            layerDrag = { kind: 'element', id: row.getAttribute('data-layer-id'), setId: null };
+            layerDrag = { kind: 'element', id: row.getAttribute('data-layer-id') };
           } else {
-            const parts = row.getAttribute('data-bg-image').split(':');
-            layerDrag = { kind: 'bgImage', id: parts[1], setId: parts[0] };
+            layerDrag = { kind: 'bgImage', id: row.getAttribute('data-bg-image') };
           }
           if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = 'move';
@@ -647,7 +660,7 @@
         if (drag.kind === 'element') {
           L.app.moveLayerTo(drag.id, targetId, placement);
         } else {
-          L.app.moveBackgroundImageTo(drag.setId, drag.id, targetId, placement);
+          L.app.moveBackgroundImageTo(drag.id, targetId, placement);
         }
       });
     });
@@ -662,13 +675,13 @@
       button.addEventListener('click', function (event) {
         event.stopPropagation();
         const parts = button.getAttribute('data-bg-move').split(':');
-        L.app.moveBackgroundImage(parts[0], parts[1], Number(parts[2]));
+        L.app.moveBackgroundImage(parts[0], Number(parts[1]));
       });
     });
     ui.els.layerPanel.querySelectorAll('[data-bg-add]').forEach(function (button) {
       button.addEventListener('click', function (event) {
         event.stopPropagation();
-        openPresetPicker('add', { setId: button.getAttribute('data-bg-add') });
+        openPresetPicker('add', null);
       });
     });
   };
@@ -678,10 +691,7 @@
     const project = L.app.state.project;
     const page = L.app.currentPage();
     let label = '页面';
-    if (selection.type === 'backgroundSet') {
-      const set = model.findBackground(project, selection.setId);
-      label = set ? '背景 · ' + set.name : '背景';
-    }
+    if (selection.type === 'background') label = '背景';
     if (selection.type === 'backgroundImage') label = '背景图片';
     if (selection.type === 'element') {
       const found = page ? page.elements.find(function (element) { return element.id === selection.id; }) : null;

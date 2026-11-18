@@ -54,63 +54,67 @@
         }
       }
     
-      function addPresetImage(set, preset, assetId, mode) {
-        let image = (set.images || []).find(function (img) { return img.assetId === assetId; }) || null;
+      function addPresetImage(background, preset, assetId, mode) {
+        let image = (background.images || []).find(function (img) { return img.assetId === assetId; }) || null;
         if (!image) {
           let fit;
           if (preset.kind === 'overlay') fit = 'original';
-          else if (mode === 'add' && (set.images || []).length > 0) fit = 'original';
+          else if (mode === 'add' && (background.images || []).length > 0) fit = 'original';
           else fit = 'cover';
           image = model.createBackgroundImage(assetId, fit);
           image.opacity = preset.opacity == null ? 1 : preset.opacity;
-          set.images.push(image);
+          background.images.push(image);
         }
         return image;
       }
-    
+
+      function editablePage() {
+        const page = actions.currentPage();
+        if (!page) return null;
+        if (!model.canEditPageBackground(state.project, page)) {
+          ui.toast('全局背景生效中，请先取消全局背景或让本页接管。');
+          return null;
+        }
+        return page;
+      }
+
       function applyPresetWhole(preset, assetId) {
-        const name = '预置 · ' + preset.name;
-        let set = (state.project.backgrounds || []).find(function (item) { return item.name === name; }) || null;
-        const isNew = !set;
-        if (isNew) {
-          set = model.createBackgroundSet(name);
-          set.color = preset.color || '#ffffff';
-          state.project.backgrounds.push(set);
-        }
-        const image = addPresetImage(set, preset, assetId, 'whole');
-        if (state.project.unifiedBackground) {
-          state.project.unifiedBackgroundId = set.id;
-        } else {
-          const page = actions.currentPage();
-          if (page) page.backgroundId = set.id;
-        }
-        state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
+        const page = editablePage();
+        if (!page) return;
+        const background = {
+          color: preset.color || model.DEFAULT_BACKGROUND_COLOR,
+          images: []
+        };
+        addPresetImage(background, preset, assetId, 'whole');
+        if (!actions.replacePageBackground(background)) return;
+        state.selection = page.background.images.length
+          ? { type: 'backgroundImage', imageId: page.background.images[0].id }
+          : { type: 'background' };
         ui.renderAll();
-        ui.toast(isNew ? '已创建背景“' + name + '”并应用到当前页。' : '已应用背景“' + name + '”。');
+        ui.toast('已更换本页背景 · 撤销');
         notifyDarkPreset(preset);
       }
-    
+
       function applyPresetAdd(preset, ctx, assetId) {
-        const set = model.findBackground(state.project, ctx.setId) ||
-          model.effectiveBackground(state.project, actions.currentPage());
-        if (!set) {
-          ui.toast('没有可添加图片的背景。', 'error');
-          return;
-        }
-        const image = addPresetImage(set, preset, assetId, 'add');
-        state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
+        const page = editablePage();
+        if (!page) return;
+        actions.pushUndo('添加背景图片');
+        const image = addPresetImage(page.background, preset, assetId, 'add');
+        state.selection = { type: 'backgroundImage', imageId: image.id };
         ui.renderAll();
         ui.toast('已添加预置图片“' + preset.name + '”。');
         notifyDarkPreset(preset);
       }
-    
+
       function applyPresetReplace(preset, ctx, assetId, loaded) {
-        const set = model.findBackground(state.project, ctx.setId);
-        const target = set && (set.images || []).find(function (img) { return img.id === ctx.imageId; }) || null;
-        if (!set || !target) {
+        const page = editablePage();
+        if (!page) return;
+        const target = (page.background.images || []).find(function (img) { return img.id === ctx.imageId; }) || null;
+        if (!target) {
           ui.toast('找不到要替换的背景图片。', 'error');
           return;
         }
+        actions.pushUndo('替换背景图');
         const oldAssetId = target.assetId;
         target.assetId = assetId;
         if (target.fit === 'none' && loaded) {
@@ -119,12 +123,12 @@
           target.height = target.height > 0 ? target.height : rect.height;
         }
         if (oldAssetId && oldAssetId !== assetId) actions.releaseUnusedAsset(oldAssetId);
-        state.selection = { type: 'backgroundImage', setId: set.id, imageId: target.id };
+        state.selection = { type: 'backgroundImage', imageId: target.id };
         ui.renderAll();
         ui.toast('已替换为“' + preset.name + '”。');
         notifyDarkPreset(preset);
       }
-    
+
       function relativeLuminance(hex) {
         const match = /^#?([0-9a-fA-F]{6})$/.exec(String(hex == null ? '' : hex).trim());
         if (!match) return 1;

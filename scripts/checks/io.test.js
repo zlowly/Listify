@@ -18,44 +18,38 @@ const model = L.model;
 const io = L.io;
 const plain = loader.toPlain;
 
-/* 一份合法 v3 项目夹具：分类块 + 文本 + 图片（含 1 个图片资产）。 */
+/* 一份合法 v4 项目夹具：分类块 + 文本 + 图片（含 1 个图片资产）。 */
 function validRaw() {
   return {
-    version: 3,
+    version: 4,
     pageSize: { width: 1080, height: 1920 },
     margins: { top: 60, right: 60, bottom: 60, left: 60 },
     playlist: {
       categories: [{ name: '流行', songs: ['夜曲', '晴天'] }]
     },
     assets: [{ id: 'asset-1', name: '封面', mime: 'image/png', data: 'AAAA' }],
-    backgrounds: [
-      {
-        id: 'bg-1',
-        name: '背景 1',
-        color: '#ffffff',
-        images: [
-          {
-            id: 'bgimg-1',
-            assetId: 'asset-1',
-            fit: 'cover',
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            rotation: 0,
-            keepRatio: true,
-            opacity: 1,
-            blur: 0
-          }
-        ]
-      }
-    ],
-    unifiedBackground: false,
-    unifiedBackgroundId: null,
+    globalBackgroundPageId: null,
     pages: [
       {
         id: 'page-1',
-        backgroundId: 'bg-1',
+        background: {
+          color: '#ffffff',
+          images: [
+            {
+              id: 'bgimg-1',
+              assetId: 'asset-1',
+              fit: 'cover',
+              x: 0,
+              y: 0,
+              width: 0,
+              height: 0,
+              rotation: 0,
+              keepRatio: true,
+              opacity: 1,
+              blur: 0
+            }
+          ]
+        },
         elements: [
           {
             id: 'el-cat',
@@ -109,9 +103,28 @@ function errorsOf(raw) {
   return plain(io.validateProject(raw));
 }
 
+/* 版本 3 夹具：用于迁移测试，结构就是 v4 夹具加上背景库与页面引用。 */
+function validV3Raw() {
+  const raw = validRaw();
+  raw.version = 3;
+  delete raw.globalBackgroundPageId;
+  const page = raw.pages[0];
+  raw.backgrounds = [{
+    id: 'bg-1',
+    name: '背景 1',
+    color: page.background.color,
+    images: page.background.images
+  }];
+  raw.unifiedBackground = false;
+  raw.unifiedBackgroundId = null;
+  page.backgroundId = 'bg-1';
+  delete page.background;
+  return raw;
+}
+
 /* ---------- 合法项目 ---------- */
 
-test('validateProject：合法 v3 项目零错误', function () {
+test('validateProject：合法 v4 项目零错误', function () {
   assert.deepEqual(errorsOf(validRaw()), { ok: true, errors: [] });
 });
 
@@ -133,15 +146,15 @@ test('validateProject：缺失或未来版本', function () {
     ok: false,
     errors: ['项目版本无效或缺失，无法加载。']
   });
-  assert.deepEqual(errorsOf(mutated(function (raw) { raw.version = 4; })), {
+  assert.deepEqual(errorsOf(mutated(function (raw) { raw.version = 5; })), {
     ok: false,
-    errors: ['项目版本 4 高于当前支持的版本 3，无法加载。']
+    errors: ['项目版本 5 高于当前支持的版本 4，无法加载。']
   });
 });
 
 test('validateProject：页面 ID 重复', function () {
   const raw = mutated(function (value) {
-    value.pages.push({ id: 'page-1', backgroundId: 'bg-1', elements: [] });
+    value.pages.push({ id: 'page-1', background: { color: '#fff', images: [] }, elements: [] });
   });
   assert.deepEqual(errorsOf(raw), {
     ok: false,
@@ -201,43 +214,43 @@ test('validateProject：缺失的图片资产（元素引用）', function () {
 
 test('validateProject：缺失的图片资产（背景图引用）', function () {
   const raw = mutated(function (value) {
-    value.backgrounds[0].images[0].assetId = 'missing-asset';
+    value.pages[0].background.images[0].assetId = 'missing-asset';
   });
   assert.deepEqual(errorsOf(raw), {
     ok: false,
-    errors: ['第 1 个背景第 1 张图片引用了不存在的图片资产。']
+    errors: ['第 1 页第 1 张背景图引用了不存在的图片资产。']
   });
 });
 
 test('validateProject：无效的背景图定位模式', function () {
   const raw = mutated(function (value) {
-    value.backgrounds[0].images[0].fit = 'stretch';
+    value.pages[0].background.images[0].fit = 'stretch';
   });
   assert.deepEqual(errorsOf(raw), {
     ok: false,
-    errors: ['第 1 个背景第 1 张图片定位模式无效。']
+    errors: ['第 1 页第 1 张背景图定位模式无效。']
   });
 });
 
-test('validateProject：页面缺少背景 ID', function () {
+test('validateProject：页面缺少背景', function () {
   const raw = mutated(function (value) {
-    delete value.pages[0].backgroundId;
+    delete value.pages[0].background;
   });
   assert.deepEqual(errorsOf(raw), {
     ok: false,
-    errors: ['第 1 页缺少背景 ID。']
+    errors: ['第 1 页的背景缺失或无效。']
   });
 });
 
 test('validateProject：错误可累积（多个问题一并返回）', function () {
   const raw = mutated(function (value) {
     value.pages[0].elements[0].category = '不存在的分类';
-    value.backgrounds[0].images[0].opacity = 2;
+    value.pages[0].background.images[0].opacity = 2;
   });
   const result = errorsOf(raw);
   assert.equal(result.ok, false);
   assert.deepEqual(result.errors, [
-    '第 1 个背景第 1 张图片透明度无效。',
+    '第 1 页第 1 张背景图透明度无效。',
     '第 1 页第 1 个元素引用了不存在的分类。'
   ]);
 });
@@ -257,7 +270,7 @@ test('serializeProjectStructure：导出结构字段与合法项目一致', func
 
   const structure = plain(io.serializeProjectStructure(project));
 
-  assert.equal(structure.version, 3);
+  assert.equal(structure.version, 4);
   assert.deepEqual(structure.pageSize, { width: 1080, height: 1920 });
   assert.deepEqual(structure.margins, { top: 60, right: 60, bottom: 60, left: 60 });
   assert.deepEqual(structure.playlist, {
@@ -267,14 +280,10 @@ test('serializeProjectStructure：导出结构字段与合法项目一致', func
     ]
   });
   assert.deepEqual(structure.assets, []);
-  assert.equal(structure.backgrounds.length, 1);
-  assert.equal(structure.backgrounds[0].id, project.backgrounds[0].id);
-  assert.deepEqual(structure.backgrounds[0].images, []);
-  assert.equal(structure.unifiedBackground, false);
-  assert.equal(structure.unifiedBackgroundId, null);
+  assert.equal(structure.globalBackgroundPageId, null);
   assert.equal(structure.pages.length, 1);
   assert.equal(structure.pages[0].id, page.id);
-  assert.equal(structure.pages[0].backgroundId, project.backgrounds[0].id);
+  assert.deepEqual(structure.pages[0].background, { color: '#ffffff', images: [] });
   assert.deepEqual(
     structure.pages[0].elements.map(function (item) { return item.type; }),
     ['category', 'text']
@@ -288,8 +297,8 @@ test('serializeProjectStructure：JSON 往返稳定且可重复序列化', funct
   const project = model.createDefaultProject();
   project.playlist.categories = [{ name: '流行', songs: ['夜曲', '晴天'] }];
   project.assets = [{ id: 'asset-1', name: '封面', mime: 'image/png' }];
-  project.backgrounds[0].images.push(model.createBackgroundImage('asset-1', 'cover'));
-  project.backgrounds[0].images[0].id = 'bgimg-1';
+  project.pages[0].background.images.push(model.createBackgroundImage('asset-1', 'cover'));
+  project.pages[0].background.images[0].id = 'bgimg-1';
   const page = project.pages[0];
   page.elements.push(model.createCategoryElement('流行', 60, 60, project, 960, page));
   page.elements.push(model.createTextElement(project, '副标题', page));
@@ -308,8 +317,8 @@ test('serializeProjectStructure：只导出被引用的资产元数据，不含 
     { id: 'asset-used', name: '用到的图', mime: 'image/png' },
     { id: 'asset-unused', name: '未用的图', mime: 'image/png' }
   ];
-  project.backgrounds[0].images.push(model.createBackgroundImage('asset-used', 'cover'));
-  project.backgrounds[0].images[0].id = 'bgimg-used';
+  project.pages[0].background.images.push(model.createBackgroundImage('asset-used', 'cover'));
+  project.pages[0].background.images[0].id = 'bgimg-used';
 
   const structure = plain(io.serializeProjectStructure(project));
 
@@ -326,8 +335,8 @@ test('createDraftEnvelope：包含 schema/ui/结构，不含 base64 资产数据
   const project = model.createDefaultProject();
   project.playlist.categories = [{ name: '流行', songs: ['夜曲'] }];
   project.assets = [{ id: 'asset-1', name: '封面', mime: 'image/png' }];
-  project.backgrounds[0].images.push(model.createBackgroundImage('asset-1', 'cover'));
-  project.backgrounds[0].images[0].id = 'bgimg-1';
+  project.pages[0].background.images.push(model.createBackgroundImage('asset-1', 'cover'));
+  project.pages[0].background.images[0].id = 'bgimg-1';
 
   const envelope = plain(io.createDraftEnvelope(project, project.pages[0].id));
 
@@ -350,7 +359,7 @@ test('validateProject：图片效果字段缺失合法、存在且在范围内�
   assert.deepEqual(errorsOf(validRaw()), { ok: true, errors: [] });
 
   const raw = mutated(function (value) {
-    const image = value.backgrounds[0].images[0];
+    const image = value.pages[0].background.images[0];
     image.brightness = 1.3;
     image.hue = -45;
     image.fadeMode = 'double';
@@ -374,24 +383,24 @@ test('validateProject：图片效果字段缺失合法、存在且在范围内�
 
 test('validateProject：背景图效果字段越界报错', function () {
   assert.deepEqual(errorsOf(mutated(function (value) {
-    value.backgrounds[0].images[0].brightness = 2.4;
+    value.pages[0].background.images[0].brightness = 2.4;
   })), {
     ok: false,
-    errors: ['第 1 个背景第 1 张图片的亮度无效。']
+    errors: ['第 1 页第 1 张背景图的亮度无效。']
   });
 
   assert.deepEqual(errorsOf(mutated(function (value) {
-    value.backgrounds[0].images[0].fadeMode = 'x';
+    value.pages[0].background.images[0].fadeMode = 'x';
   })), {
     ok: false,
-    errors: ['第 1 个背景第 1 张图片的渐隐模式无效。']
+    errors: ['第 1 页第 1 张背景图的渐隐模式无效。']
   });
 
   assert.deepEqual(errorsOf(mutated(function (value) {
-    value.backgrounds[0].images[0].fadeAngle = 400;
+    value.pages[0].background.images[0].fadeAngle = 400;
   })), {
     ok: false,
-    errors: ['第 1 个背景第 1 张图片的渐隐角度无效。']
+    errors: ['第 1 页第 1 张背景图的渐隐角度无效。']
   });
 
   [
@@ -401,10 +410,10 @@ test('validateProject：背景图效果字段越界报错', function () {
     ['fadeBottom', -1, '底部透明度']
   ].forEach(function (item) {
     assert.deepEqual(errorsOf(mutated(function (value) {
-      value.backgrounds[0].images[0][item[0]] = item[1];
+      value.pages[0].background.images[0][item[0]] = item[1];
     })), {
       ok: false,
-      errors: ['第 1 个背景第 1 张图片的' + item[2] + '无效。']
+      errors: ['第 1 页第 1 张背景图的' + item[2] + '无效。']
     });
   });
 });
@@ -423,12 +432,12 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
   // 不加载任何资产：本用例只关心字段归一化，跳过图片解码。
   raw.assets = [];
   assert.deepEqual(
-    Object.prototype.hasOwnProperty.call(raw.backgrounds[0].images[0], 'brightness'),
+    Object.prototype.hasOwnProperty.call(raw.pages[0].background.images[0], 'brightness'),
     false
   );
 
   const built = await io.buildProject(raw);
-  const backgroundImage = built.project.backgrounds[0].images[0];
+  const backgroundImage = built.project.pages[0].background.images[0];
   assert.equal(backgroundImage.brightness, 1);
   assert.equal(backgroundImage.hue, 0);
   assert.equal(backgroundImage.fadeMode, 'off');
@@ -451,7 +460,7 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
   assert.equal(freeImage.fadeBottom, 1);
 
   const structure = plain(io.serializeProjectStructure(built.project));
-  const serializedBackground = structure.backgrounds[0].images[0];
+  const serializedBackground = structure.pages[0].background.images[0];
   assert.equal(serializedBackground.brightness, 1);
   assert.equal(serializedBackground.hue, 0);
   assert.equal(serializedBackground.fadeMode, 'off');
@@ -476,7 +485,7 @@ test('buildProject：旧对象缺少效果字段时取默认值，序列化后�
 test('buildProject：非默认效果字段往返后逐字段相等', async function () {
   const raw = validRaw();
   raw.assets = [];
-  const backgroundImage = raw.backgrounds[0].images[0];
+  const backgroundImage = raw.pages[0].background.images[0];
   backgroundImage.brightness = 1.3;
   backgroundImage.hue = 60;
   backgroundImage.fadeMode = 'double';
@@ -497,7 +506,7 @@ test('buildProject：非默认效果字段往返后逐字段相等', async funct
 
   const built = await io.buildProject(raw);
   const structure = plain(io.serializeProjectStructure(built.project));
-  const serializedBackground = structure.backgrounds[0].images[0];
+  const serializedBackground = structure.pages[0].background.images[0];
   const serializedFree = structure.pages[0].elements[2];
 
   [
@@ -516,11 +525,11 @@ test('buildProject：非默认效果字段往返后逐字段相等', async funct
 test('buildProject：渐隐字段缺失时按模式预设补齐', async function () {
   const raw = validRaw();
   raw.assets = [];
-  raw.backgrounds[0].images[0].fadeMode = 'double';
+  raw.pages[0].background.images[0].fadeMode = 'double';
   raw.pages[0].elements[2].fadeMode = 'single';
 
   const built = await io.buildProject(raw);
-  const backgroundImage = built.project.backgrounds[0].images[0];
+  const backgroundImage = built.project.pages[0].background.images[0];
   assert.deepEqual(
     [backgroundImage.fadePosition, backgroundImage.fadeWidth,
       backgroundImage.fadeTop, backgroundImage.fadeBottom],
@@ -532,4 +541,108 @@ test('buildProject：渐隐字段缺失时按模式预设补齐', async function
       freeImage.fadeTop, freeImage.fadeBottom],
     [0, 1, 0, 1]
   );
+});
+
+/* ---------- 版本迁移：背景入库 → 每页背景 ---------- */
+
+test('buildProject：v3 全局背景迁移为来源页，各页保留自己的背景副本', async function () {
+  const raw = validV3Raw();
+  raw.assets = [];
+  raw.pages.push({
+    id: 'page-2',
+    backgroundId: 'bg-1',
+    elements: []
+  });
+  raw.unifiedBackground = true;
+  raw.unifiedBackgroundId = 'bg-1';
+
+  const built = await io.buildProject(raw);
+  assert.equal(built.project.version, 4);
+  assert.equal(built.project.globalBackgroundPageId, 'page-1');
+  assert.equal(built.project.pages.length, 2);
+  assert.equal(built.project.pages[0].background.images.length, 1);
+  assert.equal(built.project.pages[1].background.images.length, 1);
+  assert.notEqual(
+    built.project.pages[0].background.images[0].id,
+    built.project.pages[1].background.images[0].id
+  );
+  assert.equal(built.project.pages[1].background.images[0].assetId, 'asset-1');
+});
+
+test('buildProject：v3 全局背景没有页面引用时复制到第一页并成为来源', async function () {
+  const raw = validV3Raw();
+  raw.assets = [];
+  raw.backgrounds.push({
+    id: 'bg-2',
+    name: '全局',
+    color: '#101010',
+    images: []
+  });
+  raw.unifiedBackground = true;
+  raw.unifiedBackgroundId = 'bg-2';
+
+  const built = await io.buildProject(raw);
+  assert.equal(built.project.globalBackgroundPageId, 'page-1');
+  assert.equal(built.project.pages[0].background.color, '#101010');
+  assert.equal(built.project.pages[0].background.images.length, 0);
+});
+
+test('buildProject：v3 无全局背景时不设置来源页', async function () {
+  const raw = validV3Raw();
+  raw.assets = [];
+
+  const built = await io.buildProject(raw);
+  assert.equal(built.project.globalBackgroundPageId, null);
+  assert.equal(built.project.pages[0].background.color, '#ffffff');
+});
+
+test('buildProject：v2 引用组折叠为每页背景，共享时设来源页', async function () {
+  const raw = validV3Raw();
+  raw.assets = [];
+  raw.version = 2;
+  delete raw.backgrounds;
+  delete raw.unifiedBackground;
+  delete raw.unifiedBackgroundId;
+  const page1 = raw.pages[0];
+  page1.background = {
+    assetId: 'asset-1',
+    fit: 'cover',
+    color: '#ffffff',
+    opacity: 0.8,
+    blur: 2
+  };
+  delete page1.backgroundId;
+  raw.pages.push({
+    id: 'page-2',
+    backgroundRef: 'page-1',
+    elements: []
+  });
+
+  const built = await io.buildProject(raw);
+  assert.equal(built.project.version, 4);
+  assert.equal(built.project.pages[1].background.images.length, 1);
+  assert.equal(built.project.pages[1].background.images[0].assetId, 'asset-1');
+  assert.equal(built.project.pages[1].background.images[0].opacity, 0.8);
+  assert.equal(built.project.globalBackgroundPageId, 'page-1');
+});
+
+test('validateProject：v4 全局来源页必须指向存在的页面', function () {
+  assert.deepEqual(errorsOf(mutated(function (value) {
+    value.globalBackgroundPageId = 'missing-page';
+  })), {
+    ok: false,
+    errors: ['全局背景来源页无效。']
+  });
+  assert.deepEqual(errorsOf(mutated(function (value) {
+    value.globalBackgroundPageId = null;
+  })), { ok: true, errors: [] });
+});
+
+test('buildProject：迁移结果不残留背景库字段', async function () {
+  const raw = validV3Raw();
+  raw.assets = [];
+  const built = await io.buildProject(raw);
+  assert.equal(Object.prototype.hasOwnProperty.call(built.project, 'backgrounds'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(built.project, 'unifiedBackground'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(built.project.pages[0], 'backgroundId'), false);
 });

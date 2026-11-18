@@ -25,7 +25,7 @@
   const normalizeAngle = ui.normalizeAngle;
   const setGroupCollapsed = ui.setGroupCollapsed;
   const openPresetPicker = ui.openPresetPicker;
-  const openBackgroundLibrary = ui.openBackgroundLibrary;
+  const openCopyBackground = ui.openCopyBackground;
   const advancedToggle = ui.advancedToggle;
   const bindAdvancedToggle = ui.bindAdvancedToggle;
 
@@ -92,6 +92,23 @@
     }
   }
 
+  /* 背景缩略图：优先用首张已加载图片，失败时只剩填充色。 */
+  function backgroundPreview(background, extraClass) {
+    const source = background || {};
+    const image = (source.images || []).find(function (item) {
+      return item && item.assetId && L.assets.getUrl(item.assetId);
+    });
+    const url = image ? L.assets.getUrl(image.assetId) : '';
+    return '<div class="bg-preview' + (extraClass ? ' ' + extraClass : '') + '" style="background-color:' +
+      esc(source.color || model.DEFAULT_BACKGROUND_COLOR) + '">' +
+      (url ? '<img src="' + esc(url) + '" alt="">' : '') +
+      '</div>';
+  }
+
+  function pageNumber(project, page) {
+    return project.pages.indexOf(page) + 1;
+  }
+
   ui.renderPropertyPanel = function () {
     const focusState = capturePanelFocus();
     try {
@@ -118,23 +135,15 @@
       else renderImageProperties(element);
       return;
     }
-    if (selection.type === 'backgroundSet') {
-      const set = model.findBackground(project, selection.setId);
-      if (!set) {
-        L.app.selectPage();
-        return;
-      }
-      renderBackgroundSetProperties(set);
-      return;
-    }
     if (selection.type === 'backgroundImage') {
-      const set = model.findBackground(project, selection.setId);
-      const image = set ? (set.images || []).find(function (item) { return item.id === selection.imageId; }) : null;
-      if (!set || !image) {
+      const image = (page.background.images || []).find(function (item) {
+        return item.id === selection.imageId;
+      });
+      if (!image) {
         L.app.selectPage();
         return;
       }
-      renderBackgroundImageProperties(set, image);
+      renderBackgroundImageProperties(page, image);
       return;
     }
     renderPageProperties(page);
@@ -166,18 +175,7 @@
       propGroup('margins', '页面边距',
         marginCross(project.margins, 'prop-margin-'),
         { right: helpTip('仅参考线') }) +
-      propGroup('background', '页面背景',
-        field('当前页背景', selectInput('prop-page-bg', backgroundOptions(project), page.backgroundId, project.unifiedBackground)) +
-        field('', '<label class="check-row"><input id="prop-unified" type="checkbox"' +
-          (project.unifiedBackground ? ' checked' : '') + '> 所有页面使用同一背景</label>') +
-        field('全局背景组', selectInput('prop-unified-id', backgroundOptions(project), project.unifiedBackgroundId, !project.unifiedBackground)) +
-        '<div class="inline-actions">' +
-          '<button id="prop-bg-pick" class="btn btn-sm">选择背景图</button>' +
-          '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
-        '</div>',
-        { right: helpTip(project.unifiedBackground
-          ? '全局背景生效中，各页仍保留自己的背景；关闭全局后恢复。'
-          : '背景位于内容下方，可在图层中选中后编辑。') }) +
+      backgroundGroup(page) +
       propGroup('actions', '',
         '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
           helpTip('在画布或图层面板中选择内容后可删除。') + '</div>', { plain: true });
@@ -210,24 +208,69 @@
         L.app.setMargins(margins);
       });
     });
-    bind('prop-page-bg', 'change', function () {
-      L.app.setPageBackground(valueOf('prop-page-bg'));
-    });
-    bind('prop-unified', 'change', function () {
-      const input = document.getElementById('prop-unified');
-      L.app.toggleUnifiedBackground(input ? input.checked : false);
-    });
-    bind('prop-unified-id', 'change', function () {
-      L.app.setUnifiedBackground(valueOf('prop-unified-id'));
-    });
-    bind('prop-bg-pick', 'click', function () { openPresetPicker('whole', null); });
-    bind('prop-bg-library', 'click', openBackgroundLibrary);
+    bindBackgroundGroup(page);
   }
 
-  function backgroundOptions(project) {
-    return (project.backgrounds || []).map(function (set) {
-      return { value: set.id, label: set.name };
+  function backgroundGroup(page) {
+    const project = L.app.state.project;
+    const source = model.findGlobalBackgroundPage(project);
+    const covered = model.isBackgroundCovered(project, page);
+    const isSource = !!(source && source.id === page.id);
+    const editable = model.canEditPageBackground(project, page);
+    const disabled = editable ? '' : ' disabled';
+    const count = (page.background.images || []).length;
+    let status = '';
+    let actions = '';
+    if (covered) {
+      status = '<p class="hint bg-status">全局背景生效中 · 来源：第 ' + pageNumber(project, source) + ' 页</p>' +
+        '<p class="hint">本页背景当前不显示，取消全局背景后恢复；要改它，先取消全局。</p>';
+      actions = '<div class="inline-actions">' +
+        '<button id="prop-bg-cancel-global" class="btn btn-sm">取消全局背景</button>' +
+        '</div>';
+    } else if (isSource) {
+      status = '<p class="hint bg-status">全局来源：第 ' + pageNumber(project, page) + ' 页 · 改这里会影响所有页</p>';
+    }
+    return propGroup('background', '页面背景',
+      status +
+      '<div class="bg-card">' +
+        backgroundPreview(page.background) +
+        '<div class="bg-card-body">' +
+          '<p class="hint">本页背景' + (covered ? '（不显示）' : '') + ' · ' + count + ' 张图</p>' +
+          '<label class="bg-color-row">填充色 <input id="prop-bg-color" class="color-input" type="color" value="' +
+            esc(page.background.color || model.DEFAULT_BACKGROUND_COLOR) + '"' + disabled + '></label>' +
+        '</div>' +
+      '</div>' +
+      '<div class="inline-actions">' +
+        '<button id="prop-bg-pick" class="btn btn-sm"' + disabled + '>更换背景</button>' +
+        '<button id="prop-bg-add-image" class="btn btn-sm"' + disabled + '>＋ 叠图</button>' +
+        '<button id="prop-bg-copy-from" class="btn btn-sm"' + disabled + '>复制背景…</button>' +
+        '<button id="prop-bg-clear" class="btn btn-sm"' + disabled + '>清空背景</button>' +
+      '</div>' +
+      '<label class="check-row"><input id="prop-bg-global" type="checkbox"' +
+        (isSource ? ' checked' : '') + '> 所有页显示本页背景</label>' +
+      actions,
+      { right: helpTip(covered
+        ? '全局背景来自另一页；这里只能查看本页背景。取消全局或让本页接管后才能修改。'
+        : '背景位于内容下方。勾选后所有页显示本页背景，改本页会同步所有页。') });
+  }
+
+  function bindBackgroundGroup(page) {
+    bind('prop-bg-color', 'input', function () {
+      L.app.setBackgroundColor(valueOf('prop-bg-color'));
     });
+    bind('prop-bg-pick', 'click', function () { openPresetPicker('whole', null); });
+    bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', null); });
+    bind('prop-bg-copy-from', 'click', function () {
+      if (openCopyBackground) openCopyBackground(page.id);
+    });
+    bind('prop-bg-clear', 'click', function () { L.app.clearPageBackground(); });
+    bind('prop-bg-global', 'change', function () {
+      const input = document.getElementById('prop-bg-global');
+      if (!input) return;
+      if (input.checked) L.app.setGlobalBackgroundPage();
+      else L.app.clearGlobalBackground();
+    });
+    bind('prop-bg-cancel-global', 'click', function () { L.app.clearGlobalBackground(); });
   }
 
   function fitLabel(fit) {
@@ -331,66 +374,19 @@
     });
   }
 
-  function renderBackgroundSetProperties(set) {
+  function renderBackgroundImageProperties(page, image) {
     const project = L.app.state.project;
-    const page = L.app.currentPage();
-    const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
-    const referenceCount = model.backgroundReferenceCount(project, set.id);
-    const check = model.canDeleteBackground(project, set.id);
-    const pageIndex = project.pages.indexOf(page);
-    const usage = project.unifiedBackground
-      ? '全局背景生效中；修改会立即影响所有页面。'
-      : (referenceCount > 0
-        ? '第 ' + (pageIndex + 1) + ' 页正在使用；另有 ' + Math.max(0, referenceCount - 1) + ' 页使用同一背景。'
-        : '当前没有页面使用该背景。');
-    ui.els.propertyPanel.innerHTML =
-      propGroup('set', '背景组',
-        '<p class="hint">' + esc(usage) + '</p>' +
-        field('名称', textInput('prop-bg-name', set.name, '背景名称')) +
-        field('填充色', colorInput('prop-bg-set-color', set.color || '#ffffff')),
-        { right: isGlobal ? '<span class="pill pill-blue">全局</span>' : '' }) +
-      propGroup('images', '图片',
-        '<div class="inline-actions">' +
-          '<button id="prop-bg-add-image" class="btn btn-sm">添加图片</button>' +
-          '<button id="prop-bg-duplicate" class="btn btn-sm">复制背景</button>' +
-          '<button id="prop-bg-library" class="btn btn-sm">管理背景库</button>' +
-          '<button id="prop-bg-delete" class="btn btn-sm btn-danger"' + (check.ok ? '' : ' disabled title="' + esc(check.reason) + '"') + '>删除背景</button>' +
-        '</div>' +
-        (check.ok ? '' : '<p class="hint">' + esc(check.reason) + '</p>'),
-        { right: '<span class="hint">' + (set.images || []).length + ' 张</span>' +
-          helpTip('图片按列表顺序从底到顶绘制；在图层中选中图片后可拖拽定位。') }) +
-      (project.unifiedBackground
-        ? propGroup('global', '全局背景',
-            '<div class="inline-actions">' +
-              '<button id="prop-bg-bake" class="btn btn-sm">固化到所有页</button>' +
-              '<button id="prop-bg-copy" class="btn btn-sm">本页独立副本</button>' +
-            '</div>',
-            { right: helpTip('取消全局会恢复各页自己的背景。要让当前效果保留下来，可先固化或创建副本。') })
-        : '');
-
-    bind('prop-bg-name', 'change', function () { L.app.renameBackgroundSet(set.id, valueOf('prop-bg-name')); });
-    bind('prop-bg-set-color', 'input', function () {
-      L.app.setBackgroundColor(set.id, valueOf('prop-bg-set-color'));
-    });
-    bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', { setId: set.id }); });
-    bind('prop-bg-duplicate', 'click', function () { L.app.duplicateBackgroundSet(set.id); });
-    bind('prop-bg-library', 'click', openBackgroundLibrary);
-    bind('prop-bg-delete', 'click', function () { L.app.deleteBackgroundSet(set.id); });
-    bind('prop-bg-bake', 'click', function () { L.app.bakeUnifiedBackground(); });
-    bind('prop-bg-copy', 'click', function () { L.app.copyUnifiedBackgroundToPage(); });
-  }
-
-  function renderBackgroundImageProperties(set, image) {
-    const project = L.app.state.project;
-    const index = (set.images || []).indexOf(image);
-    const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
+    const images = page.background.images || [];
+    const index = images.indexOf(image);
+    const isSource = project.globalBackgroundPageId === page.id;
     const meta = image.assetId ? (L.assets.getMeta(image.assetId) || project.assets.find(function (asset) {
       return asset.id === image.assetId;
     })) : null;
     const custom = image.fit === 'none';
     ui.els.propertyPanel.innerHTML =
-      propGroup('info', '背景图片 ' + (index + 1) + ' / ' + set.images.length,
-        '<p class="hint">所属背景：' + esc(set.name) + (isGlobal ? '（全局，修改会影响所有页面）' : '') + '</p>' +
+      propGroup('info', '背景图片 ' + (index + 1) + ' / ' + images.length,
+        '<p class="hint">所属背景：第 ' + pageNumber(project, page) + ' 页' +
+          (isSource ? '（全局来源，修改会影响所有页面）' : '') + '</p>' +
         '<p class="hint">' + (meta ? '当前图片：' + esc(meta.name) : '图片缺失或未选择。') + '</p>') +
       propGroup('position', '定位',
         (custom ? field : fieldHelp)('尺寸', selectInput('prop-bg-fit', [
@@ -421,45 +417,45 @@
         { right: advancedToggle(model.hasImageEffects(image)) }) +
       propGroup('actions', '',
         '<div class="inline-actions">' +
-          '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= set.images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
+          '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
           '<button id="prop-bg-move-down" class="btn btn-sm"' + (index <= 0 ? ' disabled' : '') + '>下移一层</button>' +
           '<button id="prop-bg-replace" class="btn btn-sm">替换图片</button>' +
           '<button id="prop-bg-image-delete" class="btn btn-sm btn-danger">删除图片</button>' +
         '</div>', { plain: true });
 
-    bind('prop-bg-fit', 'change', function () { L.app.setBackgroundImageFit(set.id, image.id, valueOf('prop-bg-fit')); });
-    bind('prop-bg-x', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'x', Number(valueOf('prop-bg-x')) || 0); });
-    bind('prop-bg-y', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'y', Number(valueOf('prop-bg-y')) || 0); });
-    bind('prop-bg-w', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'width', Math.max(1, Number(valueOf('prop-bg-w')) || 1)); });
-    bind('prop-bg-h', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'height', Math.max(1, Number(valueOf('prop-bg-h')) || 1)); });
-    bind('prop-bg-rotation', 'change', function () { L.app.setBackgroundImageValue(set.id, image.id, 'rotation', Number(valueOf('prop-bg-rotation')) || 0); });
+    bind('prop-bg-fit', 'change', function () { L.app.setBackgroundImageFit(image.id, valueOf('prop-bg-fit')); });
+    bind('prop-bg-x', 'change', function () { L.app.setBackgroundImageValue(image.id, 'x', Number(valueOf('prop-bg-x')) || 0); });
+    bind('prop-bg-y', 'change', function () { L.app.setBackgroundImageValue(image.id, 'y', Number(valueOf('prop-bg-y')) || 0); });
+    bind('prop-bg-w', 'change', function () { L.app.setBackgroundImageValue(image.id, 'width', Math.max(1, Number(valueOf('prop-bg-w')) || 1)); });
+    bind('prop-bg-h', 'change', function () { L.app.setBackgroundImageValue(image.id, 'height', Math.max(1, Number(valueOf('prop-bg-h')) || 1)); });
+    bind('prop-bg-rotation', 'change', function () { L.app.setBackgroundImageValue(image.id, 'rotation', Number(valueOf('prop-bg-rotation')) || 0); });
     bind('prop-bg-ratio', 'change', function () {
       const input = document.getElementById('prop-bg-ratio');
-      L.app.setBackgroundImageField(set.id, image.id, 'keepRatio', input ? input.checked : true);
+      L.app.setBackgroundImageField(image.id, 'keepRatio', input ? input.checked : true);
     });
     bind('prop-bg-opacity', 'input', function () {
       const value = Number(valueOf('prop-bg-opacity'));
-      L.app.setBackgroundImageValue(set.id, image.id, 'opacity', value);
+      L.app.setBackgroundImageValue(image.id, 'opacity', value);
       const label = document.getElementById('prop-bg-opacity-value');
       if (label) label.textContent = value.toFixed(2);
     });
     bind('prop-bg-blur', 'input', function () {
       const value = Number(valueOf('prop-bg-blur'));
-      L.app.setBackgroundImageValue(set.id, image.id, 'blur', value);
+      L.app.setBackgroundImageValue(image.id, 'blur', value);
       const label = document.getElementById('prop-bg-blur-value');
       if (label) label.textContent = value;
     });
     bindAdvancedToggle();
     if (ui.advancedImage) {
       bindImageEffectFields('prop-bg', function (key, value) {
-        L.app.setBackgroundImageValue(set.id, image.id, key, value);
+        L.app.setBackgroundImageValue(image.id, key, value);
       });
     }
-    bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(set.id, image.id); });
-    bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, 1); });
-    bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundImage(set.id, image.id, -1); });
-    bind('prop-bg-replace', 'click', function () { openPresetPicker('replace', { setId: set.id, imageId: image.id }); });
-    bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(set.id, image.id); });
+    bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(image.id); });
+    bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(image.id, 1); });
+    bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundImage(image.id, -1); });
+    bind('prop-bg-replace', 'click', function () { openPresetPicker('replace', { imageId: image.id }); });
+    bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(image.id); });
   }
 
   function fontListValues(style) {

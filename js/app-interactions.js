@@ -190,7 +190,6 @@
             actions.ensureCustomBackgroundImage(backgroundHit.image);
             state.selection = {
               type: 'backgroundImage',
-              setId: backgroundHit.background.id,
               imageId: backgroundHit.image.id
             };
             ui.renderAll();

@@ -4,61 +4,49 @@
   const L = window.Listify = window.Listify || {};
   const ui = L.ui = L.ui || {};
 
-  const model = L.model;
   const esc = ui.esc;
   const helpTip = ui.helpTip;
 
-  function openBackgroundLibrary() {
+  function previewOf(background) {
+    const source = background || {};
+    const image = (source.images || []).find(function (item) {
+      return item && item.assetId && L.assets.getUrl(item.assetId);
+    });
+    const url = image ? L.assets.getUrl(image.assetId) : '';
+    return '<span class="bg-preview bg-preview-sm" style="background-color:' +
+      esc(source.color || L.model.DEFAULT_BACKGROUND_COLOR) + '">' +
+      (url ? '<img src="' + esc(url) + '" alt="">' : '') + '</span>';
+  }
+
+  // 复制背景：目标永远是当前页自己的背景；被全局覆盖时入口已在面板禁用。
+  function openCopyBackground(currentPageId) {
     const project = L.app.state.project;
-    const rows = (project.backgrounds || []).map(function (set) {
-      const count = model.backgroundReferenceCount(project, set.id);
-      const isGlobal = !!project.unifiedBackground && project.unifiedBackgroundId === set.id;
-      const check = model.canDeleteBackground(project, set.id);
-      return '<div class="bg-library-row" data-bg-lib-row="' + esc(set.id) + '">' +
-        '<input class="input" data-bg-lib-name="' + esc(set.id) + '" value="' + esc(set.name) + '">' +
-        '<span class="hint">' + count + ' 页使用' + (isGlobal ? ' · 全局使用中' : '') + '</span>' +
-        '<div class="inline-actions">' +
-          '<button class="btn btn-sm" data-bg-lib-duplicate="' + esc(set.id) + '">复制</button>' +
-          '<button class="btn btn-sm btn-danger" data-bg-lib-delete="' + esc(set.id) + '"' +
-            (check.ok ? '' : ' disabled title="' + esc(check.reason) + '"') + '>删除</button>' +
-        '</div>' +
-      '</div>';
+    const current = currentPageId || L.app.state.currentPageId;
+    const rows = project.pages.filter(function (page) {
+      return page.id !== current;
+    }).map(function (page) {
+      const index = project.pages.indexOf(page);
+      const isSource = project.globalBackgroundPageId === page.id;
+      const count = (page.background.images || []).length;
+      return '<button type="button" class="bg-copy-row" data-copy-page="' + esc(page.id) + '">' +
+        previewOf(page.background) +
+        '<span class="bg-copy-text"><strong>第 ' + (index + 1) + ' 页</strong>' +
+        '<span class="hint">' + count + ' 张图' + (isSource ? ' · 全局来源' : '') + '</span></span>' +
+        '</button>';
     }).join('');
     const modal = ui.modal.open({
-      title: '背景库',
-      width: '560px',
-      body: '<div class="prop-group">' +
-        '<div class="bg-library-tiprow">' +
-          helpTip('背景库只管理背景本身；页面使用哪一套背景由页面属性或全局背景决定。') +
-        '</div>' +
-        '<div class="bg-library-list">' + rows + '</div>' +
-      '</div>',
-      actions: [
-        {
-          label: '新建空白背景',
-          onClick: function () {
-            L.app.addBackgroundSet();
-            openBackgroundLibrary();
-          }
-        },
-        { label: '关闭', className: 'btn-primary', onClick: function (close) { close(); } }
-      ]
+      title: '复制背景到本页',
+      width: '420px',
+      body: rows
+        ? '<p class="hint">选择一页，把它的填充色与全部背景图复制到本页。</p>' +
+          '<div class="bg-copy-list">' + rows + '</div>'
+        : '<p class="hint">项目只有这一页，没有可复制的背景。</p>',
+      actions: [{ label: '关闭', className: 'btn-primary', onClick: function (close) { close(); } }]
     });
-    modal.body.querySelectorAll('[data-bg-lib-name]').forEach(function (input) {
-      input.addEventListener('change', function () {
-        L.app.renameBackgroundSet(input.getAttribute('data-bg-lib-name'), input.value);
-      });
-    });
-    modal.body.querySelectorAll('[data-bg-lib-duplicate]').forEach(function (button) {
+    modal.body.querySelectorAll('[data-copy-page]').forEach(function (button) {
       button.addEventListener('click', function () {
-        L.app.duplicateBackgroundSet(button.getAttribute('data-bg-lib-duplicate'));
-        openBackgroundLibrary();
-      });
-    });
-    modal.body.querySelectorAll('[data-bg-lib-delete]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        L.app.deleteBackgroundSet(button.getAttribute('data-bg-lib-delete'));
-        openBackgroundLibrary();
+        const ok = L.app.copyBackgroundFromPage(button.getAttribute('data-copy-page'));
+        if (ok) modal.close(true);
       });
     });
   }
@@ -90,7 +78,7 @@
 
   // 统一「选择背景图」弹窗。mode 决定应用链路，弹窗内内容决定图片来源：
   //   whole   页面属性入口：预置整套应用（新建/复用「预置·X」集并指派当前页；本地→新建集+图→指派）
-  //   add     图层面板/背景集加图：追加到当前背景集
+  //   add     图层面板加图：追加到当前页背景
   //   replace 图片属性替换：替换选中的背景图片（保留定位/透明度/模糊）
   function openPresetPicker(mode, context) {
     const ctx = context || {};
@@ -166,7 +154,7 @@
     local.addEventListener('click', function () {
       handle.close(true);
       if (mode === 'whole') L.app.pickBackgroundImageWhole();
-      else L.app.pickBackgroundImage(ctx.setId, mode === 'replace' ? ctx.imageId : null);
+      else L.app.pickBackgroundImage(mode === 'replace' ? ctx.imageId : null);
     });
     return local;
   }
@@ -351,6 +339,6 @@
     body.appendChild(createHint('预置素材免费可离线使用；透明图默认以原大小作为叠加装饰。不够用时可在上面两个生成器里做一张，导出 PNG 后直接拖进本弹窗。'));
   }
 
-  ui.openBackgroundLibrary = openBackgroundLibrary;
+  ui.openCopyBackground = openCopyBackground;
   ui.openPresetPicker = openPresetPicker;
 })();

@@ -659,6 +659,7 @@
   }
 
   function hitTestBackground(project, page, x, y) {
+    if (!model.canEditPageBackground(project, page)) return null;
     const background = model.effectiveBackground(project, page);
     if (!background || !Array.isArray(background.images)) return null;
     const pageSize = project.pageSize;
@@ -695,8 +696,9 @@
 
   function allBackgroundAssets(project) {
     const ids = new Set();
-    (project.backgrounds || []).forEach(function (background) {
-      (background.images || []).forEach(function (image) {
+    (project.pages || []).forEach(function (page) {
+      const background = page && page.background;
+      (background && background.images || []).forEach(function (image) {
         if (image && image.assetId) ids.add(image.assetId);
       });
     });

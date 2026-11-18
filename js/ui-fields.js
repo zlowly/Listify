@@ -40,8 +40,8 @@
     if (!state || !state.selection) return 'none';
     const selection = state.selection;
     if (selection.type === 'element') return 'el:' + selection.id;
-    if (selection.type === 'backgroundSet') return 'bgset:' + selection.setId;
-    if (selection.type === 'backgroundImage') return 'bgimg:' + selection.setId + ':' + selection.imageId;
+    if (selection.type === 'background') return 'bg:' + (state.currentPageId || '');
+    if (selection.type === 'backgroundImage') return 'bgimg:' + selection.imageId;
     return 'page:' + (state.currentPageId || '');
   }
 

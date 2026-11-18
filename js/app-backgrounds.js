@@ -6,94 +6,132 @@
   const layout = L.layout;
   const renderer = L.render;
   const ui = L.ui;
-  const clamp = model.clamp;
-  const escapeHtml = ui.esc;
 
   L.appBackgrounds = {
     create: function (appCtx) {
       const state = appCtx.state;
-      const viewport = appCtx.viewport;
-      const surface = appCtx.surface;
       const actions = appCtx.actions;
 
-      let pendingBackgroundSetId = null;
       let pendingBackgroundImageId = null;
       let pendingBackgroundWhole = false;
 
-      function addBackgroundSet() {
-        const set = model.createBackgroundSet('背景 ' + (state.project.backgrounds.length + 1));
-        state.project.backgrounds.push(set);
-        state.selection = { type: 'backgroundSet', setId: set.id };
-        ui.renderAll();
-        return set;
-      }
-    
-      function duplicateBackgroundSet(setId) {
-        const source = model.findBackground(state.project, setId);
-        if (!source) return null;
-        const copy = model.cloneBackgroundSet(source);
-        copy.name = source.name + ' 副本';
-        state.project.backgrounds.push(copy);
-        state.selection = { type: 'backgroundSet', setId: copy.id };
-        ui.renderAll();
-        return copy;
-      }
-    
-      function renameBackgroundSet(setId, name) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        const trimmed = String(name == null ? '' : name).trim();
-        if (!trimmed) return;
-        set.name = trimmed;
-        ui.renderAll();
-      }
-    
-      function deleteBackgroundSet(setId) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        const check = model.canDeleteBackground(state.project, setId);
-        if (!check.ok) {
-          ui.modal.alert('无法删除背景', check.reason);
-          return;
+      function currentEditablePage() {
+        const page = actions.currentPage();
+        if (!page) return null;
+        if (!model.canEditPageBackground(state.project, page)) {
+          ui.toast('全局背景生效中，请先取消全局背景或让本页接管。');
+          return null;
         }
-        const index = state.project.backgrounds.indexOf(set);
-        state.project.backgrounds.splice(index, 1);
-        (set.images || []).forEach(function (image) { actions.releaseUnusedAsset(image.assetId); });
-        state.selection = { type: 'page' };
-        ui.renderAll();
-        ui.toast('已删除背景“' + set.name + '”。');
+        return page;
       }
-    
-      function setPageBackground(setId) {
+
+      function releaseBackgroundAssets(previous, current) {
+        const keep = new Set((current && current.images || []).map(function (image) {
+          return image.assetId;
+        }).filter(Boolean));
+        (previous && previous.images || []).forEach(function (image) {
+          if (image && image.assetId && !keep.has(image.assetId)) {
+            actions.releaseUnusedAsset(image.assetId);
+          }
+        });
+      }
+
+      function setGlobalBackgroundPage() {
         const page = actions.currentPage();
         if (!page) return;
-        if (!model.findBackground(state.project, setId)) return;
-        page.backgroundId = setId;
+        if (state.project.globalBackgroundPageId === page.id) return;
+        actions.pushUndo('设为全局背景');
+        model.setGlobalBackgroundPage(state.project, page);
         state.selection = { type: 'page' };
         ui.renderAll();
+        ui.toast('已让所有页显示第 ' + (state.project.pages.indexOf(page) + 1) + ' 页的背景 · 撤销');
       }
-    
-      function pickBackgroundImage(setId, imageId) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        pendingBackgroundSetId = setId;
+
+      function clearGlobalBackground() {
+        if (!state.project.globalBackgroundPageId) return;
+        actions.pushUndo('取消全局背景');
+        model.clearGlobalBackground(state.project);
+        state.selection = { type: 'page' };
+        ui.renderAll();
+        ui.toast('已取消全局背景，各页恢复自己的背景 · 撤销');
+      }
+
+      function copyBackgroundFromPage(sourcePageId) {
+        const target = currentEditablePage();
+        if (!target) return false;
+        const source = model.getPage(state.project, sourcePageId);
+        if (!source || source.id === target.id) return false;
+        const previous = target.background;
+        const wasGlobal = state.project.globalBackgroundPageId === target.id;
+        actions.pushUndo('复制背景');
+        target.background = model.clonePageBackground(source.background);
+        releaseBackgroundAssets(previous, target.background);
+        state.selection = { type: 'background' };
+        ui.renderAll();
+        if (wasGlobal) {
+          ui.toast('已复制第 ' + (state.project.pages.indexOf(source) + 1) + ' 页的背景；本页是全局来源，所有页一起改变 · 撤销');
+        } else {
+          ui.toast('已复制第 ' + (state.project.pages.indexOf(source) + 1) + ' 页的背景 · 撤销');
+        }
+        return true;
+      }
+
+      function clearPageBackground() {
+        const page = currentEditablePage();
+        if (!page) return;
+        const previous = page.background;
+        actions.pushUndo('清空背景');
+        page.background = model.createPageBackground();
+        releaseBackgroundAssets(previous, page.background);
+        state.selection = { type: 'page' };
+        ui.renderAll();
+        ui.toast('已清空本页背景 · 撤销');
+      }
+
+      // 整套替换：填充色与图片列表一起换掉，旧图片资产按引用释放。
+      function replacePageBackground(background) {
+        const page = currentEditablePage();
+        if (!page) return false;
+        const previous = page.background;
+        actions.pushUndo('更换背景');
+        page.background = model.clonePageBackground(background);
+        releaseBackgroundAssets(previous, page.background);
+        state.selection = page.background.images.length
+          ? { type: 'backgroundImage', imageId: page.background.images[0].id }
+          : { type: 'background' };
+        ui.renderAll();
+        return true;
+      }
+
+      function pickBackgroundImage(imageId) {
+        const page = currentEditablePage();
+        if (!page) return;
+        if (imageId && !(page.background.images || []).some(function (image) { return image.id === imageId; })) return;
         pendingBackgroundImageId = imageId || null;
+        pendingBackgroundWhole = false;
         const input = document.getElementById('bg-file');
         input.value = '';
         input.click();
       }
-    
+
+      function pickBackgroundImageWhole() {
+        const page = currentEditablePage();
+        if (!page) return;
+        pendingBackgroundImageId = null;
+        pendingBackgroundWhole = true;
+        const input = document.getElementById('bg-file');
+        input.value = '';
+        input.click();
+      }
+
       async function handleBackgroundFile(file) {
         if (!file) return;
-        const setId = pendingBackgroundSetId;
+        const page = currentEditablePage();
         const imageId = pendingBackgroundImageId;
         const whole = pendingBackgroundWhole;
-        pendingBackgroundSetId = null;
         pendingBackgroundImageId = null;
         pendingBackgroundWhole = false;
-        const set = model.findBackground(state.project, setId) ||
-          model.effectiveBackground(state.project, actions.currentPage());
-        if (!set) return;
+        if (!page) return;
         let assetId;
         try {
           assetId = await L.assets.addFile(file);
@@ -101,11 +139,13 @@
           const meta = L.assets.getMeta(assetId);
           model.ensureAssetMeta(state.project, assetId, file.name, meta ? meta.mime : file.type);
           await appCtx.draft.persistDraftAssetQuietly(assetId);
+          const background = page.background;
           const target = imageId
-            ? (set.images || []).find(function (image) { return image.id === imageId; })
+            ? (background.images || []).find(function (image) { return image.id === imageId; })
             : null;
           if (target) {
             const oldAssetId = target.assetId;
+            actions.pushUndo('替换背景图');
             target.assetId = assetId;
             if (target.fit === 'none') {
               const rect = renderer.backgroundImageRect(state.project.pageSize, target, loaded);
@@ -113,18 +153,23 @@
               target.height = target.height > 0 ? target.height : rect.height;
             }
             actions.releaseUnusedAsset(oldAssetId);
-            state.selection = { type: 'backgroundImage', setId: set.id, imageId: target.id };
+            state.selection = { type: 'backgroundImage', imageId: target.id };
+          } else if (whole) {
+            const previous = background;
+            actions.pushUndo('更换背景');
+            const image = model.createBackgroundImage(assetId, 'cover');
+            page.background = { color: previous.color, images: [image] };
+            releaseBackgroundAssets(previous, page.background);
+            state.selection = { type: 'backgroundImage', imageId: image.id };
           } else {
-            const image = model.createBackgroundImage(assetId, set.images.length ? 'original' : 'cover');
-            set.images.push(image);
-            state.selection = { type: 'backgroundImage', setId: set.id, imageId: image.id };
+            actions.pushUndo('添加背景图');
+            const image = model.createBackgroundImage(assetId, background.images.length ? 'original' : 'cover');
+            background.images.push(image);
+            state.selection = { type: 'backgroundImage', imageId: image.id };
           }
           ui.renderAll();
           if (whole) {
-            const page = actions.currentPage();
-            if (page) page.backgroundId = set.id;
-            state.selection = { type: 'page' };
-            ui.toast('已创建背景“' + set.name + '”并应用到当前页。');
+            ui.toast('已更换本页背景 · 撤销');
           } else {
             ui.toast('背景图片已更新。');
           }
@@ -133,69 +178,58 @@
           ui.toast('背景图片读取失败：' + err.message, 'error');
         }
       }
-    
-      function pickBackgroundImageWhole() {
-        const set = addBackgroundSet();
-        pendingBackgroundSetId = set.id;
-        pendingBackgroundImageId = null;
-        pendingBackgroundWhole = true;
-        const input = document.getElementById('bg-file');
-        input.value = '';
-        input.click();
-      }
-    
+
       async function handleDroppedBackgroundFile(mode, context, file) {
         if (!file) return;
         const ctx = context || {};
         if (mode === 'whole') {
-          const set = addBackgroundSet();
-          pendingBackgroundSetId = set.id;
           pendingBackgroundImageId = null;
           pendingBackgroundWhole = true;
         } else {
-          pendingBackgroundSetId = ctx.setId || null;
           pendingBackgroundImageId = mode === 'replace' ? (ctx.imageId || null) : null;
+          pendingBackgroundWhole = false;
         }
         await handleBackgroundFile(file);
       }
-    
-      function deleteBackgroundImage(setId, imageId) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        const index = (set.images || []).findIndex(function (image) { return image.id === imageId; });
+
+      function deleteBackgroundImage(imageId) {
+        const page = currentEditablePage();
+        if (!page) return;
+        const index = (page.background.images || []).findIndex(function (image) { return image.id === imageId; });
         if (index < 0) return;
-        const image = set.images[index];
-        set.images.splice(index, 1);
+        const image = page.background.images[index];
+        actions.pushUndo('删除背景图');
+        page.background.images.splice(index, 1);
         actions.releaseUnusedAsset(image.assetId);
-        state.selection = { type: 'backgroundSet', setId: setId };
-        ui.renderAll();
-      }
-    
-      function moveBackgroundImage(setId, imageId, delta) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        const plan = model.planStepMove(set.images, imageId, delta);
-        if (!plan) return;
-        actions.pushUndo('调整背景图片顺序');
-        model.moveItem(set.images, plan.from, plan.to);
+        state.selection = { type: 'background' };
         ui.renderAll();
       }
 
-      function moveBackgroundImageTo(setId, imageId, targetId, placement) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return false;
-        const plan = model.planDisplayMove(set.images, imageId, targetId, placement);
+      function moveBackgroundImage(imageId, delta) {
+        const page = currentEditablePage();
+        if (!page) return;
+        const plan = model.planStepMove(page.background.images, imageId, delta);
+        if (!plan) return;
+        actions.pushUndo('调整背景图片顺序');
+        model.moveItem(page.background.images, plan.from, plan.to);
+        ui.renderAll();
+      }
+
+      function moveBackgroundImageTo(imageId, targetId, placement) {
+        const page = currentEditablePage();
+        if (!page) return false;
+        const plan = model.planDisplayMove(page.background.images, imageId, targetId, placement);
         if (!plan) return false;
         actions.pushUndo('调整背景图片顺序');
-        model.moveItem(set.images, plan.from, plan.to);
+        model.moveItem(page.background.images, plan.from, plan.to);
         ui.renderAll();
         return true;
       }
-    
-      function setBackgroundImageFit(setId, imageId, fit) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        const image = (set.images || []).find(function (item) { return item.id === imageId; });
+
+      function setBackgroundImageFit(imageId, fit) {
+        const page = currentEditablePage();
+        if (!page) return;
+        const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
         if (!image) return;
         if (fit === 'none') {
           actions.ensureCustomBackgroundImage(image);
@@ -205,15 +239,15 @@
         }
         ui.renderAll();
       }
-    
-      function restoreBackgroundImageFit(setId, imageId) {
-        setBackgroundImageFit(setId, imageId, 'cover');
+
+      function restoreBackgroundImageFit(imageId) {
+        setBackgroundImageFit(imageId, 'cover');
       }
-    
-      function setBackgroundImageValue(setId, imageId, key, value) {
-        const set = model.findBackground(state.project, setId);
-        if (!set) return;
-        const image = (set.images || []).find(function (item) { return item.id === imageId; });
+
+      function setBackgroundImageValue(imageId, key, value) {
+        const page = currentEditablePage();
+        if (!page) return;
+        const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
         if (!image) return;
         image[key] = value;
         const inputIds = {
@@ -228,58 +262,13 @@
         if (layout.invalidate) layout.invalidate();
         appCtx.viewport.scheduleRedraw(['bg', 'overlay']);
       }
-    
-      function toggleUnifiedBackground(value) {
-        const next = !!value;
-        if (next) {
-          let id = state.project.unifiedBackgroundId;
-          if (!model.findBackground(state.project, id)) {
-            const effective = model.effectiveBackground(state.project, actions.currentPage());
-            id = effective ? effective.id : (state.project.backgrounds[0] || {}).id || null;
-          }
-          state.project.unifiedBackgroundId = id;
-        }
-        state.project.unifiedBackground = next;
-        state.selection = { type: 'page' };
-        ui.renderAll();
-      }
-    
-      function setUnifiedBackground(setId) {
-        if (!model.findBackground(state.project, setId)) return;
-        state.project.unifiedBackgroundId = setId;
-        state.project.unifiedBackground = true;
-        ui.renderAll();
-      }
-    
-      function bakeUnifiedBackground() {
-        const id = state.project.unifiedBackgroundId;
-        if (!id) return;
-        state.project.pages.forEach(function (page) { page.backgroundId = id; });
-        state.project.unifiedBackground = false;
-        state.selection = { type: 'page' };
-        ui.renderAll();
-        ui.toast('已将全局背景固化到所有页。');
-      }
-    
-      function copyUnifiedBackgroundToPage() {
-        const id = state.project.unifiedBackgroundId;
-        const globalSet = model.findBackground(state.project, id);
-        const page = actions.currentPage();
-        if (!globalSet || !page) return;
-        const copy = model.cloneBackgroundSet(globalSet);
-        copy.name = globalSet.name + ' 副本';
-        state.project.backgrounds.push(copy);
-        state.project.pages.forEach(function (item) {
-          item.backgroundId = item.id === page.id ? copy.id : id;
-        });
-        state.project.unifiedBackground = false;
-        state.selection = { type: 'backgroundSet', setId: copy.id };
-        ui.renderAll();
-        ui.toast('已为当前页创建独立背景副本。');
-      }
 
       return {
-        addBackgroundSet, duplicateBackgroundSet, renameBackgroundSet, deleteBackgroundSet, setPageBackground, pickBackgroundImage, handleBackgroundFile, pickBackgroundImageWhole, handleDroppedBackgroundFile, deleteBackgroundImage, moveBackgroundImage, moveBackgroundImageTo, setBackgroundImageFit, restoreBackgroundImageFit, setBackgroundImageValue, toggleUnifiedBackground, setUnifiedBackground, bakeUnifiedBackground, copyUnifiedBackgroundToPage
+        setGlobalBackgroundPage, clearGlobalBackground, copyBackgroundFromPage,
+        clearPageBackground, replacePageBackground,
+        pickBackgroundImage, handleBackgroundFile, pickBackgroundImageWhole, handleDroppedBackgroundFile,
+        deleteBackgroundImage, moveBackgroundImage, moveBackgroundImageTo,
+        setBackgroundImageFit, restoreBackgroundImageFit, setBackgroundImageValue
       };
     }
   };
