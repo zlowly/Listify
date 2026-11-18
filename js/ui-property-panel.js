@@ -6,6 +6,7 @@
 
   const model = L.model;
   const layout = L.layout;
+  const renderer = L.render;
   const esc = ui.esc;
   const field = ui.field;
   const fieldHelp = ui.fieldHelp;
@@ -92,17 +93,10 @@
     }
   }
 
-  /* 背景缩略图：优先用首张已加载图片，失败时只剩填充色。 */
-  function backgroundPreview(background, extraClass) {
-    const source = background || {};
-    const image = (source.images || []).find(function (item) {
-      return item && item.assetId && L.assets.getUrl(item.assetId);
-    });
-    const url = image ? L.assets.getUrl(image.assetId) : '';
-    return '<div class="bg-preview' + (extraClass ? ' ' + extraClass : '') + '" style="background-color:' +
-      esc(source.color || model.DEFAULT_BACKGROUND_COLOR) + '">' +
-      (url ? '<img src="' + esc(url) + '" alt="">' : '') +
-      '</div>';
+  /* 背景缩略图：canvas 占位，插入 DOM 后由 render.paintBackgroundPreviews 合成 */
+  function backgroundPreview(page, extraClass) {
+    return '<canvas class="bg-preview' + (extraClass ? ' ' + extraClass : '') +
+      '" data-preview-page="' + esc(page.id) + '" aria-hidden="true"></canvas>';
   }
 
   function pageNumber(project, page) {
@@ -113,6 +107,7 @@
     const focusState = capturePanelFocus();
     try {
       renderPropertyPanelBody();
+      renderer.paintBackgroundPreviews(ui.els.propertyPanel);
     } finally {
       restorePanelFocus(focusState);
     }
@@ -175,10 +170,7 @@
       propGroup('margins', '页面边距',
         marginCross(project.margins, 'prop-margin-'),
         { right: helpTip('仅参考线') }) +
-      backgroundGroup(page) +
-      propGroup('actions', '',
-        '<div class="title-tip-row"><button id="prop-delete-block" class="btn btn-danger btn-sm" disabled>删除分类块</button>' +
-          helpTip('在画布或图层面板中选择内容后可删除。') + '</div>', { plain: true });
+      backgroundGroup(page);
 
     bind('prop-page-preset', 'change', function () {
       const value = valueOf('prop-page-preset');
@@ -233,7 +225,7 @@
     return propGroup('background', '页面背景',
       status +
       '<div class="bg-card">' +
-        backgroundPreview(page.background) +
+        backgroundPreview(page) +
         '<div class="bg-card-body">' +
           '<p class="hint">本页背景' + (covered ? '（不显示）' : '') + ' · ' + count + ' 张图</p>' +
           '<label class="bg-color-row">填充色 <input id="prop-bg-color" class="color-input" type="color" value="' +

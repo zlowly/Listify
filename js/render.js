@@ -241,10 +241,9 @@
     return backgroundGeometry(pageSize, img, image.fit || 'cover');
   }
 
-  function drawBackground(ctx, project, page, options) {
+  // 背景绘制体：显式传入背景值，画布/导出取有效背景，缩略图取本页背景。
+  function paintBackground(ctx, pageSize, background, options) {
     const opts = options || {};
-    const background = model.effectiveBackground(project, page);
-    const pageSize = project.pageSize;
     const pw = pageSize.width;
     const ph = pageSize.height;
     ctx.save();
@@ -282,6 +281,51 @@
       });
     }
     ctx.restore();
+  }
+
+  function drawBackground(ctx, project, page, options) {
+    paintBackground(ctx, project.pageSize, model.effectiveBackground(project, page), options);
+  }
+
+  /* 背景缩略图：把整页背景等比缩放到 canvas 内，居中留边。
+     canvas 由面板/弹窗的 HTML 片段提供，DOM 插入后统一走这里绘制。 */
+  function paintBackgroundPreviews(root) {
+    const host = root || document;
+    if (!host || !host.querySelectorAll) return 0;
+    const state = L.app && L.app.state;
+    const project = state && state.project;
+    if (!project || !project.pageSize) return 0;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const pw = Number(project.pageSize.width) || 0;
+    const ph = Number(project.pageSize.height) || 0;
+    if (!(pw > 0) || !(ph > 0)) return 0;
+    let painted = 0;
+    host.querySelectorAll('canvas[data-preview-page]').forEach(function (canvas) {
+      const page = (project.pages || []).find(function (item) {
+        return item.id === canvas.getAttribute('data-preview-page');
+      });
+      if (!page) return;
+      // 面板重建后 canvas 尚未布局时 clientWidth 为 0，按 CSS 逻辑尺寸兜底。
+      const fallback = canvas.classList.contains('bg-preview-sm')
+        ? { width: 40, height: 52 }
+        : { width: 72, height: 96 };
+      const width = Math.max(1, Math.round((canvas.clientWidth || fallback.width) * dpr));
+      const height = Math.max(1, Math.round((canvas.clientHeight || fallback.height) * dpr));
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      const scale = Math.min(width / pw, height / ph);
+      ctx.save();
+      ctx.translate((width - pw * scale) / 2, (height - ph * scale) / 2);
+      ctx.scale(scale, scale);
+      paintBackground(ctx, project.pageSize, page.background);
+      ctx.restore();
+      painted += 1;
+    });
+    return painted;
   }
 
   function elementCorners(element) {
@@ -709,6 +753,8 @@
     roundRect: roundRect,
     backgroundGeometry: backgroundGeometry,
     backgroundImageRect: backgroundImageRect,
+    paintBackground: paintBackground,
+    paintBackgroundPreviews: paintBackgroundPreviews,
     drawBackground: drawBackground,
     drawFreeText: drawFreeText,
     drawFreeImage: drawFreeImage,

@@ -578,6 +578,8 @@ const viewport = {
     if (!page || !model.canEditPageBackground(state.project, page)) return;
     page.background.color = color;
     changed({ property: false, layers: ['bg', 'overlay'] });
+    // 取色器保持焦点时不重渲染面板，这里直接补画可见的背景缩略图。
+    renderer.paintBackgroundPreviews(ui.els.propertyPanel);
   }
 
   function setBackgroundImageField(imageId, field, value) {

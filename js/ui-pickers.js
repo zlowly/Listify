@@ -7,15 +7,9 @@
   const esc = ui.esc;
   const helpTip = ui.helpTip;
 
-  function previewOf(background) {
-    const source = background || {};
-    const image = (source.images || []).find(function (item) {
-      return item && item.assetId && L.assets.getUrl(item.assetId);
-    });
-    const url = image ? L.assets.getUrl(image.assetId) : '';
-    return '<span class="bg-preview bg-preview-sm" style="background-color:' +
-      esc(source.color || L.model.DEFAULT_BACKGROUND_COLOR) + '">' +
-      (url ? '<img src="' + esc(url) + '" alt="">' : '') + '</span>';
+  function previewOf(page) {
+    return '<canvas class="bg-preview bg-preview-sm" data-preview-page="' +
+      esc(page.id) + '" aria-hidden="true"></canvas>';
   }
 
   // 复制背景：目标永远是当前页自己的背景；被全局覆盖时入口已在面板禁用。
@@ -29,7 +23,7 @@
       const isSource = project.globalBackgroundPageId === page.id;
       const count = (page.background.images || []).length;
       return '<button type="button" class="bg-copy-row" data-copy-page="' + esc(page.id) + '">' +
-        previewOf(page.background) +
+        previewOf(page) +
         '<span class="bg-copy-text"><strong>第 ' + (index + 1) + ' 页</strong>' +
         '<span class="hint">' + count + ' 张图' + (isSource ? ' · 全局来源' : '') + '</span></span>' +
         '</button>';
@@ -43,6 +37,7 @@
         : '<p class="hint">项目只有这一页，没有可复制的背景。</p>',
       actions: [{ label: '关闭', className: 'btn-primary', onClick: function (close) { close(); } }]
     });
+    L.render.paintBackgroundPreviews(modal.body);
     modal.body.querySelectorAll('[data-copy-page]').forEach(function (button) {
       button.addEventListener('click', function () {
         const ok = L.app.copyBackgroundFromPage(button.getAttribute('data-copy-page'));
