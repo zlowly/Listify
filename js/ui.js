@@ -11,7 +11,6 @@
   const setGroupCollapsed = ui.setGroupCollapsed;
   const normalizeAngle = ui.normalizeAngle;
   /* 选择器与属性面板来自 ui-pickers.js / ui-property-panel.js（先加载） */
-  const openPresetPicker = ui.openPresetPicker;
   const fitLabel = ui.fitLabel;
 
   ui.activePanel = 'categories';
@@ -584,7 +583,6 @@
         (isSource ? '<span class="pill pill-blue">全局</span>' : '') +
         '<span class="pill pill-blue">底层</span>' +
         '</button>' +
-        '<button class="icon-btn" type="button" data-bg-add title="添加背景图片" aria-label="添加背景图片">＋</button>' +
         '</div>');
       const reversed = items.slice().reverse();
       reversed.forEach(function (item, reverseIndex) {
@@ -699,12 +697,6 @@
         event.stopPropagation();
         const parts = button.getAttribute('data-bg-move').split(':');
         L.app.moveBackgroundItem(parts[0], Number(parts[1]));
-      });
-    });
-    ui.els.layerPanel.querySelectorAll('[data-bg-add]').forEach(function (button) {
-      button.addEventListener('click', function (event) {
-        event.stopPropagation();
-        openPresetPicker('add', null);
       });
     });
   };

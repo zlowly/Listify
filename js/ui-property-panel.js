@@ -232,6 +232,9 @@
     const badges = '<span class="pill pill-gray">图片 ' + imageCount + ' · 图形 ' + shapeCount + '</span>' +
       (isSource ? '<span class="pill pill-blue">全局来源</span>' : '');
     const preview = backgroundPreview(page, '', box);
+    const shapeTool = L.app.state.shapeTool;
+    const shapeArmed = !!(shapeTool && shapeTool.active && shapeTool.target === 'background' &&
+      shapeTool.pageId === page.id);
     const tip = '背景位于内容下方。选择或更换背景会整套替换填充色、图片与图形；' +
       '勾选后所有页使用本页背景，改本页会同步所有页。';
     let body;
@@ -256,9 +259,11 @@
           '</div>' +
         '</div>' +
         '<div class="bg-actions">' +
-          '<button id="prop-bg-pick" class="btn btn-sm" type="button">' + (count ? '更换背景' : '选择背景') + '</button>' +
+          '<button id="prop-bg-add-shape" class="btn btn-sm' + (shapeArmed ? ' is-active' : '') +
+            '" type="button" aria-label="添加背景图形（画一次即退出）" aria-pressed="' +
+            (shapeArmed ? 'true' : 'false') + '">＋ 图形</button>' +
           '<button id="prop-bg-add-image" class="btn btn-sm" type="button" aria-label="添加背景图片">＋ 图片</button>' +
-          '<button id="prop-bg-add-shape" class="btn btn-sm" type="button" aria-label="添加背景图形">＋ 图形</button>' +
+          '<button id="prop-bg-pick" class="btn btn-sm" type="button">' + (count ? '更换背景' : '选择背景') + '</button>' +
           '<button id="prop-bg-copy-from" class="btn btn-sm" type="button">复制背景…</button>' +
           '<button id="prop-bg-clear" class="btn btn-sm" type="button"' + (count ? '' : ' disabled') + '>清空背景</button>' +
         '</div>' +

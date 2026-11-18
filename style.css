@@ -150,6 +150,8 @@ button { cursor: pointer; }
 }
 .btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
 .btn-sm { padding: 4px 8px; font-size: 12px; }
+.btn.is-active { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.btn.is-active:hover { background: var(--blue-soft); border-color: var(--blue); }
 
 .icon-btn {
   width: 28px;

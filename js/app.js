@@ -299,6 +299,8 @@ const viewport = {
 
   /* ---------- page and selection actions ---------- */
 
+  /* 静态节点（工具条按钮）可直接命令式更新；属性面板里的入口按钮每次重渲染都会重建，
+     其按下态必须在渲染期从 state.shapeTool 派生。 */
   function updateShapeToolButton() {
     const button = document.getElementById('btn-add-shape');
     if (!button) return;
@@ -315,6 +317,7 @@ const viewport = {
     state.shapeTool.pageId = null;
     state.shapeTool.preview = null;
     updateShapeToolButton();
+    if (ctx.chrome) ctx.chrome.refreshHoverCursor();
   }
 
   function toggleShapeTool(target) {
@@ -340,8 +343,8 @@ const viewport = {
     updateShapeToolButton();
     ui.renderAll();
     ui.toast(nextTarget === 'background'
-      ? '图形工具：拖拽或单击，把图形添加到背景层；Esc 退出。'
-      : '图形工具：拖拽或单击，把图形添加到内容层；Esc 退出。');
+      ? '图形工具：拖拽或单击，把图形添加到背景层；画一次即退出，Esc 取消。'
+      : '图形工具：拖拽或单击，把图形添加到内容层；画一次即退出，Esc 取消。');
   }
 
   function selectPage() {

@@ -523,6 +523,15 @@
       }
     
       function updateCursor(screenX, screenY) {
+        // 图形工具 armed 期间固定十字，跳过手柄与命中判定（仍在 rAF 内，每帧至多一次）。
+        const armedPage = state.shapeTool && state.shapeTool.active ? actions.currentPage() : null;
+        if (armedPage && state.shapeTool.pageId === armedPage.id) {
+          if (lastAppliedCursor !== 'crosshair') {
+            lastAppliedCursor = 'crosshair';
+            surface.overlay.style.cursor = 'crosshair';
+          }
+          return;
+        }
         let cursor = 'default';
         const pageHandle = pageSizeHandleAt(screenX, screenY);
         if (pageHandle) cursor = 'nwse-resize';

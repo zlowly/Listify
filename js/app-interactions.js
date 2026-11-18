@@ -255,8 +255,7 @@
           return;
         }
     
-        state.selection = { type: 'page' };
-        ui.renderAll();
+        actions.selectPage();
       }
     
       function beginPointer(event) {
@@ -464,13 +463,16 @@
             Math.round(rect.width), Math.round(rect.height)
           );
           page.background.items.push(item);
+          state.selection = { type: 'backgroundItem', itemId: item.id };
         } else {
           const element = shape.createShapeElement(
             Math.round(rect.x), Math.round(rect.y),
             Math.round(rect.width), Math.round(rect.height)
           );
           page.elements.push(element);
+          state.selection = { type: 'element', id: element.id };
         }
+        actions.exitShapeTool();
         ui.toast(drag.target === 'background' ? '已添加背景图形。' : '已添加图形。');
       }
 
@@ -523,6 +525,7 @@
         }
         if (event) surface.hoverPoint = appCtx.chrome.overlayPoint(event);
         ui.renderAll();
+        appCtx.chrome.refreshHoverCursor();
       }
     
       function onDoubleClick(event) {
