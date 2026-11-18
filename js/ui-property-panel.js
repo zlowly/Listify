@@ -93,10 +93,24 @@
     }
   }
 
+  /* 预览框跟随页面比例：等比装进 96×96 的箱，页面比例优先于最短边下限 */
+  function previewBox(pageSize) {
+    const pw = Math.max(1, Number(pageSize && pageSize.width) || 1);
+    const ph = Math.max(1, Number(pageSize && pageSize.height) || 1);
+    let width = 96;
+    let height = Math.round(96 * ph / pw);
+    if (height > 96) {
+      height = 96;
+      width = Math.round(96 * pw / ph);
+    }
+    return { width: Math.max(1, width), height: Math.max(1, height) };
+  }
+
   /* 背景缩略图：canvas 占位，插入 DOM 后由 render.paintBackgroundPreviews 合成 */
-  function backgroundPreview(page, extraClass) {
-    return '<canvas class="bg-preview' + (extraClass ? ' ' + extraClass : '') +
-      '" data-preview-page="' + esc(page.id) + '" aria-hidden="true"></canvas>';
+  function backgroundPreview(page, extraClass, box) {
+    const size = box ? ' style="width:' + box.width + 'px;height:' + box.height + 'px"' : '';
+    return '<canvas class="bg-preview' + (extraClass ? ' ' + extraClass : '') + '"' + size +
+      ' data-preview-page="' + esc(page.id) + '" aria-hidden="true"></canvas>';
   }
 
   function pageNumber(project, page) {
@@ -208,47 +222,54 @@
     const source = model.findGlobalBackgroundPage(project);
     const covered = model.isBackgroundCovered(project, page);
     const isSource = !!(source && source.id === page.id);
-    const editable = model.canEditPageBackground(project, page);
-    const disabled = editable ? '' : ' disabled';
     const count = (page.background.images || []).length;
-    let status = '';
-    let actions = '';
+    const box = previewBox(project.pageSize);
+    const color = page.background.color || model.DEFAULT_BACKGROUND_COLOR;
+    const badges = '<span class="pill pill-gray">' + (count ? count + ' 张图' : '无图片') + '</span>' +
+      (isSource ? '<span class="pill pill-blue">全局来源</span>' : '');
+    const preview = backgroundPreview(page, '', box);
+    const tip = '背景位于内容下方。选择或更换背景会整套替换填充色与图片；' +
+      '勾选后所有页使用本页背景，改本页会同步所有页。';
+    let body;
     if (covered) {
-      status = '<p class="hint bg-status">全局背景生效中 · 来源：第 ' + pageNumber(project, source) + ' 页</p>' +
-        '<p class="hint">本页背景当前不显示，取消全局背景后恢复；要改它，先取消全局。</p>';
-      actions = '<div class="inline-actions">' +
-        '<button id="prop-bg-cancel-global" class="btn btn-sm">取消全局背景</button>' +
-        '</div>';
-    } else if (isSource) {
-      status = '<p class="hint bg-status">全局来源：第 ' + pageNumber(project, page) + ' 页 · 改这里会影响所有页</p>';
-    }
-    return propGroup('background', '页面背景',
-      status +
-      '<div class="bg-card">' +
-        backgroundPreview(page) +
-        '<div class="bg-card-body">' +
-          '<p class="hint">本页背景' + (covered ? '（不显示）' : '') + ' · ' + count + ' 张图</p>' +
-          '<label class="bg-color-row">填充色 <input id="prop-bg-color" class="color-input" type="color" value="' +
-            esc(page.background.color || model.DEFAULT_BACKGROUND_COLOR) + '"' + disabled + '></label>' +
+      body =
+        '<div class="bg-card">' + preview +
+          '<div class="bg-fields">' +
+            '<p class="bg-source-note">显示第 ' + pageNumber(project, source) + ' 页的全局背景</p>' +
+          '</div>' +
         '</div>' +
-      '</div>' +
-      '<div class="inline-actions">' +
-        '<button id="prop-bg-pick" class="btn btn-sm"' + disabled + '>更换背景</button>' +
-        '<button id="prop-bg-add-image" class="btn btn-sm"' + disabled + '>＋ 叠图</button>' +
-        '<button id="prop-bg-copy-from" class="btn btn-sm"' + disabled + '>复制背景…</button>' +
-        '<button id="prop-bg-clear" class="btn btn-sm"' + disabled + '>清空背景</button>' +
-      '</div>' +
-      '<label class="check-row"><input id="prop-bg-global" type="checkbox"' +
-        (isSource ? ' checked' : '') + '> 所有页显示本页背景</label>' +
-      actions,
-      { right: helpTip(covered
-        ? '全局背景来自另一页；这里只能查看本页背景。取消全局或让本页接管后才能修改。'
-        : '背景位于内容下方。勾选后所有页显示本页背景，改本页会同步所有页。') });
+        '<div class="inline-actions">' +
+          '<button id="prop-bg-cancel-global" class="btn btn-sm" type="button">取消全局背景</button>' +
+        '</div>' +
+        field('全局背景', '<label class="check-row"><input id="prop-bg-global" type="checkbox"> 本页接管</label>');
+    } else {
+      body =
+        '<div class="bg-card">' + preview +
+          '<div class="bg-fields">' +
+            field('图片', '<span class="bg-count">' + (count ? count + ' 张' : '无图片') + '</span>') +
+            field('填充色', colorInput('prop-bg-color', color, false) +
+              '<span class="bg-color-value">' + esc(color) + '</span>') +
+          '</div>' +
+        '</div>' +
+        '<div class="bg-actions">' +
+          '<button id="prop-bg-pick" class="btn btn-sm" type="button">' + (count ? '更换背景' : '选择背景') + '</button>' +
+          '<button id="prop-bg-add-image" class="btn btn-sm" type="button" aria-label="添加背景图片">＋ 图片</button>' +
+          '<button id="prop-bg-copy-from" class="btn btn-sm" type="button">复制背景…</button>' +
+          '<button id="prop-bg-clear" class="btn btn-sm" type="button"' + (count ? '' : ' disabled') + '>清空背景</button>' +
+        '</div>' +
+        field('全局背景', '<label class="check-row"><input id="prop-bg-global" type="checkbox"' +
+          (isSource ? ' checked' : '') + '> 所有页使用此背景</label>');
+    }
+    return propGroup('background', '页面背景', body, { right: badges + helpTip(tip) });
   }
 
   function bindBackgroundGroup(page) {
     bind('prop-bg-color', 'input', function () {
-      L.app.setBackgroundColor(valueOf('prop-bg-color'));
+      const value = valueOf('prop-bg-color');
+      L.app.setBackgroundColor(value);
+      // 取色器不触发面板重渲染，色值文本就地跟上，避免显示旧值。
+      const label = ui.els.propertyPanel.querySelector('.bg-color-value');
+      if (label) label.textContent = value;
     });
     bind('prop-bg-pick', 'click', function () { openPresetPicker('whole', null); });
     bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', null); });
