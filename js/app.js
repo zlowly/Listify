@@ -1047,6 +1047,7 @@ const viewport = {
   async function init() {
     ctx.viewport.setupSurface();
     ui.init();
+    ui.setStartupLoading(true);
     const originalRenderAll = ui.renderAll;
     ui.renderAll = function () {
       uiRenderDepth += 1;
@@ -1092,10 +1093,15 @@ const viewport = {
       });
     }
 
-    const startup = await ctx.draft.restoreDraftOnStartup();
-    ctx.viewport.fit();
-    ui.renderAll();
-    ctx.draft.restoring = false;
+    let startup;
+    try {
+      startup = await ctx.draft.restoreDraftOnStartup();
+      ctx.viewport.fit();
+      ui.renderAll();
+    } finally {
+      ctx.draft.restoring = false;
+      ui.setStartupLoading(false);
+    }
 
     if (startup.reason === 'unavailable') {
       ctx.draft.enabled = false;
@@ -1297,6 +1303,7 @@ const viewport = {
     init().catch(function (err) {
       console.error('[Listify] 初始化失败', err);
       try {
+        ui.setStartupLoading(false);
         ui.toast('初始化失败：' + (err && err.message ? err.message : '未知错误'), 'error');
       } catch (ignored) { /* empty */ }
     });

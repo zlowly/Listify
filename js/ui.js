@@ -726,6 +726,13 @@
     ui.els.selectionLabel.textContent = label;
   };
 
+  ui.setStartupLoading = function (active) {
+    const loading = document.getElementById('startup-loading');
+    if (loading) loading.hidden = !active;
+    const pane = document.getElementById('canvas-pane');
+    if (pane) pane.setAttribute('aria-busy', active ? 'true' : 'false');
+  };
+
   ui.updateEmptyHint = function () {
     const project = L.app.state.project;
     const page = L.app.currentPage();

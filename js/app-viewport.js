@@ -73,6 +73,8 @@
         surface.zoomInBtn = document.getElementById('btn-zoom-in');
     
         syncSurface();
+        measureCanvas();
+        positionCanvasStickers();
       }
     
       function toolbarChromeLeft() {
@@ -101,6 +103,14 @@
         return viewport.mode === 'fit' ? viewport.fitScale : viewport.zoom;
       }
     
+      function positionCanvasStickers() {
+        if (!surface.pane) return;
+        const chromeLeft = toolbarChromeLeft();
+        const centerX = chromeLeft + Math.max(0, viewport.width - chromeLeft) / 2;
+        surface.pane.style.setProperty('--canvas-sticker-x', Math.round(centerX) + 'px');
+        surface.pane.style.setProperty('--canvas-sticker-y', Math.round(viewport.height / 2) + 'px');
+      }
+
       function syncGeometry() {
         if (!surface.scrollEl || !surface.stageEl) return;
         drawStats.geometry += 1;
@@ -141,6 +151,7 @@
         syncedPageW = pageW;
         syncedPageH = pageH;
         updateZoomUI();
+        positionCanvasStickers();
       }
     
       function scheduleRedraw(layers) {
