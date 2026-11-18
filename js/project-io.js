@@ -12,8 +12,9 @@
     const ids = new Set();
     (project.pages || []).forEach(function (page) {
       const background = page && page.background;
-      (background && background.images || []).forEach(function (image) {
-        if (image && image.assetId) ids.add(image.assetId);
+      const items = background && (background.items || background.images) || [];
+      items.forEach(function (item) {
+        if (item && item.kind !== 'shape' && item.assetId) ids.add(item.assetId);
       });
       (page.elements || []).forEach(function (element) {
         if (element.type === 'image' && element.assetId) ids.add(element.assetId);
@@ -55,6 +56,33 @@
     };
   }
 
+  function serializeShape(shape, identity) {
+    const fade = L.model.fadeValues(shape);
+    return Object.assign({
+      id: shape.id,
+      x: shape.x,
+      y: shape.y,
+      width: shape.width,
+      height: shape.height,
+      rotation: Number(shape.rotation) || 0,
+      shape: shape.shape === 'diamond' ? 'diamond' : 'rect',
+      mode: shape.mode === 'stroke' ? 'stroke' : 'fill',
+      color: shape.color || L.shape.DEFAULT_SHAPE.color,
+      radius: Number(shape.radius) || 0,
+      strokeWidth: Number(shape.strokeWidth) || 0,
+      opacity: shape.opacity == null ? 1 : shape.opacity,
+      blur: shape.blur == null ? 0 : shape.blur,
+      brightness: shape.brightness == null ? 1 : shape.brightness,
+      hue: shape.hue == null ? 0 : shape.hue,
+      fadeMode: fade.mode,
+      fadeAngle: fade.angle,
+      fadePosition: fade.position,
+      fadeWidth: fade.width,
+      fadeTop: fade.top,
+      fadeBottom: fade.bottom
+    }, identity);
+  }
+
   function serializeElement(element) {
     if (element.type === 'category') {
       return {
@@ -80,6 +108,9 @@
         text: element.text,
         style: serializeStyle(element.style)
       };
+    }
+    if (element.type === 'shape') {
+      return serializeShape(element, { type: 'shape' });
     }
     const fade = L.model.fadeValues(element);
     return {
@@ -109,6 +140,7 @@
     const fade = L.model.fadeValues(image);
     return {
       id: image.id,
+      kind: 'image',
       assetId: image.assetId || null,
       fit: image.fit || 'cover',
       x: Number(image.x) || 0,
@@ -130,11 +162,17 @@
     };
   }
 
+  function serializeBackgroundItem(item) {
+    if (item.kind === 'shape') return serializeShape(item, { kind: 'shape' });
+    return serializeBackgroundImage(item);
+  }
+
   function serializePageBackground(background) {
     const source = background || {};
+    const items = source.items || source.images || [];
     return {
       color: source.color || L.model.DEFAULT_BACKGROUND_COLOR,
-      images: (source.images || []).map(serializeBackgroundImage)
+      items: items.map(serializeBackgroundItem)
     };
   }
 
@@ -153,7 +191,7 @@
     });
 
     return {
-      version: 4,
+      version: 5,
       pageSize: {
         width: project.pageSize.width,
         height: project.pageSize.height
@@ -246,7 +284,7 @@
 
     const isV1 = raw.version === 1;
     const project = {
-      version: 4,
+      version: 5,
       pageSize: { width: raw.pageSize.width, height: raw.pageSize.height },
       margins: {
         top: raw.margins.top,
@@ -302,6 +340,39 @@
                 text: element.text,
                 style: loadStyle(element.style)
               };
+            }
+            if (element.type === 'shape') {
+              const fadeMode = L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off';
+              const fadeDefaults = L.model.fadeDefaults(fadeMode);
+              return L.shape.clampShape({
+                id: element.id,
+                type: 'shape',
+                x: element.x,
+                y: element.y,
+                width: element.width,
+                height: element.height,
+                rotation: L.projectSchema.isFiniteNumber(element.rotation) ? element.rotation : 0,
+                shape: element.shape === 'diamond' ? 'diamond' : 'rect',
+                mode: element.mode === 'stroke' ? 'stroke' : 'fill',
+                color: typeof element.color === 'string' ? element.color : L.shape.DEFAULT_SHAPE.color,
+                radius: L.projectSchema.isFiniteNumber(element.radius) ? element.radius : 0,
+                strokeWidth: L.projectSchema.isFiniteNumber(element.strokeWidth)
+                  ? element.strokeWidth : L.shape.DEFAULT_SHAPE.strokeWidth,
+                opacity: element.opacity == null ? 1 : element.opacity,
+                blur: L.projectSchema.isFiniteNumber(element.blur) ? element.blur : 0,
+                brightness: L.projectSchema.isFiniteNumber(element.brightness) ? element.brightness : 1,
+                hue: L.projectSchema.isFiniteNumber(element.hue) ? element.hue : 0,
+                fadeMode: fadeMode,
+                fadeAngle: L.projectSchema.isFiniteNumber(element.fadeAngle) ? element.fadeAngle : 0,
+                fadePosition: L.projectSchema.isFiniteNumber(element.fadePosition)
+                  ? element.fadePosition : fadeDefaults.fadePosition,
+                fadeWidth: L.projectSchema.isFiniteNumber(element.fadeWidth)
+                  ? element.fadeWidth : fadeDefaults.fadeWidth,
+                fadeTop: L.projectSchema.isFiniteNumber(element.fadeTop)
+                  ? element.fadeTop : fadeDefaults.fadeTop,
+                fadeBottom: L.projectSchema.isFiniteNumber(element.fadeBottom)
+                  ? element.fadeBottom : fadeDefaults.fadeBottom
+              });
             }
             if (!isV1) {
               const fadeMode = L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off';

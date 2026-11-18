@@ -4,6 +4,7 @@
   const L = window.Listify = window.Listify || {};
   const model = L.model;
   const layout = L.layout;
+  const shape = L.shape;
 
   function roundRect(ctx, x, y, width, height, radius) {
     const r = Math.min(radius, width / 2, height / 2);
@@ -252,8 +253,14 @@
     ctx.clip();
     ctx.fillStyle = (background && background.color) || model.DEFAULT_BACKGROUND_COLOR;
     ctx.fillRect(0, 0, pw, ph);
-    if (background && Array.isArray(background.images)) {
-      background.images.forEach(function (image) {
+    if (background && Array.isArray(background.items || background.images)) {
+      const items = background.items || background.images;
+      items.forEach(function (item) {
+        if (item && item.kind === 'shape') {
+          drawShape(ctx, item, opts);
+          return;
+        }
+        const image = item;
         if (!image || !image.assetId) return;
         const img = L.assets.getCachedImage(image.assetId);
         if (!img) return;
@@ -442,6 +449,82 @@
     ctx.restore();
   }
 
+  function traceShape(ctx, item) {
+    const outline = shape.shapeOutline(item);
+    ctx.beginPath();
+    ctx.moveTo(outline.start.x, outline.start.y);
+    outline.commands.forEach(function (command) {
+      if (command.type === 'line') {
+        ctx.lineTo(command.to.x, command.to.y);
+      } else {
+        ctx.arc(
+          command.cx, command.cy, command.radius,
+          command.startAngle, command.endAngle, command.anticlockwise
+        );
+      }
+    });
+    if (outline.closed) ctx.closePath();
+  }
+
+  function paintShape(ctx, item) {
+    const strokeWidth = Math.max(0, Number(item.strokeWidth) || 0);
+    if (item.mode === 'stroke') {
+      if (strokeWidth <= 0) return;
+      // 先裁剪到实际路径，再用双倍线宽描边；只有内侧一半可见，
+      // 因此可见厚度等于 strokeWidth，且永远不会超出外接框。
+      traceShape(ctx, item);
+      ctx.clip();
+      traceShape(ctx, item);
+      ctx.strokeStyle = item.color || shape.DEFAULT_SHAPE.color;
+      ctx.lineWidth = strokeWidth * 2;
+      ctx.stroke();
+      return;
+    }
+    traceShape(ctx, item);
+    ctx.fillStyle = item.color || shape.DEFAULT_SHAPE.color;
+    ctx.fill();
+  }
+
+  function drawShapeWithEffects(ctx, item, width, height, effects) {
+    const ratio = contextRatio(ctx);
+    const pixelWidth = Math.max(1, Math.ceil(width * ratio));
+    const pixelHeight = Math.max(1, Math.ceil(height * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+    const offscreen = canvas.getContext('2d');
+    if (!offscreen) return;
+    offscreen.scale(pixelWidth / width, pixelHeight / height);
+    offscreen.translate(width / 2, height / 2);
+    offscreen.filter = filterString(effects, pixelWidth / width);
+    paintShape(offscreen, item);
+    offscreen.filter = 'none';
+    offscreen.setTransform(1, 0, 0, 1, 0, 0);
+    fillFadeMask(
+      offscreen, effects, width, height,
+      pixelWidth / width, pixelHeight / height,
+      -width / 2, -height / 2
+    );
+    ctx.drawImage(canvas, -width / 2, -height / 2, width, height);
+  }
+
+  function drawShape(ctx, item, options) {
+    const width = Number(item.width) || 0;
+    const height = Number(item.height) || 0;
+    if (!(width > 0) || !(height > 0)) return;
+    const effects = imageEffects(item);
+    ctx.save();
+    ctx.translate(item.x + width / 2, item.y + height / 2);
+    ctx.rotate(model.rotationRadians(item));
+    ctx.globalAlpha = model.clamp(finiteOr(item.opacity, 1), 0, 1);
+    if (effects.blur === 0 && !model.hasImageEffects(item)) {
+      paintShape(ctx, item);
+    } else {
+      drawShapeWithEffects(ctx, item, width, height, effects);
+    }
+    ctx.restore();
+  }
+
   function drawJustifiedText(ctx, style, text, x, baseline, innerWidth) {
     const chars = Array.from(text);
     if (chars.length <= 1) {
@@ -610,6 +693,8 @@
         drawFreeText(ctx, element, editMode);
       } else if (element.type === 'image') {
         drawFreeImage(ctx, element, opts);
+      } else if (element.type === 'shape') {
+        drawShape(ctx, element, opts);
       }
     });
     ctx.restore();
@@ -640,6 +725,13 @@
       if (element.type === 'image') {
         const local = imageLocalPoint(element, x, y);
         if (Math.abs(local.x) <= bounds.width / 2 && Math.abs(local.y) <= bounds.height / 2) {
+          return { element: element, index: i, bounds: bounds };
+        }
+        continue;
+      }
+      if (element.type === 'shape') {
+        const local = imageLocalPoint(element, x, y);
+        if (shape.shapeContains(element, local.x, local.y)) {
           return { element: element, index: i, bounds: bounds };
         }
         continue;
@@ -682,7 +774,7 @@
     const pageW = project.pageSize.width;
     const pageH = project.pageSize.height;
     return page.elements.filter(function (element) {
-      if (element.type === 'image') {
+      if (element.type === 'image' || element.type === 'shape') {
         return elementCorners(element).some(function (corner) {
           return (
             corner.x < -0.5 ||
@@ -705,20 +797,36 @@
   function hitTestBackground(project, page, x, y) {
     if (!model.canEditPageBackground(project, page)) return null;
     const background = model.effectiveBackground(project, page);
-    if (!background || !Array.isArray(background.images)) return null;
+    const items = background && (background.items || background.images);
+    if (!Array.isArray(items)) return null;
     const pageSize = project.pageSize;
-    for (let i = background.images.length - 1; i >= 0; i -= 1) {
-      const image = background.images[i];
-      if (!image || !image.assetId) continue;
-      const img = L.assets.getCachedImage(image.assetId);
-      if (!img) continue;
-      const rect = backgroundImageRect(pageSize, image, img);
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const item = items[i];
+      if (!item) continue;
+      let rect;
+      if (item.kind === 'shape') {
+        rect = { x: item.x, y: item.y, width: item.width, height: item.height };
+      } else {
+        if (!item.assetId) continue;
+        const img = L.assets.getCachedImage(item.assetId);
+        if (!img) continue;
+        rect = backgroundImageRect(pageSize, item, img);
+      }
       if (!(rect.width > 0) || !(rect.height > 0)) continue;
       const centerX = rect.x + rect.width / 2;
       const centerY = rect.y + rect.height / 2;
-      const local = model.rotateVector(x - centerX, y - centerY, -model.rotationRadians(image));
-      if (Math.abs(local.x) <= rect.width / 2 && Math.abs(local.y) <= rect.height / 2) {
-        return { background: background, image: image, index: i, rect: rect };
+      const local = model.rotateVector(x - centerX, y - centerY, -model.rotationRadians(item));
+      const hit = item.kind === 'shape'
+        ? shape.shapeContains(item, local.x, local.y)
+        : Math.abs(local.x) <= rect.width / 2 && Math.abs(local.y) <= rect.height / 2;
+      if (hit) {
+        return {
+          background: background,
+          item: item,
+          image: item.kind === 'shape' ? null : item,
+          index: i,
+          rect: rect
+        };
       }
     }
     return null;
@@ -727,9 +835,10 @@
   function pageAssets(project, page) {
     const ids = new Set();
     const background = model.effectiveBackground(project, page);
-    if (background && Array.isArray(background.images)) {
-      background.images.forEach(function (image) {
-        if (image && image.assetId) ids.add(image.assetId);
+    const items = background && (background.items || background.images);
+    if (Array.isArray(items)) {
+      items.forEach(function (item) {
+        if (item && item.kind !== 'shape' && item.assetId) ids.add(item.assetId);
       });
     }
     page.elements.forEach(function (element) {
@@ -742,8 +851,9 @@
     const ids = new Set();
     (project.pages || []).forEach(function (page) {
       const background = page && page.background;
-      (background && background.images || []).forEach(function (image) {
-        if (image && image.assetId) ids.add(image.assetId);
+      const items = background && (background.items || background.images);
+      (items || []).forEach(function (item) {
+        if (item && item.kind !== 'shape' && item.assetId) ids.add(item.assetId);
       });
     });
     return Array.from(ids);
@@ -758,6 +868,7 @@
     drawBackground: drawBackground,
     drawFreeText: drawFreeText,
     drawFreeImage: drawFreeImage,
+    drawShape: drawShape,
     drawCategory: drawCategory,
     drawPage: drawPage,
     elementBounds: elementBounds,

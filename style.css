@@ -166,6 +166,7 @@ button { cursor: pointer; }
 }
 .icon-btn:hover { background: var(--panel-2); border-color: var(--line); color: var(--text); }
 .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.icon-btn.is-active { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
 
 /* ---------- page tabs ---------- */
 .page-tabs {
@@ -968,6 +969,8 @@ button { cursor: pointer; }
 
 .canvas-toolbar-pages { flex: 1 1 auto; min-height: 0; }
 .canvas-toolbar .icon-btn { width: 32px; height: 32px; }
+.shape-tool-active #content-canvas,
+.shape-tool-active #overlay { cursor: crosshair; }
 
 .canvas-zoom { flex: 0 0 auto; }
 .zoom-input {

@@ -86,7 +86,7 @@ node --test scripts/checks/*.test.js
 ```
 
 - `loader.js`：沙箱与 canvas 桩；`measureText = virtualWidth(text) * fontSize * 0.6`。
-  脚本清单从 `index.html` 实读，跳过 `ui.js`、`fontpicker.js`、`clipboard-image.js`、
+  脚本清单从 `index.html` 实读（含 `js/shape.js`），跳过 `ui.js`、`fontpicker.js`、`clipboard-image.js`、
   `presets.js`、`app.js`（依赖真实 DOM、剪贴板/字体枚举或启动即 `init()`）。
 - `model.test.js`：文本虚拟宽度（ASCII/CJK/全角/emoji）、排序稳定性、字体栈规整、
   边距归一化、深拷贝。
@@ -94,7 +94,8 @@ node --test scripts/checks/*.test.js
 - `import.test.js`：替换/追加计划、同名并集、跳过定位、新分类保留与分类块增删。
 - `layout.test.js`：列宽分配、列优先/行优先填充、动态行数、满页续表、空表占位。
   期望值就是当前实现的基线；改行为时先确认意图，再同步更新断言。
-- `io.test.js`：项目结构序列化往返、`validateProject` 的错误分类、草稿信封不含 base64。
+- `io.test.js`：项目结构序列化往返、v5 图形字段、v4→v5 背景 `images`→`items` 迁移、`validateProject` 的错误分类、草稿信封不含 base64。
+- `shape.test.js`：方形/菱形角度与尺寸、正负圆角上限、`clampShape`、轮廓闭合与命中（菱形空白角、圆角外侧、内凹缺口）。
 - `zip.test.js`：本地文件头、中央目录、CRC32、空目录与多文件条目；本机有 `unzip`
   时额外执行 `unzip -t`，没有则仅跳过该条外部校验。
 

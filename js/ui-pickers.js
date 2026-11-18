@@ -21,18 +21,20 @@
     }).map(function (page) {
       const index = project.pages.indexOf(page);
       const isSource = project.globalBackgroundPageId === page.id;
-      const count = (page.background.images || []).length;
+      const items = page.background.items || page.background.images || [];
+      const imageCount = items.filter(function (item) { return item.kind !== 'shape'; }).length;
+      const shapeCount = items.filter(function (item) { return item.kind === 'shape'; }).length;
       return '<button type="button" class="bg-copy-row" data-copy-page="' + esc(page.id) + '">' +
         previewOf(page) +
         '<span class="bg-copy-text"><strong>第 ' + (index + 1) + ' 页</strong>' +
-        '<span class="hint">' + count + ' 张图' + (isSource ? ' · 全局来源' : '') + '</span></span>' +
+        '<span class="hint">图片 ' + imageCount + ' · 图形 ' + shapeCount + (isSource ? ' · 全局来源' : '') + '</span></span>' +
         '</button>';
     }).join('');
     const modal = ui.modal.open({
       title: '复制背景到本页',
       width: '420px',
       body: rows
-        ? '<p class="hint">选择一页，把它的填充色与全部背景图复制到本页。</p>' +
+        ? '<p class="hint">选择一页，把它的填充色与全部背景条目复制到本页。</p>' +
           '<div class="bg-copy-list">' + rows + '</div>'
         : '<p class="hint">项目只有这一页，没有可复制的背景。</p>',
       actions: [{ label: '关闭', className: 'btn-primary', onClick: function (close) { close(); } }]

@@ -49,8 +49,10 @@
     });
   }
 
-  // 页面背景是 v4 的唯一背景形态；校验字段与旧背景集图片保持一致。
-  function validatePageBackground(background, label, assetIds, fail) {
+  // 页面背景是 v4/v5 的唯一背景形态；v5 使用有序 items（图片/图形），
+  // v1–v4 的旧背景图片列表在迁移时按 kind=image 读入。
+  function validatePageBackground(background, label, assetIds, fail, options) {
+    const opts = options || {};
     if (!background || typeof background !== 'object' || Array.isArray(background)) {
       fail(label + '的背景缺失或无效。');
       return;
@@ -58,47 +60,96 @@
     if (typeof background.color !== 'string') {
       fail(label + '的背景颜色无效。');
     }
-    if (!Array.isArray(background.images)) {
-      fail(label + '的背景图片列表无效。');
+    let items = null;
+    if (Array.isArray(background.items)) {
+      items = background.items;
+    } else if (!opts.requireItems && Array.isArray(background.images)) {
+      items = background.images;
+    }
+    if (!items) {
+      fail(label + '的背景条目列表无效。');
       return;
     }
-    const imageIds = new Set();
-    background.images.forEach(function (image, imageIndex) {
-      const imageLabel = label + '第 ' + (imageIndex + 1) + ' 张背景图';
-      if (!image || typeof image.id !== 'string' || !image.id) {
-        fail(imageLabel + '缺少 ID。');
+    const itemIds = new Set();
+    items.forEach(function (item, itemIndex) {
+      const itemLabel = label + '第 ' + (itemIndex + 1) + ' 个背景条目';
+      if (!item || typeof item.id !== 'string' || !item.id) {
+        fail(itemLabel + '缺少 ID。');
         return;
       }
-      if (imageIds.has(image.id)) fail(imageLabel + ' ID 重复。');
-      imageIds.add(image.id);
-      if (image.assetId != null) {
-        if (typeof image.assetId !== 'string' || !assetIds.has(image.assetId)) {
+      if (itemIds.has(item.id)) fail(itemLabel + ' ID 重复。');
+      itemIds.add(item.id);
+      if (item.kind === 'shape') {
+        validateShapeItem(item, itemLabel, fail);
+        return;
+      }
+      if (item.kind !== 'image' && !(item.kind == null && opts.allowMissingKind)) {
+        fail(itemLabel + '类型无效。');
+        return;
+      }
+      const imageLabel = itemLabel + '（图片）';
+      if (item.assetId != null) {
+        if (typeof item.assetId !== 'string' || !assetIds.has(item.assetId)) {
           fail(imageLabel + '引用了不存在的图片资产。');
         }
       }
-      if (L.model.BACKGROUND_FITS.indexOf(image.fit) < 0) fail(imageLabel + '定位模式无效。');
-      if (image.fit === 'none') {
-        if (!isFiniteNumber(image.x) || !isFiniteNumber(image.y) ||
-            !isFiniteNumber(image.width) || image.width <= L.model.IMAGE_MIN_SIZE ||
-            !isFiniteNumber(image.height) || image.height <= L.model.IMAGE_MIN_SIZE) {
+      if (L.model.BACKGROUND_FITS.indexOf(item.fit) < 0) fail(imageLabel + '定位模式无效。');
+      if (item.fit === 'none') {
+        if (!isFiniteNumber(item.x) || !isFiniteNumber(item.y) ||
+            !isFiniteNumber(item.width) || item.width <= L.model.IMAGE_MIN_SIZE ||
+            !isFiniteNumber(item.height) || item.height <= L.model.IMAGE_MIN_SIZE) {
           fail(imageLabel + '的自定义位置或尺寸无效。');
         }
       }
-      if (!isFiniteNumber(image.opacity) ||
-          image.opacity < L.model.OPACITY_MIN || image.opacity > L.model.OPACITY_MAX) {
+      if (!isFiniteNumber(item.opacity) ||
+          item.opacity < L.model.OPACITY_MIN || item.opacity > L.model.OPACITY_MAX) {
         fail(imageLabel + '透明度无效。');
       }
-      if (!isFiniteNumber(image.blur) || image.blur < L.model.BLUR_MIN) {
+      if (!isFiniteNumber(item.blur) || item.blur < L.model.BLUR_MIN) {
         fail(imageLabel + '模糊值无效。');
       }
-      if (image.rotation !== undefined && !isFiniteNumber(image.rotation)) {
+      if (item.rotation !== undefined && !isFiniteNumber(item.rotation)) {
         fail(imageLabel + '旋转角度无效。');
       }
-      if (image.keepRatio !== undefined && typeof image.keepRatio !== 'boolean') {
+      if (item.keepRatio !== undefined && typeof item.keepRatio !== 'boolean') {
         fail(imageLabel + '等比设置无效。');
       }
-      validateImageEffects(image, imageLabel, fail);
+      validateImageEffects(item, imageLabel, fail);
     });
+  }
+
+  // 图形条目/元素共用：几何、枚举、颜色、带符号圆角、边框厚度与效果。
+  function validateShapeItem(item, label, fail) {
+    const shape = item.shape;
+    const mode = item.mode;
+    if (L.shape.SHAPE_KINDS.indexOf(shape) < 0) fail(label + '的形状无效。');
+    if (L.shape.SHAPE_MODES.indexOf(mode) < 0) fail(label + '的填充方式无效。');
+    if (typeof item.color !== 'string' || !item.color) fail(label + '的颜色无效。');
+    if (!isFiniteNumber(item.width) || item.width <= 0 ||
+        !isFiniteNumber(item.height) || item.height <= 0) {
+      fail(label + '的尺寸无效。');
+    } else if (L.shape.SHAPE_KINDS.indexOf(shape) >= 0) {
+      const inradius = L.shape.shapeInradius(item);
+      const concave = L.shape.shapeConcaveLimit(item);
+      if (!isFiniteNumber(item.radius) || item.radius < -concave || item.radius > inradius) {
+        fail(label + '的圆角超出范围。');
+      }
+      if (!isFiniteNumber(item.strokeWidth) ||
+          item.strokeWidth < 0 || item.strokeWidth > inradius) {
+        fail(label + '的边框厚度超出范围。');
+      }
+    }
+    if (!isFiniteNumber(item.opacity) ||
+        item.opacity < L.model.OPACITY_MIN || item.opacity > L.model.OPACITY_MAX) {
+      fail(label + '的透明度无效。');
+    }
+    if (!isFiniteNumber(item.blur) || item.blur < L.model.BLUR_MIN) {
+      fail(label + '的模糊值无效。');
+    }
+    if (item.rotation !== undefined && !isFiniteNumber(item.rotation)) {
+      fail(label + '的旋转角度无效。');
+    }
+    validateImageEffects(item, label, fail);
   }
 
   function validateProject(raw) {
@@ -110,9 +161,9 @@
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       return { ok: false, errors: ['项目文件不是有效的 JSON 对象。'] };
     }
-    if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4) {
-      if (typeof raw.version === 'number' && raw.version > 4) {
-        fail('项目版本 ' + raw.version + ' 高于当前支持的版本 4，无法加载。');
+    if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3 && raw.version !== 4 && raw.version !== 5) {
+      if (typeof raw.version === 'number' && raw.version > 5) {
+        fail('项目版本 ' + raw.version + ' 高于当前支持的版本 5，无法加载。');
       } else {
         fail('项目版本无效或缺失，无法加载。');
       }
@@ -121,6 +172,7 @@
     const isV1 = raw.version === 1;
     const isV3 = raw.version === 3;
     const isV4 = raw.version === 4;
+    const isV5 = raw.version === 5;
     if (!raw.pageSize || !isFiniteNumber(raw.pageSize.width) || !isFiniteNumber(raw.pageSize.height) ||
         raw.pageSize.width <= L.model.IMAGE_MIN_SIZE || raw.pageSize.height <= L.model.IMAGE_MIN_SIZE) {
       fail('页面尺寸无效。');
@@ -193,7 +245,7 @@
           if (backgroundIds.has(background.id)) fail('背景 ID 重复：' + background.id);
           backgroundIds.add(background.id);
           if (typeof background.name !== 'string') fail(label + '名称无效。');
-          validatePageBackground(background, label, assetIds, fail);
+          validatePageBackground(background, label, assetIds, fail, { allowMissingKind: true });
         });
       }
       if (typeof raw.unifiedBackground !== 'boolean') fail('全局背景开关无效。');
@@ -227,8 +279,12 @@
 
       raw.pages.forEach(function (page, pageIndex) {
         if (!page || typeof page.id !== 'string' || !page.id) return;
-        if (isV4) {
-          validatePageBackground(page.background, '第 ' + (pageIndex + 1) + ' 页', assetIds, fail);
+        if (isV5) {
+          validatePageBackground(page.background, '第 ' + (pageIndex + 1) + ' 页', assetIds, fail, { requireItems: true });
+        } else if (isV4) {
+          validatePageBackground(page.background, '第 ' + (pageIndex + 1) + ' 页', assetIds, fail, {
+            allowMissingKind: true
+          });
         } else if (isV3) {
           if (typeof page.backgroundId !== 'string' || !page.backgroundId) {
             fail('第 ' + (pageIndex + 1) + ' 页缺少背景 ID。');
@@ -336,6 +392,11 @@
             if (typeof element.text !== 'string' || !element.style) {
               fail(label + '的文字内容或样式无效。');
             }
+          } else if (element.type === 'shape') {
+            if (!isFiniteNumber(element.height) || element.height <= 0) {
+              fail(label + '的高度无效。');
+            }
+            validateShapeItem(element, label, fail);
           } else if (element.type === 'image') {
             if (!isFiniteNumber(element.height) || element.height <= L.model.IMAGE_MIN_SIZE) {
               fail(label + '的图片高度无效。');
@@ -370,7 +431,7 @@
         });
       });
 
-      if (isV4) {
+      if (isV4 || isV5) {
         if (raw.globalBackgroundPageId != null &&
             (typeof raw.globalBackgroundPageId !== 'string' || !pageIds.has(raw.globalBackgroundPageId))) {
           fail('全局背景来源页无效。');
@@ -411,6 +472,7 @@
   function buildBackgroundImage(rawImage) {
     const image = L.model.createBackgroundImage(rawImage.assetId, rawImage.fit);
     if (rawImage.id) image.id = rawImage.id;
+    image.kind = 'image';
     image.x = Number(rawImage.x) || 0;
     image.y = Number(rawImage.y) || 0;
     image.width = Number(rawImage.width) || 0;
@@ -431,11 +493,48 @@
     return image;
   }
 
+  function buildShapeItem(raw) {
+    const source = raw || {};
+    const shape = L.shape.createBackgroundShape(
+      Number(source.x) || 0,
+      Number(source.y) || 0,
+      Number(source.width) || 240,
+      Number(source.height) || 240
+    );
+    if (source.id) shape.id = source.id;
+    shape.rotation = Number(source.rotation) || 0;
+    shape.shape = source.shape;
+    shape.mode = source.mode;
+    shape.color = source.color;
+    shape.radius = source.radius == null ? 0 : source.radius;
+    shape.strokeWidth = source.strokeWidth == null ? 8 : source.strokeWidth;
+    shape.opacity = source.opacity == null ? 1 : source.opacity;
+    shape.blur = source.blur == null ? 0 : source.blur;
+    shape.brightness = source.brightness == null ? 1 : source.brightness;
+    shape.hue = source.hue == null ? 0 : source.hue;
+    shape.fadeMode = source.fadeMode == null ? 'off' : source.fadeMode;
+    shape.fadeAngle = source.fadeAngle == null ? 0 : source.fadeAngle;
+    const fadeDefaults = L.model.fadeDefaults(shape.fadeMode);
+    shape.fadePosition = source.fadePosition == null ? fadeDefaults.fadePosition : source.fadePosition;
+    shape.fadeWidth = source.fadeWidth == null ? fadeDefaults.fadeWidth : source.fadeWidth;
+    shape.fadeTop = source.fadeTop == null ? fadeDefaults.fadeTop : source.fadeTop;
+    shape.fadeBottom = source.fadeBottom == null ? fadeDefaults.fadeBottom : source.fadeBottom;
+    return L.shape.clampShape(shape);
+  }
+
+  function buildBackgroundItem(raw) {
+    if (raw && raw.kind === 'shape') return buildShapeItem(raw);
+    return buildBackgroundImage(raw || {});
+  }
+
   function buildPageBackground(raw) {
     const source = raw || {};
+    const list = Array.isArray(source.items)
+      ? source.items
+      : (Array.isArray(source.images) ? source.images : []);
     return {
       color: source.color || L.model.DEFAULT_BACKGROUND_COLOR,
-      images: (Array.isArray(source.images) ? source.images : []).map(buildBackgroundImage)
+      items: list.map(buildBackgroundItem)
     };
   }
 
@@ -457,7 +556,7 @@
       const image = L.model.createBackgroundImage(source.assetId, source.fit || 'cover');
       image.opacity = source.opacity == null ? 1 : source.opacity;
       image.blur = source.blur == null ? 0 : source.blur;
-      background.images.push(image);
+      background.items.push(image);
     }
     return background;
   }
@@ -465,7 +564,7 @@
   // 所有版本都归一到“每页一份背景 + 可空全局来源页”。
   // 返回与 raw.pages 同序的背景数组，图片条目 ID 已按页独立。
   function resolvePageBackgrounds(raw) {
-    if (raw.version === 4) {
+    if (raw.version === 4 || raw.version === 5) {
       return {
         globalBackgroundPageId: raw.globalBackgroundPageId || null,
         backgrounds: raw.pages.map(function (page) {
@@ -518,6 +617,7 @@
     isFiniteNumber: isFiniteNumber,
     validateProject: validateProject,
     buildBackgroundImage: buildBackgroundImage,
+    buildBackgroundItem: buildBackgroundItem,
     buildPageBackground: buildPageBackground,
     ownerPage: ownerPage,
     resolvePageBackgrounds: resolvePageBackgrounds

@@ -6,6 +6,7 @@
   const layout = L.layout;
   const renderer = L.render;
   const ui = L.ui;
+  const shape = L.shape;
 
   const clamp = model.clamp;
 
@@ -16,7 +17,8 @@
   const state = {
     project: model.createDefaultProject(),
     currentPageId: null,
-    selection: { type: 'page' }
+    selection: { type: 'page' },
+    shapeTool: { active: false, target: 'content', pageId: null, preview: null }
   };
   state.currentPageId = state.project.pages[0].id;
 
@@ -51,11 +53,17 @@
     if (selection.type === 'background' && page && model.canEditPageBackground(state.project, page)) {
       return selection;
     }
-    if (selection.type === 'backgroundImage' && page && model.canEditPageBackground(state.project, page)) {
-      const exists = (page.background.images || []).some(function (image) {
-        return image.id === selection.imageId;
+    if (selection.type === 'backgroundItem' && page && model.canEditPageBackground(state.project, page)) {
+      const exists = (page.background.items || []).some(function (item) {
+        return item.id === selection.itemId;
       });
       if (exists) return selection;
+    }
+    if (selection.type === 'backgroundImage' && page && model.canEditPageBackground(state.project, page)) {
+      const exists = (page.background.items || page.background.images || []).some(function (item) {
+        return item.id === selection.imageId;
+      });
+      if (exists) return { type: 'backgroundItem', itemId: selection.imageId };
     }
     return { type: 'page' };
   }
@@ -155,24 +163,51 @@ const viewport = {
   }
 
   function editingBackground() {
-    return (state.selection.type === 'background' || state.selection.type === 'backgroundImage') &&
+    return (state.selection.type === 'background' ||
+      state.selection.type === 'backgroundItem' ||
+      state.selection.type === 'backgroundImage') &&
       model.canEditPageBackground(state.project, currentPage());
   }
 
-  // 选中者优先：指针位于当前选中元素范围内（图片用旋转后矩形）时返回该元素
+  function backgroundItems(page) {
+    const background = page && page.background;
+    return background && (background.items || background.images) || [];
+  }
 
-  function selectedBackgroundImage() {
-    if (state.selection.type !== 'backgroundImage') return null;
+  function selectedBackgroundItem() {
+    const selection = state.selection;
+    const itemId = selection.type === 'backgroundItem'
+      ? selection.itemId
+      : (selection.type === 'backgroundImage' ? selection.imageId : null);
+    if (!itemId) return null;
     const page = currentPage();
     if (!page || !model.canEditPageBackground(state.project, page)) return null;
-    return (page.background.images || []).find(function (image) {
-      return image.id === state.selection.imageId;
+    return backgroundItems(page).find(function (item) {
+      return item.id === itemId;
     }) || null;
   }
 
+  function selectedBackgroundImage() {
+    const item = selectedBackgroundItem();
+    return item && item.kind !== 'shape' ? item : null;
+  }
+
+  function selectedBackgroundShape() {
+    const item = selectedBackgroundItem();
+    return item && item.kind === 'shape' ? item : null;
+  }
+
+  function backgroundItemBounds(item) {
+    if (!item) return { x: 0, y: 0, width: 0, height: 0 };
+    if (item.kind === 'shape') {
+      return { x: item.x, y: item.y, width: item.width, height: item.height };
+    }
+    const loaded = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+    return renderer.backgroundImageRect(state.project.pageSize, item, loaded);
+  }
+
   function backgroundImageBounds(image) {
-    const loaded = image.assetId ? L.assets.getCachedImage(image.assetId) : null;
-    return renderer.backgroundImageRect(state.project.pageSize, image, loaded);
+    return backgroundItemBounds(image);
   }
 
   function findElementAnywhere(id) {
@@ -264,29 +299,98 @@ const viewport = {
 
   /* ---------- page and selection actions ---------- */
 
+  function updateShapeToolButton() {
+    const button = document.getElementById('btn-add-shape');
+    if (!button) return;
+    const contentActive = state.shapeTool.active && state.shapeTool.target === 'content';
+    button.setAttribute('aria-pressed', contentActive ? 'true' : 'false');
+    button.classList.toggle('is-active', contentActive);
+    const pane = document.getElementById('canvas-pane');
+    if (pane) pane.classList.toggle('shape-tool-active', state.shapeTool.active);
+  }
+
+  function exitShapeTool() {
+    if (!state.shapeTool.active) return;
+    state.shapeTool.active = false;
+    state.shapeTool.pageId = null;
+    state.shapeTool.preview = null;
+    updateShapeToolButton();
+  }
+
+  function toggleShapeTool(target) {
+    const page = currentPage();
+    if (!page) return;
+    const nextTarget = target === 'background' ? 'background' : 'content';
+    if (state.shapeTool.active &&
+        state.shapeTool.target === nextTarget &&
+        state.shapeTool.pageId === page.id) {
+      exitShapeTool();
+      ui.renderAll();
+      return;
+    }
+    if (nextTarget === 'background' && !model.canEditPageBackground(state.project, page)) {
+      ui.toast('全局背景生效中，请先取消全局背景或让本页接管。');
+      return;
+    }
+    state.shapeTool.active = true;
+    state.shapeTool.target = nextTarget;
+    state.shapeTool.pageId = page.id;
+    state.shapeTool.preview = null;
+    state.selection = { type: 'page' };
+    updateShapeToolButton();
+    ui.renderAll();
+    ui.toast(nextTarget === 'background'
+      ? '图形工具：拖拽或单击，把图形添加到背景层；Esc 退出。'
+      : '图形工具：拖拽或单击，把图形添加到内容层；Esc 退出。');
+  }
+
   function selectPage() {
+    exitShapeTool();
     state.selection = { type: 'page' };
     if (uiRenderDepth > 0) ctx.viewport.redraw();
     else ui.renderAll();
   }
 
   function selectBackground() {
+    exitShapeTool();
     const page = currentPage();
     if (!page || !model.canEditPageBackground(state.project, page)) return;
     state.selection = { type: 'background' };
     ui.renderAll();
   }
 
-  function selectBackgroundImage(imageId) {
+  function selectBackgroundItem(itemId) {
+    exitShapeTool();
     const page = currentPage();
     if (!page || !model.canEditPageBackground(state.project, page)) return;
-    const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
-    if (!image) return;
-    state.selection = { type: 'backgroundImage', imageId: imageId };
+    const item = backgroundItems(page).find(function (entry) { return entry.id === itemId; });
+    if (!item) return;
+    state.selection = { type: 'backgroundItem', itemId: itemId };
     ui.renderAll();
   }
 
+  function selectBackgroundImage(imageId) {
+    const page = currentPage();
+    if (!page) return;
+    const image = backgroundItems(page).find(function (item) {
+      return item.id === imageId && item.kind !== 'shape';
+    });
+    if (!image) return;
+    selectBackgroundItem(imageId);
+  }
+
+  function selectBackgroundShape(shapeId) {
+    const page = currentPage();
+    if (!page) return;
+    const item = backgroundItems(page).find(function (entry) {
+      return entry.id === shapeId && entry.kind === 'shape';
+    });
+    if (!item) return;
+    selectBackgroundItem(shapeId);
+  }
+
   function selectElement(id) {
+    exitShapeTool();
     const page = currentPage();
     if (!page) return;
     const element = page.elements.find(function (item) { return item.id === id; });
@@ -309,13 +413,12 @@ const viewport = {
         key = 'el:' + target.id;
         label = '微调元素';
       }
-    } else if (state.selection.type === 'backgroundImage' && model.canEditPageBackground(state.project, page)) {
-      target = (page.background.images || []).find(function (img) {
-        return img && img.id === state.selection.imageId;
-      }) || null;
+    } else if ((state.selection.type === 'backgroundItem' || state.selection.type === 'backgroundImage') &&
+      model.canEditPageBackground(state.project, page)) {
+      target = selectedBackgroundItem();
       if (target) {
         key = 'bg:' + target.id;
-        label = '微调背景图片';
+        label = '微调背景条目';
         layers = ['bg', 'overlay'];
       }
     }
@@ -333,6 +436,7 @@ const viewport = {
   }
 
   function switchPage(pageId) {
+    exitShapeTool();
     const page = model.getPage(state.project, pageId);
     if (!page) return;
     state.currentPageId = pageId;
@@ -379,12 +483,33 @@ const viewport = {
 
   function deleteSelection() {
     const page = currentPage();
+    const backgroundItem = selectedBackgroundItem();
+    if (page && backgroundItem && model.canEditPageBackground(state.project, page)) {
+      const label = backgroundItem.kind === 'shape' ? '图形' : '图片';
+      ui.modal.confirm('删除背景' + label, '确定删除当前背景' + label + '吗？',
+        { confirmLabel: '删除', danger: true }).then(function (ok) {
+        if (!ok) return;
+        const items = backgroundItems(page);
+        const index = items.indexOf(backgroundItem);
+        if (index < 0) return;
+        pushUndo('删除背景条目');
+        items.splice(index, 1);
+        if (backgroundItem.assetId) releaseUnusedAsset(backgroundItem.assetId);
+        state.selection = { type: 'background' };
+        ui.renderAll();
+        ui.toast('已删除背景' + label + '。');
+      });
+      return;
+    }
     const element = selectedElement();
     if (!page || !element) return;
     const isCategory = element.type === 'category';
+    let kind = '图片';
+    if (element.type === 'text') kind = '文字';
+    if (element.type === 'shape') kind = '图形';
     const message = isCategory
       ? '删除分类块“' + element.category + '”？该分类会回到左侧未放置状态。'
-      : '确定删除当前' + (element.type === 'text' ? '文字' : '图片') + '元素吗？';
+      : '确定删除当前' + kind + '元素吗？';
     ui.modal.confirm('删除元素', message, { confirmLabel: '删除', danger: true }).then(function (ok) {
       if (!ok) return;
       const index = page.elements.indexOf(element);
@@ -556,7 +681,8 @@ const viewport = {
 
   const ELEMENT_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'blur', 'text', 'showTitle',
     'brightness', 'hue', 'fadeMode', 'fadeAngle',
-    'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom'];
+    'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom',
+    'shape', 'mode', 'color', 'radius', 'strokeWidth'];
   const ELEMENT_STYLE_FIELDS = ['fontSize', 'fontWeight', 'color', 'lineHeight', 'align', 'fontFamily', 'fontFamilies'];
 
   function setElementField(field, value) {
@@ -582,11 +708,59 @@ const viewport = {
     renderer.paintBackgroundPreviews(ui.els.propertyPanel);
   }
 
+  const SHAPE_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'blur',
+    'brightness', 'hue', 'fadeMode', 'fadeAngle',
+    'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom',
+    'shape', 'mode', 'color', 'radius', 'strokeWidth'];
+
+  function shapeEditTarget() {
+    const element = selectedElement();
+    if (element && element.type === 'shape') {
+      return { item: element, background: false };
+    }
+    const backgroundShape = selectedBackgroundShape();
+    if (backgroundShape) {
+      return { item: backgroundShape, background: true };
+    }
+    return null;
+  }
+
+  function shapeChanged(background) {
+    changed({ property: false, layers: background ? ['bg', 'overlay'] : ['content', 'overlay'] });
+  }
+
+  function setShapeField(field, value) {
+    const target = shapeEditTarget();
+    if (!target || SHAPE_FIELDS.indexOf(field) === -1) return;
+    target.item[field] = value;
+    shape.clampShape(target.item);
+    shapeChanged(target.background);
+  }
+
+  function setShapeKind(kind) {
+    const target = shapeEditTarget();
+    if (!target || shape.SHAPE_KINDS.indexOf(kind) === -1) return;
+    target.item.shape = kind;
+    shape.clampShape(target.item);
+    shapeChanged(target.background);
+  }
+
+  // 菱形内夹角只由外接框宽高推导；输入角度时保留长边，改短边。
+  function setShapeAngle(angle) {
+    const target = shapeEditTarget();
+    if (!target || target.item.shape !== 'diamond') return;
+    const size = shape.diamondSizeFromAngle(target.item.width, target.item.height, angle);
+    target.item.width = size.width;
+    target.item.height = size.height;
+    shape.clampShape(target.item);
+    shapeChanged(target.background);
+  }
+
   function setBackgroundImageField(imageId, field, value) {
     const page = currentPage();
     if (!page || !model.canEditPageBackground(state.project, page)) return;
-    const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
-    if (!image || field !== 'keepRatio') return;
+    const image = backgroundItems(page).find(function (item) { return item.id === imageId; });
+    if (!image || image.kind === 'shape' || field !== 'keepRatio') return;
     image.keepRatio = !!value;
     changed({ property: false, layers: ['bg', 'overlay'] });
   }
@@ -613,8 +787,9 @@ const viewport = {
   function assetIsReferenced(assetId) {
     if (!assetId) return false;
     return state.project.pages.some(function (page) {
-      const backgroundReferenced = (page.background.images || []).some(function (image) {
-        return image.assetId === assetId;
+      const items = page.background && (page.background.items || page.background.images) || [];
+      const backgroundReferenced = items.some(function (item) {
+        return item.kind !== 'shape' && item.assetId === assetId;
       });
       const elementReferenced = page.elements.some(function (element) {
         return element.type === 'image' && element.assetId === assetId;
@@ -941,6 +1116,9 @@ const viewport = {
     selectedElement: selectedElement,
     editingBackground: editingBackground,
     selectedBackgroundImage: selectedBackgroundImage,
+    selectedBackgroundItem: selectedBackgroundItem,
+    selectedBackgroundShape: selectedBackgroundShape,
+    backgroundItemBounds: backgroundItemBounds,
     canEditPageBackground: function (page) {
       return model.canEditPageBackground(state.project, page);
     },
@@ -955,6 +1133,8 @@ const viewport = {
     selectElement: selectElement,
     selectBackground: selectBackground,
     selectBackgroundImage: selectBackgroundImage,
+    selectBackgroundItem: selectBackgroundItem,
+    selectBackgroundShape: selectBackgroundShape,
     placeCategory: placeCategory,
     openPlaylistEditor: openPlaylistEditor,
     setPageSize: setPageSize,
@@ -963,12 +1143,17 @@ const viewport = {
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
     setElementStyleField: setElementStyleField,
+    setShapeField: setShapeField,
+    setShapeKind: setShapeKind,
+    setShapeAngle: setShapeAngle,
     setBackgroundColor: setBackgroundColor,
     setBackgroundImageField: setBackgroundImageField,
     addText: addText,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
+    toggleShapeTool: toggleShapeTool,
+    exitShapeTool: exitShapeTool,
     moveLayer: moveLayer,
     deleteSelection: deleteSelection,
     addPageDialog: addPageDialog,
@@ -1000,6 +1185,12 @@ const viewport = {
     selectPage: selectPage,
     selectBackground: selectBackground,
     selectBackgroundImage: selectBackgroundImage,
+    selectBackgroundItem: selectBackgroundItem,
+    selectBackgroundShape: selectBackgroundShape,
+    selectedBackgroundItem: selectedBackgroundItem,
+    selectedBackgroundImage: selectedBackgroundImage,
+    selectedBackgroundShape: selectedBackgroundShape,
+    backgroundItemBounds: backgroundItemBounds,
     selectElement: selectElement,
     nudgeSelection: nudgeSelection,
     switchPage: switchPage,
@@ -1029,9 +1220,14 @@ const viewport = {
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
+    toggleShapeTool: toggleShapeTool,
+    exitShapeTool: exitShapeTool,
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
     setElementStyleField: setElementStyleField,
+    setShapeField: setShapeField,
+    setShapeKind: setShapeKind,
+    setShapeAngle: setShapeAngle,
     setBackgroundColor: setBackgroundColor,
     setBackgroundImageField: setBackgroundImageField,
     setGlobalBackgroundPage: ctx.backgrounds.setGlobalBackgroundPage,
@@ -1045,8 +1241,11 @@ const viewport = {
     handleDroppedBackgroundFile: ctx.backgrounds.handleDroppedBackgroundFile,
     applyPreset: ctx.presets.applyPreset,
     deleteBackgroundImage: ctx.backgrounds.deleteBackgroundImage,
+    deleteBackgroundItem: ctx.backgrounds.deleteBackgroundItem,
     moveBackgroundImage: ctx.backgrounds.moveBackgroundImage,
     moveBackgroundImageTo: ctx.backgrounds.moveBackgroundImageTo,
+    moveBackgroundItem: ctx.backgrounds.moveBackgroundItem,
+    moveBackgroundItemTo: ctx.backgrounds.moveBackgroundItemTo,
     setBackgroundImageFit: ctx.backgrounds.setBackgroundImageFit,
     restoreBackgroundImageFit: ctx.backgrounds.restoreBackgroundImageFit,
     setBackgroundImageValue: ctx.backgrounds.setBackgroundImageValue,

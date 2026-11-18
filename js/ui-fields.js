@@ -41,6 +41,7 @@
     const selection = state.selection;
     if (selection.type === 'element') return 'el:' + selection.id;
     if (selection.type === 'background') return 'bg:' + (state.currentPageId || '');
+    if (selection.type === 'backgroundItem') return 'bgitem:' + selection.itemId;
     if (selection.type === 'backgroundImage') return 'bgimg:' + selection.imageId;
     return 'page:' + (state.currentPageId || '');
   }

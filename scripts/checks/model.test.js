@@ -693,23 +693,23 @@ test('图片效果：复制页面背景保留效果字段', function () {
   image.fadeWidth = 0.2;
   image.fadeTop = 0.75;
   image.fadeBottom = 0.5;
-  background.images.push(image);
+  background.items.push(image);
 
   const copy = model.clonePageBackground(background);
   assert.equal(copy.color, '#ffffff');
-  assert.equal(copy.images.length, 1);
-  assert.notEqual(copy.images[0].id, image.id);
-  assert.equal(copy.images[0].brightness, 1.2);
-  assert.equal(copy.images[0].hue, -30);
-  assert.equal(copy.images[0].fadeMode, 'double');
-  assert.equal(copy.images[0].fadeAngle, 120);
-  assert.equal(copy.images[0].fadePosition, 0.4);
-  assert.equal(copy.images[0].fadeWidth, 0.2);
-  assert.equal(copy.images[0].fadeTop, 0.75);
-  assert.equal(copy.images[0].fadeBottom, 0.5);
+  assert.equal(copy.items.length, 1);
+  assert.notEqual(copy.items[0].id, image.id);
+  assert.equal(copy.items[0].brightness, 1.2);
+  assert.equal(copy.items[0].hue, -30);
+  assert.equal(copy.items[0].fadeMode, 'double');
+  assert.equal(copy.items[0].fadeAngle, 120);
+  assert.equal(copy.items[0].fadePosition, 0.4);
+  assert.equal(copy.items[0].fadeWidth, 0.2);
+  assert.equal(copy.items[0].fadeTop, 0.75);
+  assert.equal(copy.items[0].fadeBottom, 0.5);
 
   // 副本与原图互不共享对象。
-  copy.images[0].brightness = 0.8;
+  copy.items[0].brightness = 0.8;
   assert.equal(image.brightness, 1.2);
 });
 
@@ -740,13 +740,19 @@ test('图片效果：替换图片只改 assetId，效果字段保持不变', fun
 
 /* ---------- 页面背景模型 ---------- */
 
-test('背景模型：默认项目为版本 4 且每页拥有背景', function () {
+test('背景模型：默认项目为版本 5 且每页拥有背景', function () {
   const project = model.createDefaultProject();
-  assert.equal(project.version, 4);
+  assert.equal(project.version, 5);
   assert.equal(project.globalBackgroundPageId, null);
   assert.equal(project.pages.length, 1);
   assert.equal(project.pages[0].background.color, model.DEFAULT_BACKGROUND_COLOR);
-  assert.equal(project.pages[0].background.images.length, 0);
+  assert.equal(model.PROJECT_VERSION, 5);
+  assert.equal(project.pages[0].background.items.length, 0);
+  assert.equal(Object.prototype.hasOwnProperty.call(project.pages[0].background, 'images'), false);
+
+  const image = model.createBackgroundImage('asset-1', 'cover');
+  assert.equal(image.kind, 'image');
+  assert.equal(model.DEFAULT_BACKGROUND_IMAGE.kind, 'image');
 });
 
 test('背景模型：新增页复制背景值，图片 ID 独立、资产共享', function () {
@@ -755,18 +761,36 @@ test('背景模型：新增页复制背景值，图片 ID 独立、资产共享'
   const image = model.createBackgroundImage('asset-1', 'cover');
   image.brightness = 1.2;
   source.background.color = '#123456';
-  source.background.images.push(image);
+  source.background.items.push(image);
 
   const page = model.createPage(model.effectiveBackground(project, source));
   assert.notEqual(page.id, source.id);
   assert.equal(page.background.color, '#123456');
-  assert.equal(page.background.images.length, 1);
-  assert.notEqual(page.background.images[0].id, image.id);
-  assert.equal(page.background.images[0].assetId, 'asset-1');
-  assert.equal(page.background.images[0].brightness, 1.2);
+  assert.equal(page.background.items.length, 1);
+  assert.notEqual(page.background.items[0].id, image.id);
+  assert.equal(page.background.items[0].assetId, 'asset-1');
+  assert.equal(page.background.items[0].brightness, 1.2);
 
-  page.background.images[0].brightness = 0.8;
+  page.background.items[0].brightness = 0.8;
   assert.equal(image.brightness, 1.2);
+});
+
+test('背景模型：复制背景保持图片与图形混排顺序，所有条目换新 ID', function () {
+  const project = model.createDefaultProject();
+  const source = project.pages[0];
+  const image = model.createBackgroundImage('asset-1', 'cover');
+  const shape = L.shape.createBackgroundShape(120, 160, 240, 160);
+  shape.radius = -18;
+  source.background.items.push(image, shape, model.createBackgroundImage('asset-2', 'original'));
+
+  const page = model.createPage(model.effectiveBackground(project, source));
+  const items = page.background.items;
+  assert.equal(items.map(function (item) { return item.kind; }).join(','), 'image,shape,image');
+  assert.notEqual(items[0].id, image.id);
+  assert.notEqual(items[1].id, shape.id);
+  assert.equal(items[1].radius, -18);
+  items[1].radius = 12;
+  assert.equal(shape.radius, -18);
 });
 
 test('背景模型：全局指针最后设置生效，取消后各页显示自己的背景', function () {

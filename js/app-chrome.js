@@ -67,6 +67,25 @@
         surface.overlayCtx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
         surface.overlayCtx.clearRect(0, 0, viewport.width, viewport.height);
         drawSelection(surface.overlayCtx, page);
+        drawShapePreview(surface.overlayCtx);
+      }
+
+      function drawShapePreview(ctx) {
+        const preview = state.shapeTool && state.shapeTool.preview;
+        if (!preview) return;
+        const x = viewport.offsetX + preview.x * viewport.scale;
+        const y = viewport.offsetY + preview.y * viewport.scale;
+        const width = preview.width * viewport.scale;
+        const height = preview.height * viewport.scale;
+        ctx.save();
+        ctx.strokeStyle = '#2563eb';
+        ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        if (width > 0 && height > 0) ctx.fillRect(x, y, width, height);
+        ctx.strokeRect(x, y, Math.max(1, width), Math.max(1, height));
+        ctx.setLineDash([]);
+        ctx.restore();
       }
     
       function drawMarginGuides(ctx, rect) {
@@ -292,7 +311,7 @@
       }
     
       function handlePoints(bounds, element) {
-        if (element.type === 'image') return imageHandlePoints(element);
+        if (element.type === 'image' || element.type === 'shape') return imageHandlePoints(element);
         const x = viewport.offsetX + bounds.x * viewport.scale;
         const y = viewport.offsetY + bounds.y * viewport.scale;
         const w = bounds.width * viewport.scale;
@@ -305,9 +324,9 @@
       }
     
       function drawSelection(ctx, page) {
-        const backgroundImage = actions.selectedBackgroundImage();
-        if (backgroundImage) {
-          drawBackgroundSelection(ctx, backgroundImage);
+        const backgroundItem = actions.selectedBackgroundItem();
+        if (backgroundItem) {
+          drawBackgroundSelection(ctx, backgroundItem);
           return;
         }
         const element = actions.selectedElement();
@@ -318,7 +337,7 @@
         ctx.strokeStyle = '#2563eb';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
-        if (element.type === 'image') {
+        if (element.type === 'image' || element.type === 'shape') {
           const corners = renderer.elementCorners(element);
           ctx.beginPath();
           corners.forEach(function (corner, index) {
@@ -336,7 +355,7 @@
         handlePoints(bounds, element).forEach(function (handle) {
           drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
         });
-        if (element.type === 'image') {
+        if (element.type === 'image' || element.type === 'shape') {
           const rp = rotateHandlePoint(element);
           drawRotateHandle(ctx, rp);
           if (surface.drag && surface.drag.type === 'rotate' && !surface.drag.background) {
@@ -348,17 +367,17 @@
         if (element.type === 'category') drawTableDividers(ctx, page, element);
       }
     
-      function drawBackgroundSelection(ctx, image) {
-        const bounds = actions.backgroundImageBounds(image);
+      function drawBackgroundSelection(ctx, item) {
+        const bounds = actions.backgroundItemBounds(item);
         if (!(bounds.width > 0) || !(bounds.height > 0)) return;
-        const shape = {
+        const box = {
           x: bounds.x,
           y: bounds.y,
           width: bounds.width,
           height: bounds.height,
-          rotation: image.rotation
+          rotation: item.rotation
         };
-        const corners = renderer.elementCorners(shape);
+        const corners = renderer.elementCorners(box);
         ctx.save();
         ctx.strokeStyle = '#2563eb';
         ctx.lineWidth = 1.5;
@@ -371,10 +390,10 @@
         });
         ctx.closePath();
         ctx.stroke();
-        imageHandlePoints(shape).forEach(function (handle) {
+        imageHandlePoints(box).forEach(function (handle) {
           drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
         });
-        const rp = rotateHandlePoint(shape);
+        const rp = rotateHandlePoint(box);
         drawRotateHandle(ctx, rp);
         if (surface.drag && surface.drag.type === 'rotate' && surface.drag.background) {
           drawRotateBadge(ctx, rp, surface.drag.liveAngle || 0);
@@ -419,25 +438,26 @@
       }
     
       function handleAt(screenX, screenY) {
-        const backgroundImage = actions.selectedBackgroundImage();
-        if (backgroundImage) {
-          const bounds = actions.backgroundImageBounds(backgroundImage);
-          const shape = {
+        const backgroundItem = actions.selectedBackgroundItem();
+        if (backgroundItem) {
+          const bounds = actions.backgroundItemBounds(backgroundItem);
+          const box = {
             x: bounds.x,
             y: bounds.y,
             width: bounds.width,
             height: bounds.height,
-            rotation: backgroundImage.rotation
+            rotation: backgroundItem.rotation
           };
-          const rpBg = rotateHandlePoint(shape);
+          const rpBg = rotateHandlePoint(box);
           if (rpBg && Math.abs(screenX - rpBg.handle.x) <= ROTATE_HANDLE_HIT && Math.abs(screenY - rpBg.handle.y) <= ROTATE_HANDLE_HIT) {
-            return { type: 'rotate-background', image: backgroundImage, cursor: ROTATE_CURSOR };
+            return { type: 'rotate-background', item: backgroundItem, image: backgroundItem, cursor: ROTATE_CURSOR };
           }
-          for (const point of imageHandlePoints(shape)) {
+          for (const point of imageHandlePoints(box)) {
             if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
               return {
                 type: 'resize-background',
-                image: backgroundImage,
+                item: backgroundItem,
+                image: backgroundItem,
                 handle: point.name,
                 cursor: point.cursor,
                 bounds: bounds
@@ -449,7 +469,7 @@
         const page = actions.currentPage();
         const element = actions.selectedElement();
         if (!page || !element) return null;
-        if (element.type === 'image') {
+        if (element.type === 'image' || element.type === 'shape') {
           const rpEl = rotateHandlePoint(element);
           if (rpEl && Math.abs(screenX - rpEl.handle.x) <= ROTATE_HANDLE_HIT && Math.abs(screenY - rpEl.handle.y) <= ROTATE_HANDLE_HIT) {
             return { type: 'rotate', element: element, cursor: ROTATE_CURSOR };

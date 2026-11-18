@@ -25,13 +25,24 @@
         return page;
       }
 
+      function items(page) {
+        const background = page && page.background;
+        return background && (background.items || background.images) || [];
+      }
+
+      function imageItems(page) {
+        return items(page).filter(function (item) {
+          return item && item.kind !== 'shape';
+        });
+      }
+
       function releaseBackgroundAssets(previous, current) {
-        const keep = new Set((current && current.images || []).map(function (image) {
-          return image.assetId;
+        const keep = new Set((current && (current.items || current.images) || []).map(function (item) {
+          return item.kind === 'shape' ? null : item.assetId;
         }).filter(Boolean));
-        (previous && previous.images || []).forEach(function (image) {
-          if (image && image.assetId && !keep.has(image.assetId)) {
-            actions.releaseUnusedAsset(image.assetId);
+        (previous && (previous.items || previous.images) || []).forEach(function (item) {
+          if (item && item.kind !== 'shape' && item.assetId && !keep.has(item.assetId)) {
+            actions.releaseUnusedAsset(item.assetId);
           }
         });
       }
@@ -96,8 +107,9 @@
         actions.pushUndo('更换背景');
         page.background = model.clonePageBackground(background);
         releaseBackgroundAssets(previous, page.background);
-        state.selection = page.background.images.length
-          ? { type: 'backgroundImage', imageId: page.background.images[0].id }
+        const firstImage = items(page).find(function (item) { return item.kind !== 'shape'; });
+        state.selection = firstImage
+          ? { type: 'backgroundItem', itemId: firstImage.id }
           : { type: 'background' };
         ui.renderAll();
         return true;
@@ -106,7 +118,7 @@
       function pickBackgroundImage(imageId) {
         const page = currentEditablePage();
         if (!page) return;
-        if (imageId && !(page.background.images || []).some(function (image) { return image.id === imageId; })) return;
+        if (imageId && !imageItems(page).some(function (image) { return image.id === imageId; })) return;
         pendingBackgroundImageId = imageId || null;
         pendingBackgroundWhole = false;
         const input = document.getElementById('bg-file');
@@ -141,7 +153,7 @@
           await appCtx.draft.persistDraftAssetQuietly(assetId);
           const background = page.background;
           const target = imageId
-            ? (background.images || []).find(function (image) { return image.id === imageId; })
+            ? items(page).find(function (item) { return item.id === imageId && item.kind !== 'shape'; })
             : null;
           if (target) {
             const oldAssetId = target.assetId;
@@ -153,19 +165,20 @@
               target.height = target.height > 0 ? target.height : rect.height;
             }
             actions.releaseUnusedAsset(oldAssetId);
-            state.selection = { type: 'backgroundImage', imageId: target.id };
+            state.selection = { type: 'backgroundItem', itemId: target.id };
           } else if (whole) {
             const previous = background;
             actions.pushUndo('更换背景');
             const image = model.createBackgroundImage(assetId, 'cover');
-            page.background = { color: previous.color, images: [image] };
+            page.background = { color: previous.color, items: [image] };
             releaseBackgroundAssets(previous, page.background);
-            state.selection = { type: 'backgroundImage', imageId: image.id };
+            state.selection = { type: 'backgroundItem', itemId: image.id };
           } else {
             actions.pushUndo('添加背景图');
-            const image = model.createBackgroundImage(assetId, background.images.length ? 'original' : 'cover');
-            background.images.push(image);
-            state.selection = { type: 'backgroundImage', imageId: image.id };
+            const image = model.createBackgroundImage(assetId,
+              imageItems(page).length ? 'original' : 'cover');
+            background.items.push(image);
+            state.selection = { type: 'backgroundItem', itemId: image.id };
           }
           ui.renderAll();
           if (whole) {
@@ -192,44 +205,67 @@
         await handleBackgroundFile(file);
       }
 
-      function deleteBackgroundImage(imageId) {
+      function deleteBackgroundItem(itemId) {
         const page = currentEditablePage();
         if (!page) return;
-        const index = (page.background.images || []).findIndex(function (image) { return image.id === imageId; });
+        const list = items(page);
+        const index = list.findIndex(function (item) { return item.id === itemId; });
         if (index < 0) return;
-        const image = page.background.images[index];
-        actions.pushUndo('删除背景图');
-        page.background.images.splice(index, 1);
-        actions.releaseUnusedAsset(image.assetId);
+        const item = list[index];
+        actions.pushUndo(item.kind === 'shape' ? '删除背景图形' : '删除背景图');
+        list.splice(index, 1);
+        if (item.assetId) actions.releaseUnusedAsset(item.assetId);
         state.selection = { type: 'background' };
         ui.renderAll();
       }
 
-      function moveBackgroundImage(imageId, delta) {
+      function deleteBackgroundImage(imageId) {
         const page = currentEditablePage();
         if (!page) return;
-        const plan = model.planStepMove(page.background.images, imageId, delta);
+        const image = items(page).find(function (item) {
+          return item.id === imageId && item.kind !== 'shape';
+        });
+        if (!image) return;
+        deleteBackgroundItem(imageId);
+      }
+
+      function moveBackgroundItem(itemId, delta) {
+        const page = currentEditablePage();
+        if (!page) return;
+        const list = items(page);
+        const plan = model.planStepMove(list, itemId, delta);
         if (!plan) return;
-        actions.pushUndo('调整背景图片顺序');
-        model.moveItem(page.background.images, plan.from, plan.to);
+        actions.pushUndo('调整背景条目顺序');
+        model.moveItem(list, plan.from, plan.to);
         ui.renderAll();
       }
 
-      function moveBackgroundImageTo(imageId, targetId, placement) {
+      function moveBackgroundItemTo(itemId, targetId, placement) {
         const page = currentEditablePage();
         if (!page) return false;
-        const plan = model.planDisplayMove(page.background.images, imageId, targetId, placement);
+        const list = items(page);
+        const plan = model.planDisplayMove(list, itemId, targetId, placement);
         if (!plan) return false;
-        actions.pushUndo('调整背景图片顺序');
-        model.moveItem(page.background.images, plan.from, plan.to);
+        actions.pushUndo('调整背景条目顺序');
+        model.moveItem(list, plan.from, plan.to);
         ui.renderAll();
         return true;
+      }
+
+      function moveBackgroundImage(imageId, delta) {
+        moveBackgroundItem(imageId, delta);
+      }
+
+      function moveBackgroundImageTo(imageId, targetId, placement) {
+        return moveBackgroundItemTo(imageId, targetId, placement);
       }
 
       function setBackgroundImageFit(imageId, fit) {
         const page = currentEditablePage();
         if (!page) return;
-        const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
+        const image = items(page).find(function (item) {
+          return item.id === imageId && item.kind !== 'shape';
+        });
         if (!image) return;
         if (fit === 'none') {
           actions.ensureCustomBackgroundImage(image);
@@ -247,7 +283,9 @@
       function setBackgroundImageValue(imageId, key, value) {
         const page = currentEditablePage();
         if (!page) return;
-        const image = (page.background.images || []).find(function (item) { return item.id === imageId; });
+        const image = items(page).find(function (item) {
+          return item.id === imageId && item.kind !== 'shape';
+        });
         if (!image) return;
         image[key] = value;
         const inputIds = {
@@ -267,7 +305,8 @@
         setGlobalBackgroundPage, clearGlobalBackground, copyBackgroundFromPage,
         clearPageBackground, replacePageBackground,
         pickBackgroundImage, handleBackgroundFile, pickBackgroundImageWhole, handleDroppedBackgroundFile,
-        deleteBackgroundImage, moveBackgroundImage, moveBackgroundImageTo,
+        deleteBackgroundImage, deleteBackgroundItem,
+        moveBackgroundImage, moveBackgroundImageTo, moveBackgroundItem, moveBackgroundItemTo,
         setBackgroundImageFit, restoreBackgroundImageFit, setBackgroundImageValue
       };
     }

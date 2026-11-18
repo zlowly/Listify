@@ -6,6 +6,7 @@
   const layout = L.layout;
   const renderer = L.render;
   const ui = L.ui;
+  const shape = L.shape;
   const clamp = model.clamp;
   const escapeHtml = ui.esc;
 
@@ -22,8 +23,11 @@
         const element = page.elements.find(function (item) { return item.id === state.selection.id; });
         if (!element) return null;
         const bounds = renderer.elementBounds(state.project, page, element);
-        if (element.type === 'image') {
+        if (element.type === 'image' || element.type === 'shape') {
           const local = renderer.imageLocalPoint(element, x, y);
+          if (element.type === 'shape') {
+            return shape.shapeContains(element, local.x, local.y) ? { element: element, bounds: bounds } : null;
+          }
           if (Math.abs(local.x) > bounds.width / 2 || Math.abs(local.y) > bounds.height / 2) return null;
           return { element: element, bounds: bounds };
         }
@@ -58,8 +62,8 @@
         if (handle) {
           if (handle.type === 'rotate' || handle.type === 'rotate-background') {
             const isBackground = handle.type === 'rotate-background';
-            const target = isBackground ? handle.image : handle.element;
-            if (isBackground) actions.ensureCustomBackgroundImage(handle.image);
+            const target = isBackground ? (handle.item || handle.image) : handle.element;
+            if (isBackground && target.kind !== 'shape') actions.ensureCustomBackgroundImage(target);
             const pp = appCtx.viewport.toPage(point.x, point.y);
             const centerX = target.x + target.width / 2;
             const centerY = target.y + target.height / 2;
@@ -67,7 +71,7 @@
               type: 'rotate',
               background: isBackground,
               element: isBackground ? null : handle.element,
-              image: isBackground ? handle.image : null,
+              image: isBackground ? target : null,
               center: { x: centerX, y: centerY },
               startPointerX: pp.x,
               startPointerY: pp.y,
@@ -76,17 +80,23 @@
               startClientY: event.clientY,
               liveAngle: Number(target.rotation) || 0
             };
-            actions.pushUndo(isBackground ? '旋转背景图片' : '旋转图片');
+            const label = isBackground
+              ? (target.kind === 'shape' ? '旋转背景图形' : '旋转背景图片')
+              : (handle.element.type === 'shape' ? '旋转图形' : '旋转图片');
+            actions.pushUndo(label);
             beginPointer(event);
             return;
           }
           if (handle.type === 'resize-background') {
-            actions.ensureCustomBackgroundImage(handle.image);
-            const bounds = actions.backgroundImageBounds(handle.image);
+            const target = handle.item || handle.image;
+            if (target.kind !== 'shape') actions.ensureCustomBackgroundImage(target);
+            const bounds = actions.backgroundItemBounds
+              ? actions.backgroundItemBounds(target)
+              : actions.backgroundImageBounds(target);
             surface.drag = {
               type: 'resize',
               background: true,
-              image: handle.image,
+              image: target,
               handle: handle.handle,
               startClientX: event.clientX,
               startClientY: event.clientY,
@@ -130,6 +140,28 @@
     
         const pt = appCtx.viewport.toPage(point.x, point.y);
     
+        if (state.shapeTool && state.shapeTool.active && state.shapeTool.pageId === page.id) {
+          const width = state.project.pageSize.width;
+          const height = state.project.pageSize.height;
+          if (pt.x >= 0 && pt.y >= 0 && pt.x <= width && pt.y <= height) {
+            surface.drag = {
+              type: 'shape-draw',
+              pageId: page.id,
+              target: state.shapeTool.target,
+              startX: pt.x,
+              startY: pt.y,
+              currentX: pt.x,
+              currentY: pt.y,
+              startClientX: event.clientX,
+              startClientY: event.clientY,
+              moved: false
+            };
+            state.shapeTool.preview = { x: pt.x, y: pt.y, width: 0, height: 0 };
+            beginPointer(event);
+            return;
+          }
+        }
+    
         // 选中者优先（内容元素）：指针在选中元素范围内时直接抓取，无视上层覆盖
         const selectedHit = selectedElementAt(page, pt.x, pt.y);
         if (selectedHit) {
@@ -146,20 +178,21 @@
           return;
         }
     
-        // 选中者优先（背景图）：选中具体背景图时，其可见范围内优先于内容元素
-        if (state.selection.type === 'backgroundImage') {
+        // 选中者优先（背景条目）：选中具体条目时，其可见范围内优先于内容元素
+        if (state.selection.type === 'backgroundItem' || state.selection.type === 'backgroundImage') {
+          const selectionId = state.selection.itemId || state.selection.imageId;
           const backgroundPriority = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
-          if (backgroundPriority && backgroundPriority.image.id === state.selection.imageId) {
-            actions.ensureCustomBackgroundImage(backgroundPriority.image);
+          if (backgroundPriority && backgroundPriority.item.id === selectionId) {
+            if (backgroundPriority.item.kind !== 'shape') actions.ensureCustomBackgroundImage(backgroundPriority.item);
             surface.drag = {
               type: 'move-background',
-              image: backgroundPriority.image,
+              image: backgroundPriority.item,
               startClientX: event.clientX,
               startClientY: event.clientY,
-              startX: backgroundPriority.image.x,
-              startY: backgroundPriority.image.y
+              startX: backgroundPriority.item.x,
+              startY: backgroundPriority.item.y
             };
-            actions.pushUndo('移动背景图片');
+            actions.pushUndo(backgroundPriority.item.kind === 'shape' ? '移动背景图形' : '移动背景图片');
             beginPointer(event);
             return;
           }
@@ -187,21 +220,22 @@
         if (actions.editingBackground()) {
           const backgroundHit = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
           if (backgroundHit) {
-            actions.ensureCustomBackgroundImage(backgroundHit.image);
+            const item = backgroundHit.item;
+            if (item.kind !== 'shape') actions.ensureCustomBackgroundImage(item);
             state.selection = {
-              type: 'backgroundImage',
-              imageId: backgroundHit.image.id
+              type: 'backgroundItem',
+              itemId: item.id
             };
             ui.renderAll();
             surface.drag = {
               type: 'move-background',
-              image: backgroundHit.image,
+              image: item,
               startClientX: event.clientX,
               startClientY: event.clientY,
-              startX: backgroundHit.image.x,
-              startY: backgroundHit.image.y
+              startX: item.x,
+              startY: item.y
             };
-            actions.pushUndo('移动背景图片');
+            actions.pushUndo(item.kind === 'shape' ? '移动背景图形' : '移动背景图片');
             beginPointer(event);
             return;
           }
@@ -241,6 +275,25 @@
         event.preventDefault();
         const dx = (event.clientX - surface.drag.startClientX) / viewport.scale;
         const dy = (event.clientY - surface.drag.startClientY) / viewport.scale;
+    
+        if (surface.drag.type === 'shape-draw') {
+          const drag = surface.drag;
+          const pp = appCtx.viewport.toPage(
+            appCtx.chrome.overlayPoint(event).x,
+            appCtx.chrome.overlayPoint(event).y
+          );
+          drag.currentX = pp.x;
+          drag.currentY = pp.y;
+          drag.moved = Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) > 6;
+          state.shapeTool.preview = {
+            x: Math.min(drag.startX, pp.x),
+            y: Math.min(drag.startY, pp.y),
+            width: Math.abs(pp.x - drag.startX),
+            height: Math.abs(pp.y - drag.startY)
+          };
+          appCtx.viewport.scheduleRedraw(['overlay']);
+          return;
+        }
     
         if (surface.drag.type === 'move-background') {
           surface.drag.image.x = Math.round(surface.drag.startX + dx);
@@ -306,34 +359,40 @@
     
       function resizeDrag(dx, dy) {
         if (surface.drag.background) {
-          const image = surface.drag.image;
+          const item = surface.drag.image;
           const start = surface.drag.startBounds;
+          const isShape = item.kind === 'shape';
           const next = model.computeImageResize(
-            { x: start.x, y: start.y, width: start.width, height: start.height, rotation: image.rotation },
+            { x: start.x, y: start.y, width: start.width, height: start.height, rotation: item.rotation },
             surface.drag.handle,
             { x: dx, y: dy },
-            image.keepRatio !== false
+            isShape ? false : item.keepRatio !== false,
+            isShape ? 1 : undefined
           );
-          image.x = Math.round(next.x);
-          image.y = Math.round(next.y);
-          image.width = Math.round(next.width);
-          image.height = Math.round(next.height);
+          item.x = Math.round(next.x);
+          item.y = Math.round(next.y);
+          item.width = Math.round(next.width);
+          item.height = Math.round(next.height);
+          if (isShape) shape.clampShape(item);
           return;
         }
         const element = surface.drag.element;
         const start = surface.drag.startBounds;
         const minWidth = element.type === 'text' ? 80 : 80;
-        if (element.type === 'image') {
+        if (element.type === 'image' || element.type === 'shape') {
+          const isShape = element.type === 'shape';
           const next = model.computeImageResize(
             { x: start.x, y: start.y, width: start.width, height: start.height, rotation: element.rotation },
             surface.drag.handle,
             { x: dx, y: dy },
-            element.keepRatio !== false
+            isShape ? false : element.keepRatio !== false,
+            isShape ? 1 : undefined
           );
           element.x = Math.round(next.x);
           element.y = Math.round(next.y);
           element.width = Math.round(next.width);
           element.height = Math.round(next.height);
+          if (isShape) shape.clampShape(element);
           return;
         }
     
@@ -372,12 +431,59 @@
         surface.hoverPoint = null;
       }
     
+      function createShapeFromDrag(drag) {
+        const page = model.getPage(state.project, drag.pageId);
+        if (!page) return;
+        const pageSize = state.project.pageSize;
+        let rect;
+        if (!drag.moved) {
+          const size = Math.min(240, pageSize.width, pageSize.height);
+          rect = {
+            x: clamp(drag.startX - size / 2, 0, Math.max(0, pageSize.width - size)),
+            y: clamp(drag.startY - size / 2, 0, Math.max(0, pageSize.height - size)),
+            width: size,
+            height: size
+          };
+        } else {
+          const current = {
+            x: drag.currentX == null ? drag.startX : drag.currentX,
+            y: drag.currentY == null ? drag.startY : drag.currentY
+          };
+          rect = {
+            x: Math.min(drag.startX, current.x),
+            y: Math.min(drag.startY, current.y),
+            width: Math.max(1, Math.abs(current.x - drag.startX)),
+            height: Math.max(1, Math.abs(current.y - drag.startY))
+          };
+        }
+        if (drag.target === 'background' && !model.canEditPageBackground(state.project, page)) return;
+        actions.pushUndo('添加图形');
+        if (drag.target === 'background') {
+          const item = shape.createBackgroundShape(
+            Math.round(rect.x), Math.round(rect.y),
+            Math.round(rect.width), Math.round(rect.height)
+          );
+          page.background.items.push(item);
+        } else {
+          const element = shape.createShapeElement(
+            Math.round(rect.x), Math.round(rect.y),
+            Math.round(rect.width), Math.round(rect.height)
+          );
+          page.elements.push(element);
+        }
+        ui.toast(drag.target === 'background' ? '已添加背景图形。' : '已添加图形。');
+      }
+
       function onPointerUp(event) {
         if (!surface.drag) return;
         const finished = surface.drag;
         surface.drag = null;
         renderer.setBlurCacheFrozen(false);
     
+        if (finished.type === 'shape-draw') {
+          createShapeFromDrag(finished);
+          if (state.shapeTool) state.shapeTool.preview = null;
+        }
         if (finished.type === 'page-size') {
           state.project.pageSize.width = Math.round(clamp(state.project.pageSize.width, 320, 5000));
           state.project.pageSize.height = Math.round(clamp(state.project.pageSize.height, 320, 5000));
@@ -407,7 +513,7 @@
           finished.element.x = Math.round(finished.element.x);
           finished.element.y = Math.round(finished.element.y);
           finished.element.width = Math.round(finished.element.width);
-          if (finished.element.type === 'image') {
+          if (finished.element.type === 'image' || finished.element.type === 'shape') {
             finished.element.height = Math.round(finished.element.height);
           }
         }

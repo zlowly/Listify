@@ -75,8 +75,10 @@
   ];
   // 需要“大于该值”的尺寸下限（页面尺寸、元素宽高、图片尺寸、表格列宽）。
   const IMAGE_MIN_SIZE = 0;
+  const PROJECT_VERSION = 5;
   const DEFAULT_BACKGROUND_COLOR = '#ffffff';
   const DEFAULT_BACKGROUND_IMAGE = {
+    kind: 'image',
     assetId: null,
     fit: 'cover',
     x: 0,
@@ -519,19 +521,33 @@
   function createPageBackground(color) {
     return {
       color: color || DEFAULT_BACKGROUND_COLOR,
-      images: []
+      items: []
     };
   }
 
   function cloneBackgroundImage(image) {
-    return Object.assign({}, DEFAULT_BACKGROUND_IMAGE, image, { id: uid('bgimg') });
+    return Object.assign({}, DEFAULT_BACKGROUND_IMAGE, image, {
+      kind: 'image',
+      id: uid('bgimg')
+    });
   }
 
-  // 页面背景是纯值：复制时图片条目换新 ID，assetId 继续共享同一图片资产。
+  function cloneBackgroundItem(item) {
+    if (!item) return item;
+    if (item.kind === 'shape') {
+      return Object.assign(clone(item), { id: uid('bgshape'), kind: 'shape' });
+    }
+    return cloneBackgroundImage(item);
+  }
+
+  // 页面背景是纯值：复制时所有条目换新 ID；图片资产继续共享，图形深拷贝。
   function clonePageBackground(background) {
+    const list = background && Array.isArray(background.items)
+      ? background.items
+      : (background && Array.isArray(background.images) ? background.images : []);
     return {
       color: background && background.color ? background.color : DEFAULT_BACKGROUND_COLOR,
-      images: (background && Array.isArray(background.images) ? background.images : []).map(cloneBackgroundImage)
+      items: list.map(cloneBackgroundItem)
     };
   }
 
@@ -584,7 +600,7 @@
   function createDefaultProject() {
     const page = createPage(createPageBackground(DEFAULT_BACKGROUND_COLOR));
     const project = {
-      version: 4,
+      version: PROJECT_VERSION,
       pageSize: { width: 1080, height: 1920 },
       margins: { top: 60, right: 60, bottom: 60, left: 60 },
       playlist: { categories: [] },
@@ -802,9 +818,10 @@
     return Math.round(number / s) * s;
   }
 
-  function computeImageResize(start, handle, delta, keepRatio) {
+  function computeImageResize(start, handle, delta, keepRatio, minSize) {
     const width0 = start.width;
     const height0 = start.height;
+    const minimum = typeof minSize === 'number' && minSize >= 0 ? minSize : 40;
     const radians = (Number(start.rotation) || 0) * Math.PI / 180;
     const local = rotateVector(delta.x, delta.y, -radians);
     const directionX = handle.indexOf('e') >= 0 ? 1 : (handle.indexOf('w') >= 0 ? -1 : 0);
@@ -818,27 +835,27 @@
         const projected = (width0 * directionX + local.x) * width0 * directionX +
           (height0 * directionY + local.y) * height0 * directionY;
         let scale = diagonal > 0 ? projected / diagonal : 1;
-        scale = Math.max(scale, 40 / width0, 40 / height0);
+        scale = Math.max(scale, minimum / width0, minimum / height0);
         width = width0 * scale;
         height = height0 * scale;
       } else if (directionX) {
-        width = Math.max(40, width0 + directionX * local.x);
+        width = Math.max(minimum, width0 + directionX * local.x);
         height = width0 > 0 ? width * (height0 / width0) : height0;
-        if (height < 40) {
-          height = 40;
+        if (height < minimum) {
+          height = minimum;
           width = height0 > 0 ? height * (width0 / height0) : width;
         }
       } else if (directionY) {
-        height = Math.max(40, height0 + directionY * local.y);
+        height = Math.max(minimum, height0 + directionY * local.y);
         width = height0 > 0 ? height * (width0 / height0) : width0;
-        if (width < 40) {
-          width = 40;
+        if (width < minimum) {
+          width = minimum;
           height = width0 > 0 ? width * (height0 / width0) : height;
         }
       }
     } else {
-      if (directionX) width = Math.max(40, width0 + directionX * local.x);
-      if (directionY) height = Math.max(40, height0 + directionY * local.y);
+      if (directionX) width = Math.max(minimum, width0 + directionX * local.x);
+      if (directionY) height = Math.max(minimum, height0 + directionY * local.y);
     }
 
     const anchorX = -directionX;
@@ -1098,6 +1115,7 @@
     PAGE_SIZE_MAX: PAGE_SIZE_MAX,
     PAGE_SIZE_PRESETS: PAGE_SIZE_PRESETS,
     IMAGE_MIN_SIZE: IMAGE_MIN_SIZE,
+    PROJECT_VERSION: PROJECT_VERSION,
     DEFAULT_BACKGROUND_COLOR: DEFAULT_BACKGROUND_COLOR,
     DEFAULT_BACKGROUND_IMAGE: DEFAULT_BACKGROUND_IMAGE,
     DEFAULT_TABLE_MARGINS: DEFAULT_TABLE_MARGINS,
@@ -1118,6 +1136,7 @@
     normalizeOutline: normalizeOutline,
     createBackgroundImage: createBackgroundImage,
     cloneBackgroundImage: cloneBackgroundImage,
+    cloneBackgroundItem: cloneBackgroundItem,
     createPageBackground: createPageBackground,
     clonePageBackground: clonePageBackground,
     createPage: createPage,

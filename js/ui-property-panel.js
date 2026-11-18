@@ -7,6 +7,7 @@
   const model = L.model;
   const layout = L.layout;
   const renderer = L.render;
+  const shape = L.shape;
   const esc = ui.esc;
   const field = ui.field;
   const fieldHelp = ui.fieldHelp;
@@ -141,18 +142,18 @@
       }
       if (element.type === 'category') renderCategoryProperties(element);
       else if (element.type === 'text') renderTextProperties(element);
+      else if (element.type === 'shape') renderShapeProperties(element, { background: false, page: page });
       else renderImageProperties(element);
       return;
     }
-    if (selection.type === 'backgroundImage') {
-      const image = (page.background.images || []).find(function (item) {
-        return item.id === selection.imageId;
-      });
-      if (!image) {
+    if (selection.type === 'backgroundItem' || selection.type === 'backgroundImage') {
+      const item = L.app.selectedBackgroundItem();
+      if (!item) {
         L.app.selectPage();
         return;
       }
-      renderBackgroundImageProperties(page, image);
+      if (item.kind === 'shape') renderShapeProperties(item, { background: true, page: page });
+      else renderBackgroundImageProperties(page, item);
       return;
     }
     renderPageProperties(page);
@@ -222,13 +223,16 @@
     const source = model.findGlobalBackgroundPage(project);
     const covered = model.isBackgroundCovered(project, page);
     const isSource = !!(source && source.id === page.id);
-    const count = (page.background.images || []).length;
+    const items = page.background.items || page.background.images || [];
+    const imageCount = items.filter(function (item) { return item.kind !== 'shape'; }).length;
+    const shapeCount = items.filter(function (item) { return item.kind === 'shape'; }).length;
+    const count = items.length;
     const box = previewBox(project.pageSize);
     const color = page.background.color || model.DEFAULT_BACKGROUND_COLOR;
-    const badges = '<span class="pill pill-gray">' + (count ? count + ' 张图' : '无图片') + '</span>' +
+    const badges = '<span class="pill pill-gray">图片 ' + imageCount + ' · 图形 ' + shapeCount + '</span>' +
       (isSource ? '<span class="pill pill-blue">全局来源</span>' : '');
     const preview = backgroundPreview(page, '', box);
-    const tip = '背景位于内容下方。选择或更换背景会整套替换填充色与图片；' +
+    const tip = '背景位于内容下方。选择或更换背景会整套替换填充色、图片与图形；' +
       '勾选后所有页使用本页背景，改本页会同步所有页。';
     let body;
     if (covered) {
@@ -246,7 +250,7 @@
       body =
         '<div class="bg-card">' + preview +
           '<div class="bg-fields">' +
-            field('图片', '<span class="bg-count">' + (count ? count + ' 张' : '无图片') + '</span>') +
+            field('内容', '<span class="bg-count">图片 ' + imageCount + ' · 图形 ' + shapeCount + '</span>') +
             field('填充色', colorInput('prop-bg-color', color, false) +
               '<span class="bg-color-value">' + esc(color) + '</span>') +
           '</div>' +
@@ -254,6 +258,7 @@
         '<div class="bg-actions">' +
           '<button id="prop-bg-pick" class="btn btn-sm" type="button">' + (count ? '更换背景' : '选择背景') + '</button>' +
           '<button id="prop-bg-add-image" class="btn btn-sm" type="button" aria-label="添加背景图片">＋ 图片</button>' +
+          '<button id="prop-bg-add-shape" class="btn btn-sm" type="button" aria-label="添加背景图形">＋ 图形</button>' +
           '<button id="prop-bg-copy-from" class="btn btn-sm" type="button">复制背景…</button>' +
           '<button id="prop-bg-clear" class="btn btn-sm" type="button"' + (count ? '' : ' disabled') + '>清空背景</button>' +
         '</div>' +
@@ -273,6 +278,7 @@
     });
     bind('prop-bg-pick', 'click', function () { openPresetPicker('whole', null); });
     bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', null); });
+    bind('prop-bg-add-shape', 'click', function () { L.app.toggleShapeTool('background'); });
     bind('prop-bg-copy-from', 'click', function () {
       if (openCopyBackground) openCopyBackground(page.id);
     });
@@ -389,15 +395,15 @@
 
   function renderBackgroundImageProperties(page, image) {
     const project = L.app.state.project;
-    const images = page.background.images || [];
-    const index = images.indexOf(image);
+    const items = page.background.items || page.background.images || [];
+    const index = items.indexOf(image);
     const isSource = project.globalBackgroundPageId === page.id;
     const meta = image.assetId ? (L.assets.getMeta(image.assetId) || project.assets.find(function (asset) {
       return asset.id === image.assetId;
     })) : null;
     const custom = image.fit === 'none';
     ui.els.propertyPanel.innerHTML =
-      propGroup('info', '背景图片 ' + (index + 1) + ' / ' + images.length,
+      propGroup('info', '背景条目 ' + (index + 1) + ' / ' + items.length,
         '<p class="hint">所属背景：第 ' + pageNumber(project, page) + ' 页' +
           (isSource ? '（全局来源，修改会影响所有页面）' : '') + '</p>' +
         '<p class="hint">' + (meta ? '当前图片：' + esc(meta.name) : '图片缺失或未选择。') + '</p>') +
@@ -430,7 +436,7 @@
         { right: advancedToggle(model.hasImageEffects(image)) }) +
       propGroup('actions', '',
         '<div class="inline-actions">' +
-          '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= images.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
+          '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= items.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
           '<button id="prop-bg-move-down" class="btn btn-sm"' + (index <= 0 ? ' disabled' : '') + '>下移一层</button>' +
           '<button id="prop-bg-replace" class="btn btn-sm">替换图片</button>' +
           '<button id="prop-bg-image-delete" class="btn btn-sm btn-danger">删除图片</button>' +
@@ -465,10 +471,10 @@
       });
     }
     bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(image.id); });
-    bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundImage(image.id, 1); });
-    bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundImage(image.id, -1); });
+    bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundItem(image.id, 1); });
+    bind('prop-bg-move-down', 'click', function () { L.app.moveBackgroundItem(image.id, -1); });
     bind('prop-bg-replace', 'click', function () { openPresetPicker('replace', { imageId: image.id }); });
-    bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundImage(image.id); });
+    bind('prop-bg-image-delete', 'click', function () { L.app.deleteBackgroundItem(image.id); });
   }
 
   function fontListValues(style) {
@@ -958,6 +964,120 @@
       L.app.setElementStyleField('align', valueOf('prop-text-align'));
     });
     bindShadowOutline('prop-text', element.style);
+    bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
+  }
+
+  /* 方形与菱形共用外接框；菱形内夹角由宽高推导，不单独持久化 */
+  function renderShapeProperties(item, options) {
+    const background = !!(options && options.background);
+    const page = options && options.page;
+    const project = L.app.state.project;
+    const isDiamond = item.shape === 'diamond';
+    const inradius = Math.max(0, shape.shapeInradius(item));
+    const concave = Math.max(0, shape.shapeConcaveLimit(item));
+    const angle = Math.round(shape.diamondAngle(item.width, item.height));
+    const isSource = background && page && project.globalBackgroundPageId === page.id;
+    const info = background
+      ? propGroup('info', '背景图形',
+          '<p class="hint">所属背景：第 ' + pageNumber(project, page) + ' 页' +
+            (isSource ? '（全局来源，修改会影响所有页面）' : '') + '</p>')
+      : propGroup('info', '自由图形',
+          '<p class="hint">' + (isDiamond ? '菱形' : '方形') + '，缩放时宽高可独立调整。</p>');
+    const geometry =
+      field('形状', selectInput('prop-shape-kind', [
+        { value: 'rect', label: '方形' },
+        { value: 'diamond', label: '菱形' }
+      ], item.shape || 'rect')) +
+      (isDiamond
+        ? fieldHelp('内夹角', numberInput('prop-shape-angle', angle, 0, 90, 1, false, 5) + '<span class="unit">°</span>',
+            '菱形锐角。调整角度会保留外接框长边、改变短边；输入 0–90。')
+        : '') +
+      field('填充方式', selectInput('prop-shape-mode', [
+        { value: 'fill', label: '实心' },
+        { value: 'stroke', label: '边框' }
+      ], item.mode || 'fill')) +
+      field('颜色', colorInput('prop-shape-color', item.color || shape.DEFAULT_SHAPE.color, false)) +
+      fieldHelp('圆角', numberInput('prop-shape-radius', Math.round(item.radius || 0), -Math.ceil(concave), Math.floor(inradius), 1, false, 5) +
+        '<span class="unit">px</span>', '0 为直角，正数外凸，负数内凹；上限随形状与尺寸变化。') +
+      (item.mode === 'stroke'
+        ? fieldHelp('边框厚度', numberInput('prop-shape-stroke', Math.round(item.strokeWidth || 0), 0, Math.floor(inradius), 1, false, 5) +
+            '<span class="unit">px</span>', '边框绘制在图形内侧，可见厚度即此值。')
+        : '');
+    const layout =
+      fieldPair(
+        '位置 X', numberInput('prop-shape-x', Math.round(item.x), -20000, 20000, 1, false, 10),
+        '位置 Y', numberInput('prop-shape-y', Math.round(item.y), -20000, 20000, 1, false, 10)
+      ) +
+      fieldPair(
+        '宽度', numberInput('prop-shape-w', Math.round(item.width), 1, 20000, 1, false, 10),
+        '高度', numberInput('prop-shape-h', Math.round(item.height), 1, 20000, 1, false, 10)
+      ) +
+      field('旋转', numberInput('prop-shape-rotation', Math.round(item.rotation || 0), -180, 180, 1, false, 45) +
+        '<span class="unit">°</span>');
+    ui.els.propertyPanel.innerHTML =
+      info +
+      propGroup('shape', '形状', geometry) +
+      propGroup('layout', '位置与尺寸', layout) +
+      propGroup('display', '外观',
+        field('不透明度', rangeInput('prop-shape-opacity', item.opacity == null ? 1 : item.opacity, 0, 1, 0.01)) +
+        field('模糊', rangeInput('prop-shape-blur', item.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
+        (ui.advancedImage ? imageEffectFields('prop-shape', item) : ''),
+        { right: advancedToggle(model.hasImageEffects(item)) }) +
+      propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除图形</button>', { plain: true });
+
+    bind('prop-shape-kind', 'change', function () {
+      L.app.setShapeKind(valueOf('prop-shape-kind'));
+      ui.renderAll();
+    });
+    bind('prop-shape-angle', 'change', function () {
+      L.app.setShapeAngle(Number(valueOf('prop-shape-angle')) || 0);
+      ui.renderAll();
+    });
+    bind('prop-shape-mode', 'change', function () {
+      L.app.setShapeField('mode', valueOf('prop-shape-mode'));
+      ui.renderAll();
+    });
+    bind('prop-shape-color', 'input', function () { L.app.setShapeField('color', valueOf('prop-shape-color')); });
+    bind('prop-shape-radius', 'change', function () {
+      L.app.setShapeField('radius', Number(valueOf('prop-shape-radius')) || 0);
+      ui.renderAll();
+    });
+    bind('prop-shape-stroke', 'change', function () {
+      L.app.setShapeField('strokeWidth', Number(valueOf('prop-shape-stroke')) || 0);
+      ui.renderAll();
+    });
+    bind('prop-shape-x', 'change', function () { L.app.setShapeField('x', Number(valueOf('prop-shape-x')) || 0); });
+    bind('prop-shape-y', 'change', function () { L.app.setShapeField('y', Number(valueOf('prop-shape-y')) || 0); });
+    bind('prop-shape-w', 'change', function () {
+      L.app.setShapeField('width', Math.max(1, Number(valueOf('prop-shape-w')) || 1));
+      ui.renderAll();
+    });
+    bind('prop-shape-h', 'change', function () {
+      L.app.setShapeField('height', Math.max(1, Number(valueOf('prop-shape-h')) || 1));
+      ui.renderAll();
+    });
+    bind('prop-shape-rotation', 'change', function () {
+      const value = normalizeAngle(valueOf('prop-shape-rotation'));
+      L.app.setShapeField('rotation', value);
+      const input = document.getElementById('prop-shape-rotation');
+      if (input) input.value = value;
+    });
+    bind('prop-shape-opacity', 'input', function () {
+      const value = Number(valueOf('prop-shape-opacity'));
+      L.app.setShapeField('opacity', value);
+      updateRangeLabel('prop-shape-opacity', value.toFixed(2));
+    });
+    bind('prop-shape-blur', 'input', function () {
+      const value = Number(valueOf('prop-shape-blur'));
+      L.app.setShapeField('blur', value);
+      updateRangeLabel('prop-shape-blur', String(value));
+    });
+    bindAdvancedToggle();
+    if (ui.advancedImage) {
+      bindImageEffectFields('prop-shape', function (key, value) {
+        L.app.setShapeField(key, value);
+      });
+    }
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
   }
 

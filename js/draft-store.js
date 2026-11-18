@@ -401,10 +401,13 @@
   function pruneMissingAssets(raw, missing) {
     (raw.pages || []).forEach(function (page) {
       if (!page) return;
-      if (page.background && Array.isArray(page.background.images)) {
-        page.background.images = page.background.images.filter(function (image) {
-          return !image || !image.assetId || !missing.has(image.assetId);
+      const items = page.background && (page.background.items || page.background.images);
+      if (Array.isArray(items)) {
+        const kept = items.filter(function (item) {
+          return !item || item.kind === 'shape' || !item.assetId || !missing.has(item.assetId);
         });
+        if (page.background.items) page.background.items = kept;
+        else page.background.images = kept;
       }
       if (!Array.isArray(page.elements)) return;
       page.elements = page.elements.filter(function (element) {
@@ -449,7 +452,8 @@
         error: '草稿版本不受支持。'
       };
     }
-    if (typeof envelope.project.version === 'number' && envelope.project.version > 4) {
+    const projectVersion = L.model.PROJECT_VERSION || 5;
+    if (typeof envelope.project.version === 'number' && envelope.project.version > projectVersion) {
       backupCorruptDraft(text);
       return { ok: false, reason: 'version', error: '草稿项目版本高于当前支持版本。' };
     }

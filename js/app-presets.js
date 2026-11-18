@@ -54,17 +54,23 @@
         }
       }
     
+      function imageItems(background) {
+        return (background && (background.items || background.images) || []).filter(function (item) {
+          return item && item.kind !== 'shape';
+        });
+      }
+
       function addPresetImage(background, preset, assetId, mode) {
-        let image = (background.images || []).find(function (img) { return img.assetId === assetId; }) || null;
-        if (!image) {
-          let fit;
-          if (preset.kind === 'overlay') fit = 'original';
-          else if (mode === 'add' && (background.images || []).length > 0) fit = 'original';
-          else fit = 'cover';
-          image = model.createBackgroundImage(assetId, fit);
-          image.opacity = preset.opacity == null ? 1 : preset.opacity;
-          background.images.push(image);
-        }
+        const existing = imageItems(background).find(function (img) { return img.assetId === assetId; }) || null;
+        if (existing) return existing;
+        let fit;
+        if (preset.kind === 'overlay') fit = 'original';
+        else if (mode === 'add' && imageItems(background).length > 0) fit = 'original';
+        else fit = 'cover';
+        const image = model.createBackgroundImage(assetId, fit);
+        image.opacity = preset.opacity == null ? 1 : preset.opacity;
+        if (!Array.isArray(background.items)) background.items = [];
+        background.items.push(image);
         return image;
       }
 
@@ -83,12 +89,15 @@
         if (!page) return;
         const background = {
           color: preset.color || model.DEFAULT_BACKGROUND_COLOR,
-          images: []
+          items: []
         };
         addPresetImage(background, preset, assetId, 'whole');
         if (!actions.replacePageBackground(background)) return;
-        state.selection = page.background.images.length
-          ? { type: 'backgroundImage', imageId: page.background.images[0].id }
+        const firstImage = (page.background.items || []).find(function (item) {
+          return item.kind !== 'shape';
+        });
+        state.selection = firstImage
+          ? { type: 'backgroundItem', itemId: firstImage.id }
           : { type: 'background' };
         ui.renderAll();
         ui.toast('已更换本页背景 · 撤销');
@@ -100,7 +109,7 @@
         if (!page) return;
         actions.pushUndo('添加背景图片');
         const image = addPresetImage(page.background, preset, assetId, 'add');
-        state.selection = { type: 'backgroundImage', imageId: image.id };
+        state.selection = { type: 'backgroundItem', itemId: image.id };
         ui.renderAll();
         ui.toast('已添加预置图片“' + preset.name + '”。');
         notifyDarkPreset(preset);
@@ -109,7 +118,9 @@
       function applyPresetReplace(preset, ctx, assetId, loaded) {
         const page = editablePage();
         if (!page) return;
-        const target = (page.background.images || []).find(function (img) { return img.id === ctx.imageId; }) || null;
+        const target = (page.background.items || []).find(function (img) {
+          return img.id === ctx.imageId && img.kind !== 'shape';
+        }) || null;
         if (!target) {
           ui.toast('找不到要替换的背景图片。', 'error');
           return;
@@ -123,7 +134,7 @@
           target.height = target.height > 0 ? target.height : rect.height;
         }
         if (oldAssetId && oldAssetId !== assetId) actions.releaseUnusedAsset(oldAssetId);
-        state.selection = { type: 'backgroundImage', imageId: target.id };
+        state.selection = { type: 'backgroundItem', itemId: target.id };
         ui.renderAll();
         ui.toast('已替换为“' + preset.name + '”。');
         notifyDarkPreset(preset);
