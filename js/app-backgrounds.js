@@ -159,6 +159,7 @@
             const oldAssetId = target.assetId;
             actions.pushUndo('替换背景图');
             target.assetId = assetId;
+            model.resetCrop(target);
             if (target.fit === 'none') {
               const rect = renderer.backgroundImageRect(state.project.pageSize, target, loaded);
               target.width = target.width > 0 ? target.width : rect.width;

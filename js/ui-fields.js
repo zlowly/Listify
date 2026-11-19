@@ -148,9 +148,10 @@
   ui.advancedImage = false;
 
   /* 分组标题右侧的「高级」开关；必须带 btn，命中 ui.js 的 summary .btn 拦截，避免点击折叠分组 */
-  function advancedToggle(adjusted) {
+  function advancedToggle(adjusted, cropped) {
     return '<button type="button" id="prop-advanced" class="btn pill" aria-pressed="' +
       (ui.advancedImage ? 'true' : 'false') + '">高级</button>' +
+      (cropped ? '<span class="prop-adjusted prop-cropped">已裁剪</span>' : '') +
       (adjusted ? '<span class="prop-adjusted">已调整</span>' : '');
   }
 

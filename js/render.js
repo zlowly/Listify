@@ -21,6 +21,82 @@
     return { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
   }
 
+  function imageNatural(img) {
+    return img ? imageSize(img) : { width: 0, height: 0 };
+  }
+
+  function cropOf(item) {
+    return model.cropValues(item);
+  }
+
+  // 完整框在局部坐标中以中心为原点；可见矩形按裁剪内缩。
+  function visibleBoxForFrame(frame, natural, crop, rotation) {
+    const visible = model.visibleRect(frame, natural, crop);
+    const frameCenterX = frame.x + frame.width / 2;
+    const frameCenterY = frame.y + frame.height / 2;
+    const radians = model.rotationRadians({ rotation: rotation || 0 });
+    const offset = model.rotateVector(
+      visible.x + visible.width / 2 - frameCenterX,
+      visible.y + visible.height / 2 - frameCenterY,
+      radians
+    );
+    const centerX = frameCenterX + offset.x;
+    const centerY = frameCenterY + offset.y;
+    return {
+      x: centerX - visible.width / 2,
+      y: centerY - visible.height / 2,
+      width: visible.width,
+      height: visible.height,
+      rotation: rotation || 0
+    };
+  }
+
+  function elementVisibleRect(element) {
+    if (!element || element.type !== 'image') {
+      return element ? { x: element.x, y: element.y, width: element.width, height: element.height } : null;
+    }
+    const img = element.assetId ? L.assets.getCachedImage(element.assetId) : null;
+    const natural = imageNatural(img);
+    return model.visibleRect(
+      { x: element.x, y: element.y, width: element.width, height: element.height },
+      natural,
+      cropOf(element)
+    );
+  }
+
+  function elementVisibleBox(element) {
+    if (!element || element.type !== 'image') return element;
+    const img = element.assetId ? L.assets.getCachedImage(element.assetId) : null;
+    const natural = imageNatural(img);
+    return visibleBoxForFrame(
+      { x: element.x, y: element.y, width: element.width, height: element.height },
+      natural,
+      cropOf(element),
+      element.rotation
+    );
+  }
+
+  function elementVisibleLocalRect(element) {
+    const rect = elementVisibleRect(element);
+    if (!rect) return { x: 0, y: 0, width: 0, height: 0 };
+    return {
+      x: rect.x - element.x - element.width / 2 + rect.width / 2,
+      y: rect.y - element.y - element.height / 2 + rect.height / 2,
+      width: rect.width,
+      height: rect.height
+    };
+  }
+
+  function backgroundVisibleRect(pageSize, image, img) {
+    const frame = backgroundImageRect(pageSize, image, img);
+    return model.visibleRect(frame, imageNatural(img), cropOf(image));
+  }
+
+  function backgroundVisibleBox(pageSize, image, img) {
+    const frame = backgroundImageRect(pageSize, image, img);
+    return visibleBoxForFrame(frame, imageNatural(img), cropOf(image), image.rotation);
+  }
+
   // 图片处理缓存：模糊、调色与渐隐一次烘焙，缓存命中后每帧只是一次 drawImage。
   // 拖拽图片只改变位置时缓存可命中；尺寸按 64px 分桶，缩放时仅跨桶才重建。
   const PROCESSED_CACHE_BUCKET = 64;
@@ -80,17 +156,19 @@
   // 用 destination-in 把渐变乘进位图 alpha：只改透明度，不改颜色。
   // originX/originY 是位图左上角对应的局部坐标（局部坐标以图片中心为原点），
   // 因此缓存位图与导出掩膜可以共用同一套渐变几何。
-  function fillFadeMask(ctx, effects, width, height, scaleX, scaleY, originX, originY) {
+  function fillFadeMask(ctx, effects, width, height, scaleX, scaleY, originX, originY, centerX, centerY) {
     if (effects.fadeMode === 'off') return;
     const points = model.fadeGradientPoints(effects.fadeAngle, width, height);
     const profile = model.fadeProfile(effects);
     const span = profile.to - profile.from;
+    const offsetX = Number(centerX) || 0;
+    const offsetY = Number(centerY) || 0;
     // 轴向坐标 t 沿 fadeGradientPoints 给出的整条投影轴线性映射；
     // 单向的坡可以伸出图片，画布会把图片外的那段裁掉。
     function axisPoint(t) {
       return {
-        x: points.x1 + (points.x2 - points.x1) * t,
-        y: points.y1 + (points.y2 - points.y1) * t
+        x: points.x1 + (points.x2 - points.x1) * t + offsetX,
+        y: points.y1 + (points.y2 - points.y1) * t + offsetY
       };
     }
     const start = axisPoint(profile.from);
@@ -112,9 +190,10 @@
     ctx.globalCompositeOperation = previous;
   }
 
-  function processedImage(assetId, effects, width, height, ratio) {
+  function processedImage(assetId, effects, width, height, crop, ratio) {
     const img = L.assets.getCachedImage(assetId);
     if (!img || !(width > 0) || !(height > 0)) return null;
+    const natural = imageNatural(img);
     const deviceWidth = width * ratio;
     const deviceHeight = height * ratio;
     // 超大图片按像素预算降采样缓存；绘制时放大，模糊半径按同比例缩放，
@@ -122,7 +201,7 @@
     const budgetScale = Math.min(1, Math.sqrt(PROCESSED_CACHE_MAX_ENTRY_PIXELS / (deviceWidth * deviceHeight)));
     const bucketWidth = Math.max(1, Math.ceil(deviceWidth * budgetScale / PROCESSED_CACHE_BUCKET) * PROCESSED_CACHE_BUCKET);
     const bucketHeight = Math.max(1, Math.ceil(deviceHeight * budgetScale / PROCESSED_CACHE_BUCKET) * PROCESSED_CACHE_BUCKET);
-    const signature = effectSignature(effects);
+    const signature = effectSignature(effects) + '|' + model.cropSignature({ crop: crop });
     const key = assetId + '|' + signature + '|' + bucketWidth + 'x' + bucketHeight;
     const cached = processedImages.get(key);
     if (cached) {
@@ -131,7 +210,7 @@
       return cached;
     }
     // 交互（拖拽缩放）期间复用已有位图，避免每次跨尺寸桶都重新烘焙；
-    // 前缀必须覆盖全部效果参数，否则会复用另一套效果的位图。
+    // 前缀必须覆盖全部效果与裁剪参数，否则会复用另一套结果的位图。
     if (processedCacheFrozen) {
       const prefix = assetId + '|' + signature + '|';
       for (const [cachedKey, canvas] of processedImages) {
@@ -147,10 +226,14 @@
     cacheContext.filter = filterString(effects, blurScale);
     cacheContext.drawImage(img, 0, 0, bucketWidth, bucketHeight);
     cacheContext.filter = 'none';
+    const frame = { x: -width / 2, y: -height / 2, width: width, height: height };
+    const visible = model.visibleRect(frame, natural, crop);
     fillFadeMask(
-      cacheContext, effects, width, height,
+      cacheContext, effects, visible.width, visible.height,
       bucketWidth / width, bucketHeight / height,
-      -width / 2, -height / 2
+      -width / 2, -height / 2,
+      visible.x + visible.width / 2,
+      visible.y + visible.height / 2
     );
     const pixels = bucketWidth * bucketHeight;
     processedImages.set(key, canvas);
@@ -164,28 +247,60 @@
     return canvas;
   }
 
-  function drawProcessedImage(ctx, assetId, img, item, x, y, width, height) {
+  // 在已旋转/平移的上下文里绘制一张图片：frame 为局部完整框（中心为原点），
+  // 无效果时直接按源裁剪取样；有效果时取完整框烘焙位图的可见子矩形。
+  function drawProcessedImage(ctx, assetId, img, item, frame, crop) {
     if (!img) return;
+    const natural = imageNatural(img);
+    const values = model.clampCrop(crop, natural);
+    const visible = model.visibleRect(frame, natural, values);
+    if (!(visible.width > 0) || !(visible.height > 0)) return;
     const effects = imageEffects(item);
+    const sourceWidth = Math.max(0, natural.width - values.left - values.right);
+    const sourceHeight = Math.max(0, natural.height - values.top - values.bottom);
     // 无效果快速路径：完全不分配离屏画布，保持现有绘制成本。
     if (effects.blur === 0 && !model.hasImageEffects(item)) {
-      ctx.drawImage(img, x, y, width, height);
+      if (sourceWidth > 0 && sourceHeight > 0) {
+        ctx.drawImage(
+          img, values.left, values.top, sourceWidth, sourceHeight,
+          visible.x, visible.y, visible.width, visible.height
+        );
+      }
       return;
     }
-    const cached = processedImage(assetId, effects, width, height, contextRatio(ctx));
+    const cached = processedImage(assetId, effects, frame.width, frame.height, values, contextRatio(ctx));
     if (cached) {
-      ctx.drawImage(cached, x, y, width, height);
+      const scaleX = cached.width / frame.width;
+      const scaleY = cached.height / frame.height;
+      ctx.drawImage(
+        cached,
+        (visible.x - frame.x) * scaleX,
+        (visible.y - frame.y) * scaleY,
+        visible.width * scaleX,
+        visible.height * scaleY,
+        visible.x, visible.y, visible.width, visible.height
+      );
       return;
     }
     ctx.filter = filterString(effects, 1);
-    ctx.drawImage(img, x, y, width, height);
+    if (sourceWidth > 0 && sourceHeight > 0) {
+      ctx.drawImage(
+        img, values.left, values.top, sourceWidth, sourceHeight,
+        visible.x, visible.y, visible.width, visible.height
+      );
+    }
     ctx.filter = 'none';
   }
 
   // 导出保真分支：无模糊时按全分辨率一次性出图（不进缓存），
   // 掩膜只覆盖传入的局部矩形，4K 导出不会分配整张超大位图。
-  function drawOneShotImage(ctx, img, effects, width, height, originX, originY, maskWidth, maskHeight) {
+  function drawOneShotImage(ctx, img, effects, width, height, crop, originX, originY, maskWidth, maskHeight) {
     if (!img || !(maskWidth > 0) || !(maskHeight > 0)) return;
+    const natural = imageNatural(img);
+    const values = model.clampCrop(crop, natural);
+    const frame = { x: -width / 2, y: -height / 2, width: width, height: height };
+    const visible = model.visibleRect(frame, natural, values);
+    if (!(visible.width > 0) || !(visible.height > 0)) return;
     const ratio = contextRatio(ctx);
     const pixelWidth = Math.max(1, Math.ceil(maskWidth * ratio));
     const pixelHeight = Math.max(1, Math.ceil(maskHeight * ratio));
@@ -205,7 +320,12 @@
       height * scaleY
     );
     offscreen.filter = 'none';
-    fillFadeMask(offscreen, effects, width, height, scaleX, scaleY, originX, originY);
+    fillFadeMask(
+      offscreen, effects, visible.width, visible.height, scaleX, scaleY,
+      originX, originY,
+      visible.x + visible.width / 2,
+      visible.y + visible.height / 2
+    );
     ctx.drawImage(canvas, originX, originY, maskWidth, maskHeight);
   }
 
@@ -266,23 +386,31 @@
         if (!img) return;
         const rect = backgroundImageRect(pageSize, image, img);
         if (!(rect.width > 0) || !(rect.height > 0)) return;
+        const natural = imageNatural(img);
+        const crop = model.clampCrop(cropOf(image), natural);
+        const visible = model.visibleRect(rect, natural, crop);
+        if (!(visible.width > 0) || !(visible.height > 0)) return;
         const effects = imageEffects(image);
         const needsHighRes = opts.exportMode && effects.blur === 0 && model.hasImageEffects(image);
-        // 掩膜只需覆盖“图片矩形 ∩ 页面”，避免超大 cover 图在 4K 导出时分配整张位图。
-        const mask = needsHighRes ? model.fadeMaskRect(rect, pageSize, image.rotation) : null;
+        // 掩膜只需覆盖“可见矩形 ∩ 页面”，避免超大 cover 图在 4K 导出时分配整张位图。
+        const mask = needsHighRes ? model.fadeMaskRect(visible, pageSize, image.rotation) : null;
         if (needsHighRes && !mask) return;
         ctx.save();
         ctx.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
         ctx.rotate(model.rotationRadians(image));
         ctx.globalAlpha = model.clamp(Number(image.opacity), 0, 1);
         if (needsHighRes) {
+          // mask 相对可见中心；转回完整框中心作为一次性绘制的局部原点。
+          const offsetX = visible.x + visible.width / 2 - (rect.x + rect.width / 2);
+          const offsetY = visible.y + visible.height / 2 - (rect.y + rect.height / 2);
           drawOneShotImage(
-            ctx, img, effects, rect.width, rect.height,
-            mask.x, mask.y, mask.width, mask.height
+            ctx, img, effects, rect.width, rect.height, crop,
+            mask.x + offsetX, mask.y + offsetY, mask.width, mask.height
           );
         } else {
           drawProcessedImage(ctx, image.assetId, img, image,
-            -rect.width / 2, -rect.height / 2, rect.width, rect.height);
+            { x: -rect.width / 2, y: -rect.height / 2, width: rect.width, height: rect.height },
+            crop);
         }
         ctx.restore();
       });
@@ -430,21 +558,25 @@
     const opts = options || {};
     const width = element.width;
     const height = element.height;
+    const natural = imageNatural(img);
+    const crop = model.clampCrop(cropOf(element), natural);
+    const frame = { x: -width / 2, y: -height / 2, width: width, height: height };
+    const visible = model.visibleRect(frame, natural, crop);
+    if (!(visible.width > 0) || !(visible.height > 0)) return;
     const effects = imageEffects(element);
     ctx.save();
     ctx.translate(element.x + width / 2, element.y + height / 2);
     ctx.rotate(model.rotationRadians(element));
     ctx.beginPath();
-    ctx.rect(-width / 2, -height / 2, width, height);
+    ctx.rect(visible.x, visible.y, visible.width, visible.height);
     ctx.clip();
     ctx.globalAlpha = model.clamp(Number(element.opacity), 0, 1);
     if (opts.exportMode && effects.blur === 0 && model.hasImageEffects(element)) {
-      // 自由图片自身就是矩形，无需页面交集；一次性全分辨率出图避免缓存降采样。
-      drawOneShotImage(ctx, img, effects, width, height,
-        -width / 2, -height / 2, width, height);
+      // 自由图片只需可见矩形作为掩膜；一次性全分辨率出图避免缓存降采样。
+      drawOneShotImage(ctx, img, effects, width, height, crop,
+        visible.x, visible.y, visible.width, visible.height);
     } else {
-      drawProcessedImage(ctx, element.assetId, img, element,
-        -width / 2, -height / 2, width, height);
+      drawProcessedImage(ctx, element.assetId, img, element, frame, crop);
     }
     ctx.restore();
   }
@@ -707,6 +839,8 @@
       height = layout.layoutCategory(category, element, { editMode: true }).blockHeight;
     } else if (element.type === 'text') {
       height = layout.layoutText(element).height;
+    } else if (element.type === 'image') {
+      return elementVisibleRect(element);
     } else {
       height = element.height || 0;
     }
@@ -724,7 +858,9 @@
       const bounds = elementBounds(project, page, element);
       if (element.type === 'image') {
         const local = imageLocalPoint(element, x, y);
-        if (Math.abs(local.x) <= bounds.width / 2 && Math.abs(local.y) <= bounds.height / 2) {
+        const visible = elementVisibleLocalRect(element);
+        if (Math.abs(local.x - visible.x) <= visible.width / 2 &&
+            Math.abs(local.y - visible.y) <= visible.height / 2) {
           return { element: element, index: i, bounds: bounds };
         }
         continue;
@@ -775,7 +911,10 @@
     const pageH = project.pageSize.height;
     return page.elements.filter(function (element) {
       if (element.type === 'image' || element.type === 'shape') {
-        return elementCorners(element).some(function (corner) {
+        const corners = element.type === 'image'
+          ? elementCorners(elementVisibleBox(element))
+          : elementCorners(element);
+        return corners.some(function (corner) {
           return (
             corner.x < -0.5 ||
             corner.y < -0.5 ||
@@ -804,6 +943,7 @@
       const item = items[i];
       if (!item) continue;
       let rect;
+      let visible = null;
       if (item.kind === 'shape') {
         rect = { x: item.x, y: item.y, width: item.width, height: item.height };
       } else {
@@ -811,21 +951,29 @@
         const img = L.assets.getCachedImage(item.assetId);
         if (!img) continue;
         rect = backgroundImageRect(pageSize, item, img);
+        visible = model.visibleRect(rect, imageNatural(img), cropOf(item));
       }
       if (!(rect.width > 0) || !(rect.height > 0)) continue;
+      if (visible && (!(visible.width > 0) || !(visible.height > 0))) continue;
       const centerX = rect.x + rect.width / 2;
       const centerY = rect.y + rect.height / 2;
       const local = model.rotateVector(x - centerX, y - centerY, -model.rotationRadians(item));
-      const hit = item.kind === 'shape'
-        ? shape.shapeContains(item, local.x, local.y)
-        : Math.abs(local.x) <= rect.width / 2 && Math.abs(local.y) <= rect.height / 2;
+      let hit;
+      if (item.kind === 'shape') {
+        hit = shape.shapeContains(item, local.x, local.y);
+      } else {
+        const visibleX = visible.x + visible.width / 2 - centerX;
+        const visibleY = visible.y + visible.height / 2 - centerY;
+        hit = Math.abs(local.x - visibleX) <= visible.width / 2 &&
+          Math.abs(local.y - visibleY) <= visible.height / 2;
+      }
       if (hit) {
         return {
           background: background,
           item: item,
           image: item.kind === 'shape' ? null : item,
           index: i,
-          rect: rect
+          rect: visible || rect
         };
       }
     }
@@ -863,6 +1011,11 @@
     roundRect: roundRect,
     backgroundGeometry: backgroundGeometry,
     backgroundImageRect: backgroundImageRect,
+    backgroundVisibleRect: backgroundVisibleRect,
+    backgroundVisibleBox: backgroundVisibleBox,
+    elementVisibleRect: elementVisibleRect,
+    elementVisibleBox: elementVisibleBox,
+    elementVisibleLocalRect: elementVisibleLocalRect,
     paintBackground: paintBackground,
     paintBackgroundPreviews: paintBackgroundPreviews,
     drawBackground: drawBackground,

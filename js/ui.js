@@ -521,6 +521,7 @@
       let icon = '▤';
       let name = '元素';
       let sub = '';
+      let cropTitle = '';
       if (element.type === 'category') {
         icon = '▤';
         name = '分类 · ' + element.category;
@@ -534,6 +535,11 @@
         icon = '▧';
         name = '图片';
         sub = element.rotation ? '旋转 ' + normalizeAngle(element.rotation) + '°' : '自由图片';
+        if (model.hasCrop(element)) {
+          const crop = model.cropValues(element);
+          sub += ' · 已裁剪';
+          cropTitle = '已裁剪：上' + crop.top + ' 右' + crop.right + ' 下' + crop.bottom + ' 左' + crop.left;
+        }
       } else if (element.type === 'shape') {
         icon = element.shape === 'diamond' ? '◇' : '▢';
         name = '图形 · ' + (element.shape === 'diamond' ? '菱形' : '方形');
@@ -541,7 +547,7 @@
       }
       rows.push('<div class="layer-row' + (selected ? ' selected' : '') +
         '" data-layer-kind="element" data-layer-id="' + esc(element.id) + '">' +
-        '<button type="button" class="layer-row-main" draggable="true" aria-label="' +
+        '<button type="button" class="layer-row-main" draggable="true"' + (cropTitle ? ' title="' + esc(cropTitle) + '"' : '') + ' aria-label="' +
           esc(name + '，' + sub + '，拖动可调整层级') + '">' +
         '<span class="layer-icon" aria-hidden="true">' + icon + '</span>' +
         '<span class="layer-name">' + esc(name) + '<span class="layer-sub"> ' + esc(sub) + '</span></span>' +
@@ -594,12 +600,18 @@
         const name = isShape
           ? '图形 · ' + (item.shape === 'diamond' ? '菱形' : '方形')
           : '图片';
-        const sub = isShape
+        let sub = isShape
           ? '背景图形'
           : (item.fit === 'none' ? '自定义' : fitLabel(item.fit));
+        let cropTitle = '';
+        if (!isShape && model.hasCrop(item)) {
+          const crop = model.cropValues(item);
+          sub += ' · 已裁剪';
+          cropTitle = '已裁剪：上' + crop.top + ' 右' + crop.right + ' 下' + crop.bottom + ' 左' + crop.left;
+        }
         rows.push('<div class="layer-row layer-bg-image-row' + (itemSelected ? ' selected' : '') +
           '" data-layer-kind="bgItem" data-bg-item="' + esc(item.id) + '">' +
-          '<button type="button" class="layer-row-main" draggable="true" aria-label="' +
+          '<button type="button" class="layer-row-main" draggable="true"' + (cropTitle ? ' title="' + esc(cropTitle) + '"' : '') + ' aria-label="' +
             esc(name + ' ' + (realIndex + 1) + '，' + sub + '，拖动可调整顺序') + '">' +
           '<span class="layer-icon" aria-hidden="true">' + icon + '</span>' +
           '<span class="layer-name">' + esc(name) + ' ' + (realIndex + 1) +

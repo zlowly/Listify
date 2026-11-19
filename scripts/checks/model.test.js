@@ -817,6 +817,86 @@ test('背景模型：全局指针最后设置生效，取消后各页显示自�
   assert.equal(model.effectiveBackground(project, second).color, '#222222');
 });
 
+/* ---------- 图片裁剪模型 ---------- */
+
+test('裁剪模型：四边裁剪按完整框比例推导可见矩形', function () {
+  const natural = { width: 100, height: 100 };
+  const frame = { x: 10, y: 20, width: 50, height: 50 };
+  const crop = { top: 10, right: 10, bottom: 10, left: 10 };
+  const visible = model.visibleRect(frame, natural, crop);
+  assert.equal(visible.x, 15);
+  assert.equal(visible.y, 25);
+  assert.equal(visible.width, 40);
+  assert.equal(visible.height, 40);
+});
+
+test('裁剪模型：单边裁剪只移动对应边', function () {
+  const natural = { width: 100, height: 100 };
+  const frame = { x: 0, y: 0, width: 50, height: 50 };
+  const visible = model.visibleRect(frame, natural, { top: 0, right: 0, bottom: 0, left: 10 });
+  assert.equal(visible.x, 5);
+  assert.equal(visible.y, 0);
+  assert.equal(visible.width, 45);
+  assert.equal(visible.height, 50);
+});
+
+test('裁剪模型：归零恢复完整框，可见矩形与完整框互换', function () {
+  const natural = { width: 100, height: 100 };
+  const frame = { x: 12, y: 18, width: 50, height: 50 };
+  const zero = model.cropValues({});
+  const visible = model.visibleRect(frame, natural, zero);
+  assert.equal(visible.x, frame.x);
+  assert.equal(visible.y, frame.y);
+  assert.equal(visible.width, frame.width);
+  assert.equal(visible.height, frame.height);
+
+  const cropped = model.visibleRect(frame, natural, { top: 10, right: 10, bottom: 10, left: 10 });
+  const restored = model.frameRectFromVisible(cropped, natural, { top: 10, right: 10, bottom: 10, left: 10 });
+  assert.ok(Math.abs(restored.x - frame.x) < 1e-9);
+  assert.ok(Math.abs(restored.y - frame.y) < 1e-9);
+  assert.ok(Math.abs(restored.width - frame.width) < 1e-9);
+  assert.ok(Math.abs(restored.height - frame.height) < 1e-9);
+});
+
+test('裁剪模型：fit 完整框变化时裁剪值不变，可见矩形重算', function () {
+  const natural = { width: 200, height: 100 };
+  const crop = { top: 0, right: 10, bottom: 0, left: 10 };
+  const first = model.visibleRect({ x: 0, y: 0, width: 200, height: 100 }, natural, crop);
+  const second = model.visibleRect({ x: 0, y: 0, width: 100, height: 50 }, natural, crop);
+  assert.equal(first.width, 180);
+  assert.equal(second.width, 90);
+  const normalized = model.cropValues({ crop: crop });
+  assert.equal(normalized.top, crop.top);
+  assert.equal(normalized.right, crop.right);
+  assert.equal(normalized.bottom, crop.bottom);
+  assert.equal(normalized.left, crop.left);
+});
+
+test('裁剪模型：合计越界按原图尺寸夹取，至少保留 1 个源像素', function () {
+  const natural = { width: 100, height: 100 };
+  const clamped = model.clampCrop({ top: 60, right: 60, bottom: 60, left: 60 }, natural);
+  assert.equal(clamped.left + clamped.right, 99);
+  assert.equal(clamped.top + clamped.bottom, 99);
+  const visible = model.visibleRect({ x: 0, y: 0, width: 100, height: 100 }, natural, clamped);
+  assert.equal(visible.width, 1);
+  assert.equal(visible.height, 1);
+});
+
+test('裁剪模型：单边编辑只夹当前边，保留对边', function () {
+  const natural = { width: 100, height: 100 };
+  const next = model.setCropSide({ top: 0, right: 5, bottom: 0, left: 0 }, 'left', 200, natural);
+  assert.equal(next.left, 94);
+  assert.equal(next.right, 5);
+  assert.equal(model.hasCrop({ crop: next }), true);
+  assert.equal(model.hasCrop({ crop: { top: 0, right: 0, bottom: 0, left: 0 } }), false);
+});
+
+test('裁剪模型：可见宽高比按裁剪后的源区域计算', function () {
+  assert.equal(model.visibleAspect({ width: 100, height: 100 }, {}), 1);
+  assert.equal(model.visibleAspect({ width: 100, height: 100 }, { top: 0, right: 0, bottom: 0, left: 50 }), 0.5);
+  assert.equal(model.visibleAspect({ width: 100, height: 100 }, { top: 25, right: 0, bottom: 25, left: 0 }), 2);
+});
+
 /* ---------- 画布空态判定 ---------- */
 
 test('空态判定：默认项目为空', function () {

@@ -311,7 +311,10 @@
       }
     
       function handlePoints(bounds, element) {
-        if (element.type === 'image' || element.type === 'shape') return imageHandlePoints(element);
+        if (element.type === 'image') {
+          return imageHandlePoints(renderer.elementVisibleBox(element));
+        }
+        if (element.type === 'shape') return imageHandlePoints(element);
         const x = viewport.offsetX + bounds.x * viewport.scale;
         const y = viewport.offsetY + bounds.y * viewport.scale;
         const w = bounds.width * viewport.scale;
@@ -323,6 +326,92 @@
         ];
       }
     
+      function localRectCorners(rect, centerX, centerY, rotation) {
+        const radians = model.rotationRadians({ rotation: rotation || 0 });
+        return [
+          [rect.x, rect.y],
+          [rect.x + rect.width, rect.y],
+          [rect.x + rect.width, rect.y + rect.height],
+          [rect.x, rect.y + rect.height]
+        ].map(function (point) {
+          const rotated = model.rotateVector(point[0], point[1], radians);
+          return { x: centerX + rotated.x, y: centerY + rotated.y };
+        });
+      }
+
+      function strokePagePolygon(ctx, points, fillStyle) {
+        ctx.beginPath();
+        points.forEach(function (point, index) {
+          const screen = screenFromPage(point.x, point.y);
+          if (index === 0) ctx.moveTo(screen.x, screen.y);
+          else ctx.lineTo(screen.x, screen.y);
+        });
+        ctx.closePath();
+        if (fillStyle) {
+          ctx.fillStyle = fillStyle;
+          ctx.fill();
+        }
+        ctx.stroke();
+      }
+
+      function drawCropGuides(ctx, frame, natural, crop, rotation) {
+        const values = model.clampCrop(crop, natural);
+        if (!model.hasCrop({ crop: values })) return;
+        const visible = model.visibleRect(frame, natural, values);
+        if (!(visible.width > 0) || !(visible.height > 0)) return;
+        const centerX = frame.x + frame.width / 2;
+        const centerY = frame.y + frame.height / 2;
+        const left = -frame.width / 2;
+        const top = -frame.height / 2;
+        const right = left + frame.width;
+        const bottom = top + frame.height;
+        const visibleX = visible.x - centerX;
+        const visibleY = visible.y - centerY;
+        const visibleRight = visibleX + visible.width;
+        const visibleBottom = visibleY + visible.height;
+        const bands = [
+          { x: left, y: top, width: frame.width, height: visibleY - top },
+          { x: left, y: visibleBottom, width: frame.width, height: bottom - visibleBottom },
+          { x: left, y: visibleY, width: visibleX - left, height: visible.height },
+          { x: visibleRight, y: visibleY, width: right - visibleRight, height: visible.height }
+        ];
+        ctx.save();
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
+        ctx.strokeStyle = 'rgba(37, 99, 235, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        bands.forEach(function (band) {
+          if (!(band.width > 0.01) || !(band.height > 0.01)) return;
+          const points = localRectCorners(band, centerX, centerY, rotation);
+          strokePagePolygon(ctx, points, 'rgba(15, 23, 42, 0.24)');
+        });
+        ctx.setLineDash([4, 4]);
+        strokePagePolygon(ctx, localRectCorners({ x: left, y: top, width: frame.width, height: frame.height },
+          centerX, centerY, rotation));
+        ctx.restore();
+      }
+
+      function drawPivotCross(ctx, center) {
+        if (!center) return;
+        const point = screenFromPage(center.x, center.y);
+        ctx.save();
+        ctx.strokeStyle = '#1d4ed8';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(point.x - 7, point.y);
+        ctx.lineTo(point.x + 7, point.y);
+        ctx.moveTo(point.x, point.y - 7);
+        ctx.lineTo(point.x, point.y + 7);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
       function drawSelection(ctx, page) {
         const backgroundItem = actions.selectedBackgroundItem();
         if (backgroundItem) {
@@ -332,13 +421,14 @@
         const element = actions.selectedElement();
         if (!element) return;
         const bounds = renderer.elementBounds(state.project, page, element);
+        const imageBox = element.type === 'image' ? renderer.elementVisibleBox(element) : null;
     
         ctx.save();
         ctx.strokeStyle = '#2563eb';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
         if (element.type === 'image' || element.type === 'shape') {
-          const corners = renderer.elementCorners(element);
+          const corners = renderer.elementCorners(imageBox || element);
           ctx.beginPath();
           corners.forEach(function (corner, index) {
             const point = screenFromPage(corner.x, corner.y);
@@ -356,13 +446,22 @@
           drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
         });
         if (element.type === 'image' || element.type === 'shape') {
-          const rp = rotateHandlePoint(element);
+          const rp = rotateHandlePoint(imageBox || element);
           drawRotateHandle(ctx, rp);
           if (surface.drag && surface.drag.type === 'rotate' && !surface.drag.background) {
             drawRotateBadge(ctx, rp, surface.drag.liveAngle || 0);
+            drawPivotCross(ctx, surface.drag.center);
           }
         }
         ctx.restore();
+        if (element.type === 'image') {
+          const img = element.assetId ? L.assets.getCachedImage(element.assetId) : null;
+          const natural = img ? { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height } : null;
+          if (natural) {
+            drawCropGuides(ctx, { x: element.x, y: element.y, width: element.width, height: element.height },
+              natural, element.crop, element.rotation);
+          }
+        }
     
         if (element.type === 'category') drawTableDividers(ctx, page, element);
       }
@@ -370,13 +469,12 @@
       function drawBackgroundSelection(ctx, item) {
         const bounds = actions.backgroundItemBounds(item);
         if (!(bounds.width > 0) || !(bounds.height > 0)) return;
-        const box = {
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
-          rotation: item.rotation
-        };
+        const img = item.kind !== 'shape' && item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+        const box = item.kind === 'shape'
+          ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: item.rotation }
+          : (renderer.backgroundVisibleBox(state.project.pageSize, item, img) || {
+            x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: item.rotation
+          });
         const corners = renderer.elementCorners(box);
         ctx.save();
         ctx.strokeStyle = '#2563eb';
@@ -397,8 +495,14 @@
         drawRotateHandle(ctx, rp);
         if (surface.drag && surface.drag.type === 'rotate' && surface.drag.background) {
           drawRotateBadge(ctx, rp, surface.drag.liveAngle || 0);
+          drawPivotCross(ctx, surface.drag.center);
         }
         ctx.restore();
+        if (item.kind !== 'shape' && img && model.hasCrop(item)) {
+          const frame = renderer.backgroundImageRect(state.project.pageSize, item, img);
+          const natural = { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
+          drawCropGuides(ctx, frame, natural, item.crop, item.rotation);
+        }
       }
     
       function drawTableDividers(ctx, page, element) {
@@ -441,13 +545,14 @@
         const backgroundItem = actions.selectedBackgroundItem();
         if (backgroundItem) {
           const bounds = actions.backgroundItemBounds(backgroundItem);
-          const box = {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-            rotation: backgroundItem.rotation
-          };
+          const img = backgroundItem.kind !== 'shape' && backgroundItem.assetId
+            ? L.assets.getCachedImage(backgroundItem.assetId)
+            : null;
+          const box = backgroundItem.kind === 'shape'
+            ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: backgroundItem.rotation }
+            : (renderer.backgroundVisibleBox(state.project.pageSize, backgroundItem, img) || {
+              x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: backgroundItem.rotation
+            });
           const rpBg = rotateHandlePoint(box);
           if (rpBg && Math.abs(screenX - rpBg.handle.x) <= ROTATE_HANDLE_HIT && Math.abs(screenY - rpBg.handle.y) <= ROTATE_HANDLE_HIT) {
             return { type: 'rotate-background', item: backgroundItem, image: backgroundItem, cursor: ROTATE_CURSOR };

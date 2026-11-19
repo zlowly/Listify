@@ -69,6 +69,70 @@
     '</div>';
   }
 
+  /* 图片裁剪十字：上(1,2) 左(2,1) 右(2,3) 下(3,2)，单位原图像素。
+     标题已移到上方，数值恢复 72px 档位，四位数完整可见。 */
+  function cropCross(crop, prefix, disabled) {
+    const item = function (side) {
+      return '<input id="' + prefix + '-crop-' + side + '" class="input num-wide cross-' + side +
+        '" type="number" min="0" max="20000" step="1" data-ctrl-step="10" value="' + esc(crop[side]) + '"' +
+        (disabled ? ' disabled' : '') + '>';
+    };
+    return '<div class="margin-cross crop-cross">' +
+      item('top') + item('left') + item('right') +
+      '<span class="cross-page"></span>' +
+      item('bottom') +
+    '</div>';
+  }
+
+  function cropFields(prefix, item, frame) {
+    const crop = model.cropValues(item);
+    const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+    const natural = img
+      ? { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height }
+      : null;
+    const covered = prefix === 'prop-bg' &&
+      !model.canEditPageBackground(L.app.state.project, L.app.currentPage());
+    const disabled = !natural || covered;
+    const visible = natural ? model.visibleRect(frame, natural, crop) : null;
+    const summary = natural
+      ? '原图 ' + Math.round(natural.width) + '×' + Math.round(natural.height) +
+        ' · 可见 ' + Math.round(visible.width) + '×' + Math.round(visible.height)
+      : '原图尺寸加载后可用';
+    return '<div class="crop-fields">' +
+      '<div class="crop-heading"><span>裁剪（原图像素）</span>' +
+        helpTip('四边按原图像素裁剪，调小或归零会让被裁掉的像素在原位重新出现。') + '</div>' +
+      cropCross(crop, prefix, disabled) +
+      '<p class="hint" id="' + prefix + '-crop-summary">' + esc(summary) + '</p>' +
+      '<div class="inline-actions"><button id="' + prefix + '-crop-reset" class="btn btn-sm"' +
+        (disabled || !model.hasCrop(item) ? ' disabled' : '') + '>重置裁剪</button></div>' +
+      '</div>';
+  }
+
+  function bindCropFields(prefix, setSide, reset) {
+    model.CROP_SIDES.forEach(function (side) {
+      bind(prefix + '-crop-' + side, 'change', function () {
+        setSide(side, Number(valueOf(prefix + '-crop-' + side)) || 0);
+      });
+    });
+    bind(prefix + '-crop-reset', 'click', reset);
+  }
+
+  ui.updateCropSummary = function (prefix, item, frame) {
+    const target = document.getElementById(prefix + '-crop-summary');
+    if (!target) return;
+    const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+    const natural = img
+      ? { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height }
+      : null;
+    if (!natural) {
+      target.textContent = '原图尺寸加载后可用';
+      return;
+    }
+    const visible = model.visibleRect(frame, natural, model.cropValues(item));
+    target.textContent = '原图 ' + Math.round(natural.width) + '×' + Math.round(natural.height) +
+      ' · 可见 ' + Math.round(visible.width) + '×' + Math.round(visible.height);
+  };
+
   /* 重渲染前后捕获/恢复面板内聚焦控件（含光标）：点数值箭头改值会触发重渲染，
      若不恢复，聚焦节点被 innerHTML 销毁后焦点丢失，蓝色焦点边框随之消失 */
   function capturePanelFocus() {
@@ -307,12 +371,17 @@
 
   /* 高级图片效果字段：背景图与自由图片共用同一组名字、范围与展示格式。
      渐隐参数比照 Kdenlive 的 Alpha Gradient：位置、转场宽度、角度、顶部/底部透明度。 */
-  function imageEffectFields(prefix, item) {
+  function imageEffectFields(prefix, item, frame) {
     const brightness = effectNumber(item.brightness, 1);
     const hue = effectNumber(item.hue, 0);
     const fade = model.fadeValues(item);
     const fadeDisabled = fade.mode === 'off';
     const widthLabel = fade.mode === 'double' ? '不透明区宽度' : '转场宽度';
+    const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+    const frameRect = frame || (prefix === 'prop-bg' && img
+      ? renderer.backgroundImageRect(L.app.state.project.pageSize, item, img)
+      : { x: item.x, y: item.y, width: item.width, height: item.height });
+    const crop = prefix === 'prop-shape' ? '' : cropFields(prefix, item, frameRect);
     return field('亮度', rangeInput(prefix + '-brightness', brightness,
         model.BRIGHTNESS_MIN, model.BRIGHTNESS_MAX, 0.01, percentLabel)) +
       field('色相', rangeInput(prefix + '-hue', hue, model.HUE_MIN, model.HUE_MAX, 1, degreeLabel)) +
@@ -330,7 +399,8 @@
       field('顶部透明度', rangeInput(prefix + '-fade-top', fade.top,
         model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, 0.01, percentLabel, fadeDisabled)) +
       field('底部透明度', rangeInput(prefix + '-fade-bottom', fade.bottom,
-        model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, 0.01, percentLabel, fadeDisabled));
+        model.FADE_TRANSPARENCY_MIN, model.FADE_TRANSPARENCY_MAX, 0.01, percentLabel, fadeDisabled)) +
+      crop;
   }
 
   function panelFadeDefaults(prefix) {
@@ -407,6 +477,12 @@
       return asset.id === image.assetId;
     })) : null;
     const custom = image.fit === 'none';
+    const loaded = image.assetId ? L.assets.getCachedImage(image.assetId) : null;
+    const natural = loaded
+      ? { width: loaded.naturalWidth || loaded.width, height: loaded.naturalHeight || loaded.height }
+      : null;
+    const frameRect = renderer.backgroundImageRect(project.pageSize, image, loaded);
+    const visibleRect = natural ? model.visibleRect(frameRect, natural, image.crop) : frameRect;
     ui.els.propertyPanel.innerHTML =
       propGroup('info', '背景条目 ' + (index + 1) + ' / ' + items.length,
         '<p class="hint">所属背景：第 ' + pageNumber(project, page) + ' 页' +
@@ -426,8 +502,8 @@
               'Y', numberInput('prop-bg-y', Math.round(image.y), -20000, 20000, 1, false, 10)
             ) +
             fieldPair(
-              '宽', numberInput('prop-bg-w', Math.round(image.width), 1, 20000, 1, false, 10),
-              '高', numberInput('prop-bg-h', Math.round(image.height), 1, 20000, 1, false, 10)
+              '宽', numberInput('prop-bg-w', Math.round(visibleRect.width), 1, 20000, 1, false, 10),
+              '高', numberInput('prop-bg-h', Math.round(visibleRect.height), 1, 20000, 1, false, 10)
             ) +
             field('旋转', numberInput('prop-bg-rotation', Math.round(Number(image.rotation) || 0), -360, 360, 1, false, 45) + '<span class="unit">°</span>') +
             field('', '<label class="check-row"><input id="prop-bg-ratio" type="checkbox"' +
@@ -438,7 +514,7 @@
         field('透明度', rangeInput('prop-bg-opacity', image.opacity == null ? 1 : image.opacity, 0, 1, 0.01)) +
         field('边缘模糊', rangeInput('prop-bg-blur', image.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
         (ui.advancedImage ? imageEffectFields('prop-bg', image) : ''),
-        { right: advancedToggle(model.hasImageEffects(image)) }) +
+        { right: advancedToggle(model.hasImageEffects(image), model.hasCrop(image)) }) +
       propGroup('actions', '',
         '<div class="inline-actions">' +
           '<button id="prop-bg-move-up" class="btn btn-sm"' + (index >= items.length - 1 ? ' disabled' : '') + '>上移一层</button>' +
@@ -450,8 +526,8 @@
     bind('prop-bg-fit', 'change', function () { L.app.setBackgroundImageFit(image.id, valueOf('prop-bg-fit')); });
     bind('prop-bg-x', 'change', function () { L.app.setBackgroundImageValue(image.id, 'x', Number(valueOf('prop-bg-x')) || 0); });
     bind('prop-bg-y', 'change', function () { L.app.setBackgroundImageValue(image.id, 'y', Number(valueOf('prop-bg-y')) || 0); });
-    bind('prop-bg-w', 'change', function () { L.app.setBackgroundImageValue(image.id, 'width', Math.max(1, Number(valueOf('prop-bg-w')) || 1)); });
-    bind('prop-bg-h', 'change', function () { L.app.setBackgroundImageValue(image.id, 'height', Math.max(1, Number(valueOf('prop-bg-h')) || 1)); });
+    bind('prop-bg-w', 'change', function () { L.app.setBackgroundImageVisibleSize(image.id, 'width', Number(valueOf('prop-bg-w')) || 1); });
+    bind('prop-bg-h', 'change', function () { L.app.setBackgroundImageVisibleSize(image.id, 'height', Number(valueOf('prop-bg-h')) || 1); });
     bind('prop-bg-rotation', 'change', function () { L.app.setBackgroundImageValue(image.id, 'rotation', Number(valueOf('prop-bg-rotation')) || 0); });
     bind('prop-bg-ratio', 'change', function () {
       const input = document.getElementById('prop-bg-ratio');
@@ -474,6 +550,9 @@
       bindImageEffectFields('prop-bg', function (key, value) {
         L.app.setBackgroundImageValue(image.id, key, value);
       });
+      bindCropFields('prop-bg',
+        function (side, value) { L.app.setBackgroundImageCrop(image.id, side, value); },
+        function () { L.app.resetBackgroundImageCrop(image.id); });
     }
     bind('prop-bg-restore', 'click', function () { L.app.restoreBackgroundImageFit(image.id); });
     bind('prop-bg-move-up', 'click', function () { L.app.moveBackgroundItem(image.id, 1); });
@@ -1090,6 +1169,12 @@
     const meta = L.assets.getMeta(element.assetId) || L.app.state.project.assets.find(function (asset) {
       return asset.id === element.assetId;
     });
+    const loaded = element.assetId ? L.assets.getCachedImage(element.assetId) : null;
+    const natural = loaded
+      ? { width: loaded.naturalWidth || loaded.width, height: loaded.naturalHeight || loaded.height }
+      : null;
+    const frameRect = { x: element.x, y: element.y, width: element.width, height: element.height };
+    const visibleRect = natural ? model.visibleRect(frameRect, natural, element.crop) : frameRect;
     ui.els.propertyPanel.innerHTML =
       propGroup('info', '自由图片',
         '<p class="hint">当前图片：' + esc(meta ? meta.name : (element.assetId || '未选择')) + '</p>' +
@@ -1100,8 +1185,8 @@
           '位置 Y', numberInput('prop-img-y', Math.round(element.y), -5000, 20000, 1, false, 10)
         ) +
         fieldPair(
-          '宽度', numberInput('prop-img-w', Math.round(element.width), 40, 5000, 1, false, 10),
-          '高度', numberInput('prop-img-h', Math.round(element.height), 40, 5000, 1, false, 10)
+          '宽度', numberInput('prop-img-w', Math.round(visibleRect.width), 40, 5000, 1, false, 10),
+          '高度', numberInput('prop-img-h', Math.round(visibleRect.height), 40, 5000, 1, false, 10)
         )) +
       propGroup('appearance', '外观',
         '<div class="field field-compact"><label>比例</label><div class="control">' +
@@ -1113,7 +1198,7 @@
         field('透明度', rangeInput('prop-img-opacity', element.opacity == null ? 1 : element.opacity, 0, 1, 0.01)) +
         field('模糊', rangeInput('prop-img-blur', element.blur || 0, 0, 40, 1) + '<span class="unit">px</span>') +
         (ui.advancedImage ? imageEffectFields('prop-img', element) : ''),
-        { right: advancedToggle(model.hasImageEffects(element)) }) +
+        { right: advancedToggle(model.hasImageEffects(element), model.hasCrop(element)) }) +
       propGroup('actions', '', '<button id="prop-delete-block" class="btn btn-danger btn-sm">删除图片</button>', { plain: true });
 
     bind('prop-img-replace', 'click', function () { L.app.pickFreeImage(element.id); });
@@ -1124,10 +1209,10 @@
       L.app.setElementField('y', Number(valueOf('prop-img-y')) || 0);
     });
     bind('prop-img-w', 'input', function () {
-      L.app.setElementField('width', Math.max(40, Number(valueOf('prop-img-w')) || 40));
+      L.app.setElementVisibleSize('width', Math.max(40, Number(valueOf('prop-img-w')) || 40));
     });
     bind('prop-img-h', 'input', function () {
-      L.app.setElementField('height', Math.max(40, Number(valueOf('prop-img-h')) || 40));
+      L.app.setElementVisibleSize('height', Math.max(40, Number(valueOf('prop-img-h')) || 40));
     });
     bind('prop-img-ratio', 'change', function () {
       const input = document.getElementById('prop-img-ratio');
@@ -1154,6 +1239,9 @@
       bindImageEffectFields('prop-img', function (key, value) {
         L.app.setElementField(key, value);
       });
+      bindCropFields('prop-img',
+        function (side, value) { L.app.setElementCrop(side, value); },
+        function () { L.app.resetElementCrop(); });
     }
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
   }

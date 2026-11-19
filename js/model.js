@@ -99,6 +99,8 @@
     fadeBottom: 1
   };
   const DEFAULT_TABLE_MARGINS = { top: 0, right: 0, bottom: 0, left: 0 };
+  const CROP_SIDES = ['top', 'right', 'bottom', 'left'];
+  const DEFAULT_CROP = { top: 0, right: 0, bottom: 0, left: 0 };
 
   let seq = 0;
   function uid(prefix) {
@@ -108,6 +110,124 @@
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  /* ---------- 图片裁剪 ---------- */
+
+  // 裁剪值属于图片条目：四边原图像素，缺省 0。读取时只做安全归一，
+  // 越界合计交给 clampCrop 按原图尺寸夹取，避免渲染出空白图片。
+  function cropValues(item) {
+    const source = item && item.crop;
+    const result = { top: 0, right: 0, bottom: 0, left: 0 };
+    if (!source || typeof source !== 'object') return result;
+    CROP_SIDES.forEach(function (side) {
+      const value = Number(source[side]);
+      result[side] = Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+    });
+    return result;
+  }
+
+  function hasCrop(item) {
+    const crop = cropValues(item);
+    return crop.top > 0 || crop.right > 0 || crop.bottom > 0 || crop.left > 0;
+  }
+
+  function cropSignature(item) {
+    const crop = cropValues(item);
+    return crop.top + '|' + crop.right + '|' + crop.bottom + '|' + crop.left;
+  }
+
+  function clampCrop(crop, natural) {
+    const result = cropValues({ crop: crop });
+    const naturalWidth = Number(natural && natural.width) || 0;
+    const naturalHeight = Number(natural && natural.height) || 0;
+    if (!(naturalWidth > 0) || !(naturalHeight > 0)) return result;
+    function fitPair(first, second, max) {
+      const total = first + second;
+      if (total <= max) return [first, second];
+      if (total <= 0 || max <= 0) return [0, 0];
+      const scaledFirst = Math.min(max, Math.floor(first * max / total));
+      return [scaledFirst, max - scaledFirst];
+    }
+    const horizontal = fitPair(result.left, result.right, Math.max(0, Math.floor(naturalWidth) - 1));
+    const vertical = fitPair(result.top, result.bottom, Math.max(0, Math.floor(naturalHeight) - 1));
+    result.left = horizontal[0];
+    result.right = horizontal[1];
+    result.top = vertical[0];
+    result.bottom = vertical[1];
+    return result;
+  }
+
+  // 单边编辑：只夹取当前边，保留对边与其它方向，适合面板逐项输入。
+  function setCropSide(crop, side, value, natural) {
+    const result = cropValues({ crop: crop });
+    if (CROP_SIDES.indexOf(side) < 0) return result;
+    const number = Number(value);
+    const next = Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+    const horizontal = side === 'left' || side === 'right';
+    const opposite = side === 'left' ? 'right' : (side === 'right' ? 'left' : (side === 'top' ? 'bottom' : 'top'));
+    const dimension = horizontal
+      ? Number(natural && natural.width) || 0
+      : Number(natural && natural.height) || 0;
+    const max = dimension > 0
+      ? Math.max(0, Math.floor(dimension) - 1 - result[opposite])
+      : next;
+    result[side] = Math.min(next, max);
+    return result;
+  }
+
+  // 完整框 -> 可见矩形：完整框始终映射整张原图，裁剪只内缩可见区域。
+  function visibleRect(frame, natural, crop) {
+    if (!frame) return { x: 0, y: 0, width: 0, height: 0 };
+    const naturalWidth = Number(natural && natural.width) || 0;
+    const naturalHeight = Number(natural && natural.height) || 0;
+    if (!(naturalWidth > 0) || !(naturalHeight > 0)) {
+      return {
+        x: Number(frame.x) || 0,
+        y: Number(frame.y) || 0,
+        width: Number(frame.width) || 0,
+        height: Number(frame.height) || 0
+      };
+    }
+    const values = clampCrop(crop, natural);
+    const scaleX = (Number(frame.width) || 0) / naturalWidth;
+    const scaleY = (Number(frame.height) || 0) / naturalHeight;
+    return {
+      x: (Number(frame.x) || 0) + values.left * scaleX,
+      y: (Number(frame.y) || 0) + values.top * scaleY,
+      width: Math.max(0, naturalWidth - values.left - values.right) * scaleX,
+      height: Math.max(0, naturalHeight - values.top - values.bottom) * scaleY
+    };
+  }
+
+  // 可见矩形 -> 完整框：交互只操作可见矩形，写回模型前统一换算。
+  function frameRectFromVisible(visible, natural, crop) {
+    const naturalWidth = Math.max(1, Number(natural && natural.width) || 1);
+    const naturalHeight = Math.max(1, Number(natural && natural.height) || 1);
+    const values = clampCrop(crop, natural);
+    const sourceWidth = Math.max(1, naturalWidth - values.left - values.right);
+    const sourceHeight = Math.max(1, naturalHeight - values.top - values.bottom);
+    const scaleX = (Number(visible.width) || 0) / sourceWidth;
+    const scaleY = (Number(visible.height) || 0) / sourceHeight;
+    return {
+      x: (Number(visible.x) || 0) - values.left * scaleX,
+      y: (Number(visible.y) || 0) - values.top * scaleY,
+      width: naturalWidth * scaleX,
+      height: naturalHeight * scaleY
+    };
+  }
+
+  function visibleAspect(natural, crop) {
+    const naturalWidth = Math.max(1, Number(natural && natural.width) || 1);
+    const naturalHeight = Math.max(1, Number(natural && natural.height) || 1);
+    const values = clampCrop(crop, natural);
+    return Math.max(0, naturalWidth - values.left - values.right) /
+      Math.max(1, naturalHeight - values.top - values.bottom);
+  }
+
+  function resetCrop(item) {
+    if (!item) return;
+    item.crop = { top: 0, right: 0, bottom: 0, left: 0 };
   }
 
   /* ---------- 图片调色与渐隐 ---------- */
@@ -1132,6 +1252,8 @@
     DEFAULT_BACKGROUND_COLOR: DEFAULT_BACKGROUND_COLOR,
     DEFAULT_BACKGROUND_IMAGE: DEFAULT_BACKGROUND_IMAGE,
     DEFAULT_TABLE_MARGINS: DEFAULT_TABLE_MARGINS,
+    CROP_SIDES: CROP_SIDES,
+    DEFAULT_CROP: DEFAULT_CROP,
     uid: uid,
     clamp: clamp,
     matchPageSizePreset: matchPageSizePreset,
@@ -1168,6 +1290,15 @@
     createImageElement: createImageElement,
     rotationRadians: rotationRadians,
     rotateVector: rotateVector,
+    cropValues: cropValues,
+    hasCrop: hasCrop,
+    cropSignature: cropSignature,
+    clampCrop: clampCrop,
+    setCropSide: setCropSide,
+    visibleRect: visibleRect,
+    frameRectFromVisible: frameRectFromVisible,
+    visibleAspect: visibleAspect,
+    resetCrop: resetCrop,
     hasImageEffects: hasImageEffects,
     fadeDefaults: fadeDefaults,
     fadeValues: fadeValues,

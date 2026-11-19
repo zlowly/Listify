@@ -28,7 +28,9 @@
           if (element.type === 'shape') {
             return shape.shapeContains(element, local.x, local.y) ? { element: element, bounds: bounds } : null;
           }
-          if (Math.abs(local.x) > bounds.width / 2 || Math.abs(local.y) > bounds.height / 2) return null;
+          const visible = renderer.elementVisibleLocalRect(element);
+          if (Math.abs(local.x - visible.x) > visible.width / 2 ||
+              Math.abs(local.y - visible.y) > visible.height / 2) return null;
           return { element: element, bounds: bounds };
         }
         if (x < bounds.x || y < bounds.y || x > bounds.x + bounds.width || y > bounds.y + bounds.height) return null;
@@ -356,6 +358,18 @@
         }
       }
     
+      function frameFromVisible(item, visible) {
+        if (!item || item.kind === 'shape') return visible;
+        const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+        if (!img) return visible;
+        const natural = {
+          width: img.naturalWidth || img.width,
+          height: img.naturalHeight || img.height
+        };
+        if (!(natural.width > 0) || !(natural.height > 0)) return visible;
+        return model.frameRectFromVisible(visible, natural, item.crop);
+      }
+
       function resizeDrag(dx, dy) {
         if (surface.drag.background) {
           const item = surface.drag.image;
@@ -368,10 +382,11 @@
             isShape ? false : item.keepRatio !== false,
             isShape ? 1 : undefined
           );
-          item.x = Math.round(next.x);
-          item.y = Math.round(next.y);
-          item.width = Math.round(next.width);
-          item.height = Math.round(next.height);
+          const frame = frameFromVisible(item, next);
+          item.x = Math.round(frame.x);
+          item.y = Math.round(frame.y);
+          item.width = Math.round(frame.width);
+          item.height = Math.round(frame.height);
           if (isShape) shape.clampShape(item);
           return;
         }
@@ -387,10 +402,11 @@
             isShape ? false : element.keepRatio !== false,
             isShape ? 1 : undefined
           );
-          element.x = Math.round(next.x);
-          element.y = Math.round(next.y);
-          element.width = Math.round(next.width);
-          element.height = Math.round(next.height);
+          const frame = isShape ? next : frameFromVisible(element, next);
+          element.x = Math.round(frame.x);
+          element.y = Math.round(frame.y);
+          element.width = Math.round(frame.width);
+          element.height = Math.round(frame.height);
           if (isShape) shape.clampShape(element);
           return;
         }

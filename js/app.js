@@ -203,7 +203,8 @@ const viewport = {
       return { x: item.x, y: item.y, width: item.width, height: item.height };
     }
     const loaded = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
-    return renderer.backgroundImageRect(state.project.pageSize, item, loaded);
+    if (!loaded) return renderer.backgroundImageRect(state.project.pageSize, item, null);
+    return renderer.backgroundVisibleRect(state.project.pageSize, item, loaded);
   }
 
   function backgroundImageBounds(image) {
@@ -695,6 +696,109 @@ const viewport = {
     changed({ property: false });
   }
 
+  function cachedNatural(assetId) {
+    const image = assetId ? L.assets.getCachedImage(assetId) : null;
+    if (!image) return null;
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    return width > 0 && height > 0 ? { width: width, height: height } : null;
+  }
+
+  function setElementCrop(side, value) {
+    const element = selectedElement();
+    if (!element || element.type !== 'image') return;
+    const natural = cachedNatural(element.assetId);
+    if (!natural) return;
+    pushUndo('裁剪图片');
+    element.crop = model.setCropSide(element.crop, side, value, natural);
+    ui.renderAll();
+  }
+
+  function resetElementCrop() {
+    const element = selectedElement();
+    if (!element || element.type !== 'image') return;
+    pushUndo('重置裁剪');
+    model.resetCrop(element);
+    ui.renderAll();
+  }
+
+  function setElementVisibleSize(field, value) {
+    const element = selectedElement();
+    if (!element || element.type !== 'image' || (field !== 'width' && field !== 'height')) return;
+    const natural = cachedNatural(element.assetId);
+    const next = Math.max(1, Number(value) || 0);
+    if (!natural) {
+      element[field] = Math.round(next);
+    } else {
+      const frame = { x: element.x, y: element.y, width: element.width, height: element.height };
+      const visible = model.visibleRect(frame, natural, element.crop);
+      visible[field] = next;
+      const nextFrame = model.frameRectFromVisible(visible, natural, element.crop);
+      element[field] = nextFrame[field];
+    }
+    changed({ property: false });
+    if (ui.updateCropSummary) {
+      ui.updateCropSummary('prop-img', element, {
+        x: element.x, y: element.y, width: element.width, height: element.height
+      });
+    }
+  }
+
+  function backgroundImageById(imageId) {
+    const page = currentPage();
+    if (!page) return null;
+    const items = page.background.items || page.background.images || [];
+    return items.find(function (item) {
+      return item.id === imageId && item.kind !== 'shape';
+    }) || null;
+  }
+
+  function setBackgroundImageCrop(imageId, side, value) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    const image = backgroundImageById(imageId);
+    if (!image) return;
+    const natural = cachedNatural(image.assetId);
+    if (!natural) return;
+    pushUndo('裁剪背景图');
+    image.crop = model.setCropSide(image.crop, side, value, natural);
+    ui.renderAll();
+  }
+
+  function resetBackgroundImageCrop(imageId) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    const image = backgroundImageById(imageId);
+    if (!image) return;
+    pushUndo('重置背景裁剪');
+    model.resetCrop(image);
+    ui.renderAll();
+  }
+
+  function setBackgroundImageVisibleSize(imageId, field, value) {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    const image = backgroundImageById(imageId);
+    if (!image || image.fit !== 'none' || (field !== 'width' && field !== 'height')) return;
+    const natural = cachedNatural(image.assetId);
+    const next = Math.max(1, Number(value) || 0);
+    if (!natural) {
+      image[field] = Math.round(next);
+    } else {
+      const frame = { x: image.x, y: image.y, width: image.width, height: image.height };
+      const visible = model.visibleRect(frame, natural, image.crop);
+      visible[field] = next;
+      const nextFrame = model.frameRectFromVisible(visible, natural, image.crop);
+      image[field] = nextFrame[field];
+    }
+    changed({ property: false, layers: ['bg', 'overlay'] });
+    if (ui.updateCropSummary) {
+      const loaded = image.assetId ? L.assets.getCachedImage(image.assetId) : null;
+      ui.updateCropSummary('prop-bg', image,
+        renderer.backgroundImageRect(state.project.pageSize, image, loaded));
+    }
+  }
+
   function setElementStyleField(field, value) {
     const element = selectedElement();
     if (!element || !element.style || ELEMENT_STYLE_FIELDS.indexOf(field) === -1) return;
@@ -854,6 +958,7 @@ const viewport = {
         const found = findElementAnywhere(targetId);
         if (found && found.element.type === 'image') {
           found.element.assetId = assetId;
+          model.resetCrop(found.element);
           if (found.element.keepRatio !== false) normalizeImageRatio(found.element, image);
           state.selection = { type: 'element', id: found.element.id };
           if (found.page.id !== state.currentPageId) state.currentPageId = found.page.id;
@@ -991,10 +1096,14 @@ const viewport = {
     const naturalWidth = cached.naturalWidth || cached.width;
     const naturalHeight = cached.naturalHeight || cached.height;
     if (!naturalWidth || !naturalHeight) return;
+    const aspect = model.visibleAspect(
+      { width: naturalWidth, height: naturalHeight },
+      element.crop
+    );
     const centerX = element.x + element.width / 2;
     const centerY = element.y + element.height / 2;
     const width = Math.max(40, element.width);
-    const height = Math.max(40, width * naturalHeight / naturalWidth);
+    const height = Math.max(40, aspect > 0 ? width / aspect : naturalHeight);
     element.width = Math.round(width);
     element.height = Math.round(height);
     element.x = Math.round(centerX - element.width / 2);
@@ -1010,13 +1119,15 @@ const viewport = {
 
   function ensureCustomBackgroundImage(image) {
     if (!image || image.fit === 'none') return;
-    const bounds = backgroundImageBounds(image);
     const pageSize = state.project.pageSize;
+    const loaded = image.assetId ? L.assets.getCachedImage(image.assetId) : null;
+    // 烘焙完整框，而不是可见框；裁剪值保持，否则会二次裁剪。
+    const frame = renderer.backgroundImageRect(pageSize, image, loaded);
     image.fit = 'none';
-    image.x = Math.round(bounds.width > 0 ? bounds.x : 0);
-    image.y = Math.round(bounds.height > 0 ? bounds.y : 0);
-    image.width = Math.round(bounds.width > 0 ? bounds.width : pageSize.width);
-    image.height = Math.round(bounds.height > 0 ? bounds.height : pageSize.height);
+    image.x = Math.round(frame.width > 0 ? frame.x : 0);
+    image.y = Math.round(frame.height > 0 ? frame.y : 0);
+    image.width = Math.round(frame.width > 0 ? frame.width : pageSize.width);
+    image.height = Math.round(frame.height > 0 ? frame.height : pageSize.height);
   }
 
 
@@ -1151,6 +1262,12 @@ const viewport = {
     resizeElementWidth: resizeElementWidth,
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
+    setElementCrop: setElementCrop,
+    resetElementCrop: resetElementCrop,
+    setElementVisibleSize: setElementVisibleSize,
+    setBackgroundImageCrop: setBackgroundImageCrop,
+    resetBackgroundImageCrop: resetBackgroundImageCrop,
+    setBackgroundImageVisibleSize: setBackgroundImageVisibleSize,
     setElementStyleField: setElementStyleField,
     setShapeField: setShapeField,
     setShapeKind: setShapeKind,
@@ -1233,6 +1350,12 @@ const viewport = {
     exitShapeTool: exitShapeTool,
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
+    setElementCrop: setElementCrop,
+    resetElementCrop: resetElementCrop,
+    setElementVisibleSize: setElementVisibleSize,
+    setBackgroundImageCrop: setBackgroundImageCrop,
+    resetBackgroundImageCrop: resetBackgroundImageCrop,
+    setBackgroundImageVisibleSize: setBackgroundImageVisibleSize,
     setElementStyleField: setElementStyleField,
     setShapeField: setShapeField,
     setShapeKind: setShapeKind,

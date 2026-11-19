@@ -817,6 +817,22 @@ button { cursor: pointer; }
 }
 .table-card .margin-cross { grid-template-columns: 56px 56px 56px; }
 
+/* 图片裁剪：标题独立成行，数值恢复 72px 档位 */
+.crop-fields { margin-top: 4px; }
+.crop-heading {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+.crop-cross {
+  grid-template-columns: 72px 72px 72px;
+  gap: 8px;
+  justify-content: start;
+  margin-bottom: 4px;
+}
+
 /* 同行双数值字段：第一半沿用主面板 72px 标签节奏，第二半内容右对齐成稳定第二列 */
 .field-row {
   display: grid;

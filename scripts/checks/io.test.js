@@ -258,6 +258,45 @@ test('validateProject：错误可累积（多个问题一并返回）', function
 
 /* ---------- 结构序列化 ---------- */
 
+test('validateProject：裁剪字段缺失合法、非负整数合法', function () {
+  assert.deepEqual(errorsOf(validRaw()), { ok: true, errors: [] });
+  const raw = mutated(function (item) {
+    item.pages[0].elements[2].crop = { top: 10, right: 0, bottom: 10, left: 0 };
+    item.pages[0].background.items[0].crop = { top: 0, right: 5, bottom: 0, left: 5 };
+  });
+  assert.deepEqual(errorsOf(raw), { ok: true, errors: [] });
+});
+
+test('validateProject：负数或非整数裁剪报错', function () {
+  const negative = mutated(function (item) {
+    item.pages[0].elements[2].crop = { top: -1, right: 0, bottom: 0, left: 0 };
+  });
+  assert.equal(errorsOf(negative).ok, false);
+  const fraction = mutated(function (item) {
+    item.pages[0].background.items[0].crop = { top: 1.5, right: 0, bottom: 0, left: 0 };
+  });
+  assert.equal(errorsOf(fraction).ok, false);
+});
+
+test('serializeProjectStructure：图片与背景图导出裁剪字段', function () {
+  const project = model.createDefaultProject();
+  project.assets = [{ id: 'asset-1', name: '封面', mime: 'image/png' }];
+  const page = project.pages[0];
+  page.background.items.push(model.createBackgroundImage('asset-1', 'cover'));
+  page.background.items[0].crop = { top: 1, right: 2, bottom: 3, left: 4 };
+  const element = model.createImageElement(project, 'asset-1', 400, 300);
+  element.crop = { top: 5, right: 6, bottom: 7, left: 8 };
+  page.elements.push(element);
+
+  const structure = plain(io.serializeProjectStructure(project));
+  assert.deepEqual(structure.pages[0].background.items[0].crop,
+    { top: 1, right: 2, bottom: 3, left: 4 });
+  assert.deepEqual(structure.pages[0].elements[0].crop,
+    { top: 5, right: 6, bottom: 7, left: 8 });
+});
+
+/* ---------- 项目结构序列化 ---------- */
+
 test('serializeProjectStructure：导出结构字段与合法项目一致', function () {
   const project = model.createDefaultProject();
   project.playlist.categories = [

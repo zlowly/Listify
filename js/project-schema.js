@@ -49,6 +49,22 @@
     });
   }
 
+  // 裁剪是可选增量：缺失合法，存在则四边必须是非负整数原图像素。
+  function validateCrop(item, label, fail) {
+    if (item.crop === undefined) return;
+    const crop = item.crop;
+    if (!crop || typeof crop !== 'object' || Array.isArray(crop)) {
+      fail(label + '的裁剪无效。');
+      return;
+    }
+    ['top', 'right', 'bottom', 'left'].forEach(function (side) {
+      const value = crop[side];
+      if (value !== undefined && (!isFiniteNumber(value) || value < 0 || !Number.isInteger(value))) {
+        fail(label + '的裁剪无效。');
+      }
+    });
+  }
+
   // 页面背景是 v4/v5 的唯一背景形态；v5 使用有序 items（图片/图形），
   // v1–v4 的旧背景图片列表在迁移时按 kind=image 读入。
   function validatePageBackground(background, label, assetIds, fail, options) {
@@ -114,6 +130,7 @@
       if (item.keepRatio !== undefined && typeof item.keepRatio !== 'boolean') {
         fail(imageLabel + '等比设置无效。');
       }
+      validateCrop(item, imageLabel, fail);
       validateImageEffects(item, imageLabel, fail);
     });
   }
@@ -419,6 +436,7 @@
                   (!isFiniteNumber(element.blur) || element.blur < L.model.BLUR_MIN)) {
                 fail(label + '的模糊值无效。');
               }
+              validateCrop(element, label, fail);
               validateImageEffects(element, label, fail);
             }
             if (!isFiniteNumber(element.opacity) ||
@@ -477,6 +495,7 @@
     image.y = Number(rawImage.y) || 0;
     image.width = Number(rawImage.width) || 0;
     image.height = Number(rawImage.height) || 0;
+    image.crop = L.model.cropValues(rawImage);
     image.rotation = Number(rawImage.rotation) || 0;
     image.keepRatio = rawImage.keepRatio !== false;
     image.opacity = rawImage.opacity == null ? 1 : rawImage.opacity;
