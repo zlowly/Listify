@@ -816,3 +816,82 @@ test('背景模型：全局指针最后设置生效，取消后各页显示自�
   assert.equal(model.effectiveBackground(project, first).color, '#111111');
   assert.equal(model.effectiveBackground(project, second).color, '#222222');
 });
+
+/* ---------- 画布空态判定 ---------- */
+
+test('空态判定：默认项目为空', function () {
+  const project = model.createDefaultProject();
+  assert.equal(model.isPageEmpty(project, project.pages[0]), true);
+});
+
+test('空态判定：背景图片或图形让页面非空', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+
+  page.background.items.push(model.createBackgroundImage('asset-1', 'cover'));
+  assert.equal(model.isPageEmpty(project, page), false);
+
+  page.background.items.length = 0;
+  page.background.items.push(L.shape.createBackgroundShape(10, 10, 100, 80));
+  assert.equal(model.isPageEmpty(project, page), false);
+});
+
+test('空态判定：旧版 images 字段同样计入', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+  page.background = {
+    color: '#ffffff',
+    images: [model.createBackgroundImage('asset-1', 'cover')]
+  };
+  assert.equal(model.isPageEmpty(project, page), false);
+});
+
+test('空态判定：内容元素与歌单分类让页面非空', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+
+  page.elements.push(model.createTextElement(project, '标题'));
+  assert.equal(model.isPageEmpty(project, page), false);
+
+  page.elements.length = 0;
+  project.playlist.categories.push({ name: '分类', songs: [] });
+  assert.equal(model.isPageEmpty(project, page), false);
+});
+
+test('空态判定：全局背景来自含条目页时页面非空', function () {
+  const project = model.createDefaultProject();
+  const source = project.pages[0];
+  const target = model.createPage(model.createPageBackground('#ffffff'));
+  project.pages.push(target);
+  source.background.items.push(model.createBackgroundImage('asset-1', 'cover'));
+
+  model.setGlobalBackgroundPage(project, source);
+  assert.equal(model.isPageEmpty(project, target), false);
+
+  model.clearGlobalBackground(project);
+  assert.equal(model.isPageEmpty(project, target), true);
+});
+
+test('空态判定：全局指针悬空时回退本页背景', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+  project.globalBackgroundPageId = 'page-missing';
+  assert.equal(model.isPageEmpty(project, page), true);
+
+  page.background.items.push(model.createBackgroundImage('asset-1', 'cover'));
+  assert.equal(model.isPageEmpty(project, page), false);
+});
+
+test('空态判定：仅改填充色仍为空，清空背景条目后恢复为空', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+
+  page.background.color = '#123456';
+  assert.equal(model.isPageEmpty(project, page), true);
+
+  page.background.items.push(model.createBackgroundImage('asset-1', 'cover'));
+  assert.equal(model.isPageEmpty(project, page), false);
+
+  page.background = model.createPageBackground();
+  assert.equal(model.isPageEmpty(project, page), true);
+});

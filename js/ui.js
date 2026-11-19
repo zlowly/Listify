@@ -736,8 +736,7 @@
   ui.updateEmptyHint = function () {
     const project = L.app.state.project;
     const page = L.app.currentPage();
-    const empty = project.playlist.categories.length === 0 && (!page || page.elements.length === 0);
-    ui.els.emptyHint.hidden = !empty;
+    ui.els.emptyHint.hidden = !model.isPageEmpty(project, page);
   };
 
   ui.toast = function (message, type) {

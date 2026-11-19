@@ -583,6 +583,19 @@
     return !!page && !!page.background && !isBackgroundCovered(project, page);
   }
 
+  // 画布空态判定：无歌单分类、当前页无内容元素、有效背景也没有条目（图片或图形）。
+  function isPageEmpty(project, page) {
+    if (!project) return true;
+    const categories = project.playlist && project.playlist.categories;
+    const hasCategories = Array.isArray(categories) && categories.length > 0;
+    const hasElements = !!page && Array.isArray(page.elements) && page.elements.length > 0;
+    const background = effectiveBackground(project, page);
+    const items = background && Array.isArray(background.items)
+      ? background.items
+      : (background && Array.isArray(background.images) ? background.images : []);
+    return !hasCategories && !hasElements && items.length === 0;
+  }
+
   function setGlobalBackgroundPage(project, page) {
     if (!project || !page || !Array.isArray(project.pages) ||
         !project.pages.some(function (item) { return item.id === page.id; })) {
@@ -1144,6 +1157,7 @@
     effectiveBackground: effectiveBackground,
     isBackgroundCovered: isBackgroundCovered,
     canEditPageBackground: canEditPageBackground,
+    isPageEmpty: isPageEmpty,
     setGlobalBackgroundPage: setGlobalBackgroundPage,
     clearGlobalBackground: clearGlobalBackground,
     createDefaultProject: createDefaultProject,
