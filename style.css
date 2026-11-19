@@ -414,6 +414,29 @@ button { cursor: pointer; }
   white-space: nowrap;
   font-size: 12px;
 }
+/* 行内身份标识：缩略图与迷你图形都只占既有 22px 图标槽位，不改变行几何。 */
+.layer-icon .layer-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  outline: 1px solid rgba(15, 23, 42, 0.1);
+  outline-offset: -1px;
+}
+.layer-icon .layer-shape {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--shape-color);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+.layer-icon .layer-shape.is-diamond { transform: rotate(45deg); border-radius: 1px; }
+.layer-icon .layer-shape.is-stroke {
+  background: transparent;
+  border: 2px solid var(--shape-color);
+  box-shadow: none;
+}
 .layer-sub { color: var(--muted); font-size: 10px; }
 .layer-bg-row { background: #fbfcfd; }
 .layer-bg-image-row {

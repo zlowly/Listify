@@ -508,16 +508,62 @@
     return null;
   }
 
+  /* ---------- 图层行身份标识 ---------- */
+
+  // 内容层：按模型顺序为图片编号（模型下标 0 在最底层，故编号自底向顶递增）。
+  function elementImageNumbers(elements) {
+    const numbers = new Map();
+    let count = 0;
+    elements.forEach(function (element) {
+      if (element.type !== 'image') return;
+      count += 1;
+      numbers.set(element.id, count);
+    });
+    return numbers;
+  }
+
+  // 背景层：与内容层同一方向编号，只数图片，图形不占号。
+  function backgroundImageNumbers(items) {
+    const numbers = new Map();
+    let count = 0;
+    items.forEach(function (item) {
+      if (item.kind === 'shape') return;
+      count += 1;
+      numbers.set(item.id, count);
+    });
+    return numbers;
+  }
+
+  // 缩略图直接复用资产已有的对象 URL；取不到时返回空串，由调用方回退到通用图标。
+  function layerThumb(assetId) {
+    const url = assetId ? L.assets.getUrl(assetId) : '';
+    if (!url) return '';
+    return '<img class="layer-thumb" src="' + esc(url) + '" alt="" draggable="false">';
+  }
+
+  // 迷你图形只表达形状、填充方式与颜色；不透明度收敛到可辨认下限。
+  function layerShapeMark(item) {
+    const kind = item.shape === 'diamond' ? 'diamond' : 'rect';
+    const mode = item.mode === 'stroke' ? 'stroke' : 'fill';
+    const color = typeof item.color === 'string' && item.color ? item.color : '#333333';
+    const opacity = Number(item.opacity);
+    const alpha = Number.isFinite(opacity) ? Math.min(1, Math.max(0.35, opacity)) : 1;
+    return '<span class="layer-shape is-' + kind + ' is-' + mode + '" style="--shape-color:' +
+      esc(color) + ';opacity:' + alpha + '"></span>';
+  }
+
   ui.renderLayerPanel = function () {
     const project = L.app.state.project;
     const page = L.app.currentPage();
     const selection = L.app.state.selection;
     if (!page) return;
     const rows = [];
+    const imageNumbers = elementImageNumbers(page.elements);
     const elements = page.elements.slice().reverse();
     elements.forEach(function (element, reverseIndex) {
       const realIndex = page.elements.length - 1 - reverseIndex;
       const selected = selection.type === 'element' && selection.id === element.id;
+      const imageNumber = imageNumbers.get(element.id) || 0;
       let icon = '▤';
       let name = '元素';
       let sub = '';
@@ -532,7 +578,7 @@
         name = '文字 · ' + (element.text || '空文字').slice(0, 16);
         sub = '自由文字';
       } else if (element.type === 'image') {
-        icon = '▧';
+        icon = layerThumb(element.assetId) || '▧';
         name = '图片';
         sub = element.rotation ? '旋转 ' + normalizeAngle(element.rotation) + '°' : '自由图片';
         if (model.hasCrop(element)) {
@@ -541,16 +587,17 @@
           cropTitle = '已裁剪：上' + crop.top + ' 右' + crop.right + ' 下' + crop.bottom + ' 左' + crop.left;
         }
       } else if (element.type === 'shape') {
-        icon = element.shape === 'diamond' ? '◇' : '▢';
+        icon = layerShapeMark(element);
         name = '图形 · ' + (element.shape === 'diamond' ? '菱形' : '方形');
         sub = '自由图形';
       }
+      const label = name + (imageNumber ? ' ' + imageNumber : '');
       rows.push('<div class="layer-row' + (selected ? ' selected' : '') +
         '" data-layer-kind="element" data-layer-id="' + esc(element.id) + '">' +
         '<button type="button" class="layer-row-main" draggable="true"' + (cropTitle ? ' title="' + esc(cropTitle) + '"' : '') + ' aria-label="' +
-          esc(name + '，' + sub + '，拖动可调整层级') + '">' +
+          esc(label + '，' + sub + '，拖动可调整层级') + '">' +
         '<span class="layer-icon" aria-hidden="true">' + icon + '</span>' +
-        '<span class="layer-name">' + esc(name) + '<span class="layer-sub"> ' + esc(sub) + '</span></span>' +
+        '<span class="layer-name">' + esc(label) + '<span class="layer-sub"> ' + esc(sub) + '</span></span>' +
         '</button>' +
         '<span class="row-actions">' +
         '<button class="icon-btn" type="button" data-layer-move="' + realIndex + ':-1" title="下移一层" aria-label="下移一层"' +
@@ -577,6 +624,7 @@
       const isSource = !!(source && source.id === page.id);
       const bgSelected = selection.type === 'background';
       const items = background.items || background.images || [];
+      const bgNumbers = backgroundImageNumbers(items);
       const imageCount = items.filter(function (item) { return item.kind !== 'shape'; }).length;
       const shapeCount = items.filter(function (item) { return item.kind === 'shape'; }).length;
       rows.push('<div class="layer-row layer-bg-row' + (bgSelected ? ' selected' : '') +
@@ -596,10 +644,12 @@
         const itemSelected = (selection.type === 'backgroundItem' && selection.itemId === item.id) ||
           (selection.type === 'backgroundImage' && selection.imageId === item.id);
         const isShape = item.kind === 'shape';
-        const icon = isShape ? (item.shape === 'diamond' ? '◇' : '▢') : '▧';
+        const icon = isShape ? layerShapeMark(item) : (layerThumb(item.assetId) || '▧');
         const name = isShape
           ? '图形 · ' + (item.shape === 'diamond' ? '菱形' : '方形')
           : '图片';
+        const number = isShape ? 0 : (bgNumbers.get(item.id) || 0);
+        const label = name + (number ? ' ' + number : '');
         let sub = isShape
           ? '背景图形'
           : (item.fit === 'none' ? '自定义' : fitLabel(item.fit));
@@ -612,9 +662,9 @@
         rows.push('<div class="layer-row layer-bg-image-row' + (itemSelected ? ' selected' : '') +
           '" data-layer-kind="bgItem" data-bg-item="' + esc(item.id) + '">' +
           '<button type="button" class="layer-row-main" draggable="true"' + (cropTitle ? ' title="' + esc(cropTitle) + '"' : '') + ' aria-label="' +
-            esc(name + ' ' + (realIndex + 1) + '，' + sub + '，拖动可调整顺序') + '">' +
+            esc(label + '，' + sub + '，拖动可调整顺序') + '">' +
           '<span class="layer-icon" aria-hidden="true">' + icon + '</span>' +
-          '<span class="layer-name">' + esc(name) + ' ' + (realIndex + 1) +
+          '<span class="layer-name">' + esc(label) +
             '<span class="layer-sub"> ' + esc(sub) + '</span></span>' +
           '</button>' +
           '<span class="row-actions">' +
@@ -626,6 +676,12 @@
       });
     }
     ui.els.layerPanel.innerHTML = rows.join('');
+    /* 缩略图加载失败（对象 URL 失效或解码失败）时退回通用图标，行仍可操作 */
+    ui.els.layerPanel.querySelectorAll('img.layer-thumb').forEach(function (img) {
+      img.addEventListener('error', function () {
+        img.replaceWith('▧');
+      });
+    });
     ui.els.layerPanel.querySelectorAll('.layer-row').forEach(function (row) {
       const kind = row.getAttribute('data-layer-kind');
       const main = row.querySelector('.layer-row-main');

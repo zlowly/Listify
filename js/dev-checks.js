@@ -3,7 +3,8 @@
 
   const L = window.Listify = window.Listify || {};
 
-  // 开发期自检：仅依赖 L.model / L.layout 的公开接口；该文件不进入发布产物。
+  // 开发期自检：纯逻辑断言只依赖 L.model / L.layout 的公开接口；图层行标识一组
+  // 额外读取 L.app 与真实 DOM，应用未启动时跳过。该文件不进入发布产物。
   function devChecks() {
     const model = L.model;
     const {
@@ -360,6 +361,57 @@
     beginFrame();
     const textAfterChange = layoutText(cacheText);
     check('文字布局缓存随内容失效', textAfterChange !== textAfterColor, true);
+
+    /* 图层行身份标识：读取真实 DOM，应用未启动或无当前页时整组跳过 */
+    const app = L.app;
+    const panel = document.getElementById('layer-panel');
+    if (app && app.state && app.state.project && panel) {
+      const page = app.currentPage();
+      const issues = [];
+      if (page) {
+        panel.querySelectorAll('[data-layer-id]').forEach(function (row) {
+          const element = page.elements.find(function (item) {
+            return item.id === row.getAttribute('data-layer-id');
+          });
+          if (!element) return;
+          const icon = row.querySelector('.layer-icon');
+          if (element.type === 'image') {
+            const thumb = icon && icon.querySelector('img.layer-thumb');
+            const url = L.assets.getUrl(element.assetId);
+            if (url && (!thumb || thumb.getAttribute('src') !== url)) {
+              issues.push('图片行缩略图未使用资产 URL：' + element.id);
+            }
+            if (!url && thumb) issues.push('缺失资产仍显示缩略图：' + element.id);
+          }
+          if (element.type === 'shape') {
+            const mark = icon && icon.querySelector('.layer-shape');
+            const color = mark && mark.style.getPropertyValue('--shape-color');
+            if (!mark || color !== element.color) {
+              issues.push('图形行颜色标识不符：' + element.id);
+            }
+          }
+        });
+        (page.background.items || page.background.images || []).forEach(function (item) {
+          const row = panel.querySelector('[data-bg-item="' + item.id + '"]');
+          if (!row) return;
+          const icon = row.querySelector('.layer-icon');
+          if (item.kind === 'shape') {
+            const mark = icon && icon.querySelector('.layer-shape');
+            const color = mark && mark.style.getPropertyValue('--shape-color');
+            if (!mark || color !== item.color) {
+              issues.push('背景图形行颜色标识不符：' + item.id);
+            }
+            return;
+          }
+          const thumb = icon && icon.querySelector('img.layer-thumb');
+          const url = L.assets.getUrl(item.assetId);
+          if (url && (!thumb || thumb.getAttribute('src') !== url)) {
+            issues.push('背景图片行缩略图未使用资产 URL：' + item.id);
+          }
+        });
+      }
+      check('图层行身份标识与模型一致', issues.join('；') || 'ok', 'ok');
+    }
 
     const pass = checks.every(function (item) { return item.pass; });
     if (console && console.table) console.table(checks);
