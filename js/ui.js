@@ -535,10 +535,13 @@
   }
 
   // 缩略图直接复用资产已有的对象 URL；取不到时返回空串，由调用方回退到通用图标。
-  function layerThumb(assetId) {
+  // 色相非零时附带 filter（与画布同一套归一化与格式）；其余效果不烘焙。
+  function layerThumb(assetId, item) {
     const url = assetId ? L.assets.getUrl(assetId) : '';
     if (!url) return '';
-    return '<img class="layer-thumb" src="' + esc(url) + '" alt="" draggable="false">';
+    const filter = L.render.hueFilter(item);
+    return '<img class="layer-thumb" src="' + esc(url) + '" alt="" draggable="false"' +
+      (filter ? ' style="filter:' + esc(filter) + '"' : '') + '>';
   }
 
   // 迷你图形只表达形状、填充方式与颜色；不透明度收敛到可辨认下限。
@@ -578,7 +581,7 @@
         name = '文字 · ' + (element.text || '空文字').slice(0, 16);
         sub = '自由文字';
       } else if (element.type === 'image') {
-        icon = layerThumb(element.assetId) || '▧';
+        icon = layerThumb(element.assetId, element) || '▧';
         name = '图片';
         sub = element.rotation ? '旋转 ' + normalizeAngle(element.rotation) + '°' : '自由图片';
         if (model.hasCrop(element)) {
@@ -644,7 +647,7 @@
         const itemSelected = (selection.type === 'backgroundItem' && selection.itemId === item.id) ||
           (selection.type === 'backgroundImage' && selection.imageId === item.id);
         const isShape = item.kind === 'shape';
-        const icon = isShape ? layerShapeMark(item) : (layerThumb(item.assetId) || '▧');
+        const icon = isShape ? layerShapeMark(item) : (layerThumb(item.assetId, item) || '▧');
         const name = isShape
           ? '图形 · ' + (item.shape === 'diamond' ? '菱形' : '方形')
           : '图片';

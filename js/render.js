@@ -153,6 +153,13 @@
     return parts.length ? parts.join(' ') : 'none';
   }
 
+  // 图层缩略图只反映色相：归一化与滤镜串格式和画布共用，避免两处换算漂移。
+  // 返回空串表示“不做任何着色”，由调用方保持原图外观。
+  function hueFilter(item) {
+    const hue = finiteOr((item || {}).hue, 0);
+    return hue !== 0 ? 'hue-rotate(' + hue + 'deg)' : '';
+  }
+
   // 用 destination-in 把渐变乘进位图 alpha：只改透明度，不改颜色。
   // originX/originY 是位图左上角对应的局部坐标（局部坐标以图片中心为原点），
   // 因此缓存位图与导出掩膜可以共用同一套渐变几何。
@@ -1034,6 +1041,7 @@
     pageOverflow: pageOverflow,
     pageAssets: pageAssets,
     allBackgroundAssets: allBackgroundAssets,
+    hueFilter: hueFilter,
     setBlurCacheFrozen: setBlurCacheFrozen,
     cacheStats: function () {
       return { entries: processedImages.size, pixels: processedImagePixels, frozen: processedCacheFrozen };
