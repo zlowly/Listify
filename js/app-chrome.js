@@ -456,7 +456,7 @@
         ctx.restore();
         if (element.type === 'image') {
           const img = element.assetId ? L.assets.getCachedImage(element.assetId) : null;
-          const natural = img ? { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height } : null;
+          const natural = img ? L.assets.imageSize(img) : null;
           if (natural) {
             drawCropGuides(ctx, { x: element.x, y: element.y, width: element.width, height: element.height },
               natural, element.crop, element.rotation);
@@ -500,7 +500,7 @@
         ctx.restore();
         if (item.kind !== 'shape' && img && model.hasCrop(item)) {
           const frame = renderer.backgroundImageRect(state.project.pageSize, item, img);
-          const natural = { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
+          const natural = L.assets.imageSize(img);
           drawCropGuides(ctx, frame, natural, item.crop, item.rotation);
         }
       }

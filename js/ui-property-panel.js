@@ -84,18 +84,22 @@
     '</div>';
   }
 
+  function formatNaturalSize(natural) {
+    const width = Math.round(natural.width * 10) / 10;
+    const height = Math.round(natural.height * 10) / 10;
+    return width + '×' + height;
+  }
+
   function cropFields(prefix, item, frame) {
     const crop = model.cropValues(item);
     const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
-    const natural = img
-      ? { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height }
-      : null;
+    const natural = img ? L.assets.imageSize(img) : null;
     const covered = prefix === 'prop-bg' &&
       !model.canEditPageBackground(L.app.state.project, L.app.currentPage());
     const disabled = !natural || covered;
     const visible = natural ? model.visibleRect(frame, natural, crop) : null;
     const summary = natural
-      ? '原图 ' + Math.round(natural.width) + '×' + Math.round(natural.height) +
+      ? '原图 ' + formatNaturalSize(natural) +
         ' · 可见 ' + Math.round(visible.width) + '×' + Math.round(visible.height)
       : '原图尺寸加载后可用';
     return '<div class="crop-fields">' +
@@ -121,15 +125,13 @@
     const target = document.getElementById(prefix + '-crop-summary');
     if (!target) return;
     const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
-    const natural = img
-      ? { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height }
-      : null;
+    const natural = img ? L.assets.imageSize(img) : null;
     if (!natural) {
       target.textContent = '原图尺寸加载后可用';
       return;
     }
     const visible = model.visibleRect(frame, natural, model.cropValues(item));
-    target.textContent = '原图 ' + Math.round(natural.width) + '×' + Math.round(natural.height) +
+    target.textContent = '原图 ' + formatNaturalSize(natural) +
       ' · 可见 ' + Math.round(visible.width) + '×' + Math.round(visible.height);
   };
 
@@ -478,9 +480,7 @@
     })) : null;
     const custom = image.fit === 'none';
     const loaded = image.assetId ? L.assets.getCachedImage(image.assetId) : null;
-    const natural = loaded
-      ? { width: loaded.naturalWidth || loaded.width, height: loaded.naturalHeight || loaded.height }
-      : null;
+    const natural = loaded ? L.assets.imageSize(loaded) : null;
     const frameRect = renderer.backgroundImageRect(project.pageSize, image, loaded);
     const visibleRect = natural ? model.visibleRect(frameRect, natural, image.crop) : frameRect;
     ui.els.propertyPanel.innerHTML =
@@ -1170,9 +1170,7 @@
       return asset.id === element.assetId;
     });
     const loaded = element.assetId ? L.assets.getCachedImage(element.assetId) : null;
-    const natural = loaded
-      ? { width: loaded.naturalWidth || loaded.width, height: loaded.naturalHeight || loaded.height }
-      : null;
+    const natural = loaded ? L.assets.imageSize(loaded) : null;
     const frameRect = { x: element.x, y: element.y, width: element.width, height: element.height };
     const visibleRect = natural ? model.visibleRect(frameRect, natural, element.crop) : frameRect;
     ui.els.propertyPanel.innerHTML =

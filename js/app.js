@@ -699,8 +699,9 @@ const viewport = {
   function cachedNatural(assetId) {
     const image = assetId ? L.assets.getCachedImage(assetId) : null;
     if (!image) return null;
-    const width = image.naturalWidth || image.width;
-    const height = image.naturalHeight || image.height;
+    const size = L.assets.imageSize(image);
+    const width = size.width;
+    const height = size.height;
     return width > 0 && height > 0 ? { width: width, height: height } : null;
   }
 
@@ -929,8 +930,9 @@ const viewport = {
   }
 
   function buildFreeImageElement(assetId, image, offset) {
-    const naturalWidth = image.naturalWidth || image.width || 400;
-    const naturalHeight = image.naturalHeight || image.height || 300;
+    const natural = L.assets.imageSize(image);
+    const naturalWidth = natural.width || 400;
+    const naturalHeight = natural.height || 300;
     const maxSize = 480;
     const ratio = Math.min(1, maxSize / Math.max(naturalWidth, naturalHeight));
     const width = Math.max(40, Math.round(naturalWidth * ratio));
@@ -1093,8 +1095,9 @@ const viewport = {
       }
       return;
     }
-    const naturalWidth = cached.naturalWidth || cached.width;
-    const naturalHeight = cached.naturalHeight || cached.height;
+    const natural = L.assets.imageSize(cached);
+    const naturalWidth = natural.width;
+    const naturalHeight = natural.height;
     if (!naturalWidth || !naturalHeight) return;
     const aspect = model.visibleAspect(
       { width: naturalWidth, height: naturalHeight },

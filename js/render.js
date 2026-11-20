@@ -18,7 +18,7 @@
   }
 
   function imageSize(img) {
-    return { width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
+    return L.assets.imageSize(img);
   }
 
   function imageNatural(img) {
@@ -223,8 +223,13 @@
     const cacheContext = canvas.getContext('2d');
     if (!cacheContext) return null;
     const blurScale = Math.min(1, bucketWidth / deviceWidth);
+    const source = L.assets.imageSourceRect(img, null);
+    if (!(source.width > 0) || !(source.height > 0)) return null;
     cacheContext.filter = filterString(effects, blurScale);
-    cacheContext.drawImage(img, 0, 0, bucketWidth, bucketHeight);
+    cacheContext.drawImage(
+      img, source.x, source.y, source.width, source.height,
+      0, 0, bucketWidth, bucketHeight
+    );
     cacheContext.filter = 'none';
     const frame = { x: -width / 2, y: -height / 2, width: width, height: height };
     const visible = model.visibleRect(frame, natural, crop);
@@ -256,13 +261,12 @@
     const visible = model.visibleRect(frame, natural, values);
     if (!(visible.width > 0) || !(visible.height > 0)) return;
     const effects = imageEffects(item);
-    const sourceWidth = Math.max(0, natural.width - values.left - values.right);
-    const sourceHeight = Math.max(0, natural.height - values.top - values.bottom);
+    const source = L.assets.imageSourceRect(img, values);
     // 无效果快速路径：完全不分配离屏画布，保持现有绘制成本。
     if (effects.blur === 0 && !model.hasImageEffects(item)) {
-      if (sourceWidth > 0 && sourceHeight > 0) {
+      if (source.width > 0 && source.height > 0) {
         ctx.drawImage(
-          img, values.left, values.top, sourceWidth, sourceHeight,
+          img, source.x, source.y, source.width, source.height,
           visible.x, visible.y, visible.width, visible.height
         );
       }
@@ -283,9 +287,9 @@
       return;
     }
     ctx.filter = filterString(effects, 1);
-    if (sourceWidth > 0 && sourceHeight > 0) {
+    if (source.width > 0 && source.height > 0) {
       ctx.drawImage(
-        img, values.left, values.top, sourceWidth, sourceHeight,
+        img, source.x, source.y, source.width, source.height,
         visible.x, visible.y, visible.width, visible.height
       );
     }
@@ -311,9 +315,12 @@
     if (!offscreen) return;
     const scaleX = pixelWidth / maskWidth;
     const scaleY = pixelHeight / maskHeight;
+    const source = L.assets.imageSourceRect(img, null);
+    if (!(source.width > 0) || !(source.height > 0)) return;
     offscreen.filter = filterString(effects, 1);
     offscreen.drawImage(
       img,
+      source.x, source.y, source.width, source.height,
       (-width / 2 - originX) * scaleX,
       (-height / 2 - originY) * scaleY,
       width * scaleX,
@@ -330,8 +337,9 @@
   }
 
   function backgroundGeometry(pageSize, img, fit) {
-    const iw = img.naturalWidth || img.width;
-    const ih = img.naturalHeight || img.height;
+    const size = imageSize(img);
+    const iw = size.width;
+    const ih = size.height;
     const pw = pageSize.width;
     const ph = pageSize.height;
     if (!iw || !ih) return { x: 0, y: 0, width: pw, height: ph };

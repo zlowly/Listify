@@ -237,12 +237,24 @@
     L.assets.downloadBlob(blob, '歌单项目.json');
   }
 
-  function loadImageFromBlob(blob) {
+  function loadImageFromBlob(blob, name) {
     return new Promise(function (resolve, reject) {
       const url = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = function () {
-        resolve({ img: img, url: url });
+        L.assets.svgBlobSize(blob, name).then(function (info) {
+          const raster = info ? L.assets.rasterizeSvg(img, info) : null;
+          if (raster) {
+            L.assets.setImageSize(raster.canvas, raster.natural, raster.source);
+            resolve({ img: raster.canvas, url: url });
+            return;
+          }
+          if (info) {
+            const metrics = L.assets.svgImageMetrics(info, img);
+            if (metrics) L.assets.setImageSize(img, metrics.natural, metrics.source);
+          }
+          resolve({ img: img, url: url });
+        });
       };
       img.onerror = function () {
         URL.revokeObjectURL(url);
@@ -268,7 +280,7 @@
         } catch (err) {
           throw new Error('图片资产“' + asset.id + '”损坏：' + err.message);
         }
-        const decoded = await loadImageFromBlob(blob);
+        const decoded = await loadImageFromBlob(blob, asset.name);
         tempBlobs.set(asset.id, blob);
         tempMeta.set(asset.id, {
           id: asset.id,
@@ -407,9 +419,7 @@
               };
             }
             const decoded = tempImages.get(element.assetId);
-            const natural = decoded
-              ? { width: decoded.naturalWidth || decoded.width, height: decoded.naturalHeight || decoded.height }
-              : null;
+            const natural = decoded ? L.assets.imageSize(decoded) : null;
             const rect = L.model.migrateImageRect(element.fit, {
               x: element.x,
               y: element.y,

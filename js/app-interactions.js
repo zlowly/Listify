@@ -362,10 +362,7 @@
         if (!item || item.kind === 'shape') return visible;
         const img = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
         if (!img) return visible;
-        const natural = {
-          width: img.naturalWidth || img.width,
-          height: img.naturalHeight || img.height
-        };
+        const natural = L.assets.imageSize(img);
         if (!(natural.width > 0) || !(natural.height > 0)) return visible;
         return model.frameRectFromVisible(visible, natural, item.crop);
       }
