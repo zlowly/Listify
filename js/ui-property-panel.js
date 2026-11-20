@@ -421,6 +421,8 @@
       const value = clampEffect(valueOf(prefix + '-hue'), model.HUE_MIN, model.HUE_MAX, 0);
       write('hue', value);
       updateRangeLabel(prefix + '-hue', degreeLabel(value));
+      // 色相是唯一会出现在图层缩略图上的效果：属性写入只重绘画布，这里补一次行重建。
+      ui.renderLayerPanel();
     });
     bind(prefix + '-fade-mode', 'change', function () {
       const raw = valueOf(prefix + '-fade-mode');
