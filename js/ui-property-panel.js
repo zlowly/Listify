@@ -333,8 +333,11 @@
           '<button id="prop-bg-copy-from" class="btn btn-sm" type="button">复制背景…</button>' +
           '<button id="prop-bg-clear" class="btn btn-sm" type="button"' + (count ? '' : ' disabled') + '>清空背景</button>' +
         '</div>' +
-        field('全局背景', '<label class="check-row"><input id="prop-bg-global" type="checkbox"' +
-          (isSource ? ' checked' : '') + '> 所有页使用此背景</label>');
+        '<div class="global-bg-row">' +
+          '<label class="check-row"><input id="prop-bg-global" type="checkbox"' +
+            (isSource ? ' checked' : '') + '> 全局背景</label>' +
+          helpTip('所有页使用此背景') +
+        '</div>';
     }
     return propGroup('background', '页面背景', body, { right: badges + helpTip(tip) });
   }

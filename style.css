@@ -476,6 +476,9 @@ button { cursor: pointer; }
 .bg-source-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
 .bg-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; margin-top: 4px; }
 .bg-actions .btn { width: 100%; }
+.global-bg-row { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.global-bg-row .help-tip { margin-left: 0; }
+.prop-group[data-group="background"] .inline-actions + .field { margin-top: 12px; }
 
 /* copy background dialog */
 .bg-copy-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
