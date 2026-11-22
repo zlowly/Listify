@@ -19,7 +19,7 @@
         const page = actions.currentPage();
         if (!page) return null;
         if (!model.canEditPageBackground(state.project, page)) {
-          ui.toast('全局背景生效中，请先取消全局背景或让本页接管。');
+          ui.toast('全局背景生效中，请先取消全局背景。');
           return null;
         }
         return page;

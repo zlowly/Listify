@@ -306,15 +306,11 @@
     let body;
     if (covered) {
       body =
-        '<div class="bg-card">' + preview +
-          '<div class="bg-fields">' +
-            '<p class="bg-source-note">显示第 ' + pageNumber(project, source) + ' 页的全局背景</p>' +
-          '</div>' +
-        '</div>' +
+        '<div class="bg-card">' + preview + '</div>' +
         '<div class="inline-actions">' +
           '<button id="prop-bg-cancel-global" class="btn btn-sm" type="button">取消全局背景</button>' +
         '</div>' +
-        field('全局背景', '<label class="check-row"><input id="prop-bg-global" type="checkbox"> 本页接管</label>');
+        '<p class="bg-source-note bg-global-note">目前全局背景为第 ' + pageNumber(project, source) + ' 页的背景</p>';
     } else {
       body =
         '<div class="bg-card">' + preview +

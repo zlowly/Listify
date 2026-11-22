@@ -478,7 +478,7 @@ button { cursor: pointer; }
 .bg-actions .btn { width: 100%; }
 .global-bg-row { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 .global-bg-row .help-tip { margin-left: 0; }
-.prop-group[data-group="background"] .inline-actions + .field { margin-top: 12px; }
+.bg-global-note { margin-top: 8px; }
 
 /* copy background dialog */
 .bg-copy-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
