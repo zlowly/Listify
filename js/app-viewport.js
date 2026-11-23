@@ -87,14 +87,15 @@
         viewport.width = Math.max(1, surface.scrollEl.clientWidth || 1);
         viewport.height = Math.max(1, surface.scrollEl.clientHeight || 1);
         viewport.dpr = window.devicePixelRatio || 1;
-        viewport.padding = Math.min(72, Math.max(24, Math.min(viewport.width, viewport.height) * 0.08));
+        viewport.paddingX = Math.min(72, Math.max(24, Math.min(viewport.width, viewport.height) * 0.08));
+        viewport.paddingY = 16;
         const chromeLeft = toolbarChromeLeft();
         const availableWidth = Math.max(1, viewport.width - chromeLeft);
         const pageW = Math.max(1, state.project.pageSize.width);
         const pageH = Math.max(1, state.project.pageSize.height);
         viewport.fitScale = Math.max(0.05, Math.min(1.6, Math.min(
-          (availableWidth - viewport.padding * 2 - 1) / pageW,
-          (viewport.height - viewport.padding * 2 - 1) / pageH
+          (availableWidth - viewport.paddingX * 2 - 1) / pageW,
+          (viewport.height - viewport.paddingY * 2) / pageH
         )));
         return true;
       }
@@ -117,12 +118,12 @@
         const pageW = Math.max(1, state.project.pageSize.width);
         const pageH = Math.max(1, state.project.pageSize.height);
         let previousSize = '';
-        for (let pass = 0; pass < 2; pass++) {
+        for (let pass = 0; pass < 3; pass++) {
           measureCanvas();
           const chromeLeft = toolbarChromeLeft();
           const scale = effectiveScale();
-          const contentW = pageW * scale + chromeLeft + viewport.padding * 2;
-          const contentH = pageH * scale + viewport.padding * 2;
+          const contentW = pageW * scale + chromeLeft + viewport.paddingX * 2;
+          const contentH = pageH * scale + viewport.paddingY * 2;
           const stageW = contentW <= viewport.width + 0.01 ? viewport.width : Math.ceil(contentW);
           const stageH = contentH <= viewport.height + 0.01 ? viewport.height : Math.ceil(contentH);
           surface.stageEl.style.width = stageW + 'px';
@@ -131,11 +132,15 @@
           viewport.stageWidth = stageW;
           viewport.stageHeight = stageH;
           viewport.originX = stageW > viewport.width + 0.5
-            ? chromeLeft + viewport.padding
+            ? chromeLeft + viewport.paddingX
             : chromeLeft + (viewport.width - chromeLeft - pageW * scale) / 2;
           viewport.originY = stageH > viewport.height + 0.5
-            ? viewport.padding
+            ? viewport.paddingY
             : (viewport.height - pageH * scale) / 2;
+          // The page canvases start at full page size, so the first measurement can
+          // include transient scrollbars. Apply the computed transform before the
+          // next pass so scrollbars caused by the previous scale are resolved.
+          applyViewTransform();
           // Scrollbars may appear or disappear after the stage resize; measure once
           // more so the origin and offsets use the real visible area.
           const size = surface.scrollEl.clientWidth + 'x' + surface.scrollEl.clientHeight;
@@ -317,6 +322,7 @@
       function fit() {
         viewport.mode = 'fit';
         if (surface.scrollEl) {
+          surface.scrollEl.style.overflow = 'hidden';
           surface.scrollEl.scrollLeft = 0;
           surface.scrollEl.scrollTop = 0;
         }
@@ -356,6 +362,7 @@
         const pageY = (point.y - viewport.offsetY) / previousScale;
         viewport.mode = 'manual';
         viewport.zoom = target;
+        surface.scrollEl.style.overflow = '';
         syncGeometry();
         const maxX = Math.max(0, viewport.stageWidth - viewport.width);
         const maxY = Math.max(0, viewport.stageHeight - viewport.height);
