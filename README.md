@@ -97,7 +97,7 @@ Listify/
 ├── presets/            # 预置素材（6 个分类目录）、manifest.json 配置与 SOURCES.md
 ├── scripts/            # 开发期脚本：预置打包与自产素材生成（见 scripts/README.md）
 ├── samples/            # 示例歌单与测试素材
-├── docs/               # 原始需求文档
+├── docs/               # 需求规范与评审文档
 ├── openspec/           # 能力规范（specs）与已归档变更
 ├── DESIGN.md           # 设计系统与视觉规范
 ├── PRODUCT.md          # 产品定位、用户与约束
@@ -166,7 +166,7 @@ Listify/
 
 ## 文档
 
-- 原始需求：`docs/歌单生成器需求.md`
+- 需求规范：`docs/需求规范.md`（整合自原始需求与能力规范，只描述需求的目的与效果）
 - 能力规范：`openspec/specs/`（导入、分类布局、页面编辑、背景层、PNG 导出、项目持久化、发布构建等）
 - 历史变更：`openspec/changes/archive/`
 - 视觉规范：`DESIGN.md`

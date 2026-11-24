@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Playlist ("歌单") layout generator — a static web app. **Greenfield**: the repo currently holds only the spec, `歌单生成器需求.md`, which is the single source of truth for behavior. Read it before implementing anything.
+Playlist ("歌单") layout generator — a static web app. The consolidated requirements spec is `docs/需求规范.md` (purpose/effect level); `openspec/specs/` holds the detailed capability specifications and remains the source of truth for behavior. Read them before implementing anything.
 
 ## Hard constraints
 

@@ -49,7 +49,7 @@ web
 
 ## Evidence on Hand
 
-- `docs/歌单生成器需求.md`：原始需求，行为的事实来源。
+- `docs/需求规范.md`：整合后的需求规范（目的与效果口径），行为事实来源之一。
 - `openspec/specs/`：六个能力规范（playlist-import、category-layout、page-editor、background-layer、png-export、project-persistence）。
 - `openspec/changes/archive/`：两个已归档变更（初始版本、自动列间距）。
 - `samples/`：编码与重复项测试歌单、21 首测试、背景图。
