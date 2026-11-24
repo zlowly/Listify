@@ -672,6 +672,19 @@ const viewport = {
     changed({ property: false });
   }
 
+  function autoLayoutCategory(element, options) {
+    if (!element || element.type !== 'category') return { ok: false, reason: 'invalid' };
+    const category = model.getCategory(state.project, element.category);
+    const result = layout.arrangeTables(element, category, options);
+    if (!result || !Array.isArray(result.tables) || !result.tables.length) {
+      return { ok: false, reason: 'unsupported' };
+    }
+    pushUndo('自动布局');
+    element.tables = result.tables;
+    changed({ property: false });
+    return { ok: true, result: result };
+  }
+
   function changed(options) {
     const opts = options || {};
     if (opts.property === false) {
@@ -1263,6 +1276,7 @@ const viewport = {
     openPlaylistEditor: openPlaylistEditor,
     setPageSize: setPageSize,
     setMargins: setMargins,
+    autoLayoutCategory: autoLayoutCategory,
     resizeElementWidth: resizeElementWidth,
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
@@ -1345,6 +1359,7 @@ const viewport = {
     },
     setPageSize: setPageSize,
     setMargins: setMargins,
+    autoLayoutCategory: autoLayoutCategory,
     resizeElementWidth: resizeElementWidth,
     addText: addText,
     pickFreeImage: pickFreeImage,

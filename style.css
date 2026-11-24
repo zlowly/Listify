@@ -802,6 +802,18 @@ button { cursor: pointer; }
 .seg button:last-child { border-right: 0; }
 .seg button.active { background: var(--blue-soft); color: var(--blue-dark); font-weight: 600; }
 
+.auto-layout {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+  padding-bottom: 2px;
+}
+.auto-layout-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 .table-card {
   border: 1px solid var(--line);
   border-radius: 6px;

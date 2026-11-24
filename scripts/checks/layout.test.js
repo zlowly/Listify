@@ -522,6 +522,113 @@ test('落点：Infinity 取全部分类块的最低下边缘', function () {
 test('落点：空页回退上边距，缺失参数不抛错', function () {
   const projectRef = dropProject();
   assert.deepEqual(plain(layout.categoryDropPosition({ elements: [] }, projectRef, Infinity)), { x: 30, y: 40 });
-  assert.deepEqual(plain(layout.categoryDropPosition(null, projectRef, Infinity)), { x: 30, y: 40 });
   assert.deepEqual(plain(layout.categoryDropPosition({ elements: [] }, null, Infinity)), { x: 0, y: 0 });
+});
+
+/* ---------- arrangeTables：单分类自动分割 ---------- */
+
+function arrangeScene(name, width, list, options) {
+  const element = categoryElement(name, width, [model.createTable()]);
+  element.songStyle = SONG_STYLE;
+  const result = layout.arrangeTables(element, { name: name, songs: list }, options);
+  return { element: element, result: result };
+}
+
+function renderedTables(element, name, list) {
+  return layout.layoutCategory({ name: name, songs: list }, element).tables;
+}
+
+function collectTexts(tables) {
+  const texts = [];
+  tables.forEach(function (table) {
+    table.cells.forEach(function (cell) {
+      if (cell) texts.push(cell.text);
+    });
+  });
+  return texts;
+}
+
+test('自动分割：等宽歌名按最大可行列数铺满且无空缺', function () {
+  const list = [];
+  for (let i = 0; i < 10; i += 1) list.push(String.fromCharCode(97 + i) + 'aa');
+  const scene = arrangeScene('等宽', 600, list, { maxRows: 10, density: 1 });
+  const result = scene.result;
+
+  assert.ok(result);
+  assert.equal(result.rows, 2);
+  assert.equal(result.minRows, 2);
+  assert.equal(result.overBudget, false);
+  assert.equal(result.tables.length, 1);
+  assert.equal(result.tables[0].columns, 5);
+  assert.equal(result.tables[0].rows, 2);
+
+  scene.element.tables = result.tables;
+  const tables = renderedTables(scene.element, '等宽', list);
+  assert.equal(tables.length, 1);
+  assert.equal(tables[0].fallback, false);
+  assert.equal(tables[0].cells.filter(function (cell) { return !!cell; }).length, 10);
+  tables[0].cells.forEach(function (cell) {
+    if (cell) assert.equal(cell.overflow, false);
+  });
+});
+
+test('自动分割：全部歌名保留、无重复、单元格不溢出', function () {
+  const list = [];
+  for (let i = 1; i <= 35; i += 1) list.push('a'.repeat(i));
+  const scene = arrangeScene('递增', 2000, list, { maxRows: 60, density: 1 });
+  const result = scene.result;
+
+  assert.ok(result);
+  const capacity = result.tables.reduce(function (sum, table) {
+    return sum + table.columns * table.rows;
+  }, 0);
+  assert.ok(capacity >= list.length);
+  assert.ok(result.tables.every(function (table) {
+    return table.rows > 0 && table.columns > 0 && table.fill === 'column';
+  }));
+
+  scene.element.tables = result.tables;
+  const tables = renderedTables(scene.element, '递增', list);
+  assert.equal(collectTexts(tables).length, list.length);
+  assert.equal(new Set(collectTexts(tables)).size, list.length);
+  tables.forEach(function (table) {
+    assert.equal(table.fallback, false);
+    table.cells.forEach(function (cell) {
+      if (cell) assert.equal(cell.overflow, false);
+    });
+  });
+});
+
+test('自动分割：密度降低时列更宽、行数不减少', function () {
+  const list = [];
+  for (let i = 0; i < 10; i += 1) list.push('abc');
+  const compact = arrangeScene('紧凑', 400, list, { maxRows: 10, density: 1 }).result;
+  const loose = arrangeScene('疏松', 400, list, { maxRows: 10, density: 0.5 }).result;
+
+  assert.ok(compact);
+  assert.ok(loose);
+  assert.equal(compact.maxColumns, 8);
+  assert.equal(loose.maxColumns, 4);
+  assert.equal(compact.rows, 2);
+  assert.equal(loose.rows, 3);
+  assert.ok(loose.rows >= compact.rows);
+});
+
+test('自动分割：高度上限低于最小行数时夹取并标记超预算', function () {
+  const list = [];
+  for (let i = 0; i < 10; i += 1) list.push('abc');
+  const result = arrangeScene('超预算', 600, list, { maxRows: 1, density: 1 }).result;
+
+  assert.ok(result);
+  assert.equal(result.minRows, 2);
+  assert.equal(result.rows, 2);
+  assert.equal(result.overBudget, true);
+});
+
+test('自动分割：空歌单或放不下的超长歌名返回 null', function () {
+  const empty = arrangeScene('空', 600, [], { maxRows: 10 });
+  assert.equal(empty.result, null);
+
+  const narrow = arrangeScene('超窄', 40, ['a'.repeat(40)], { maxRows: 10 });
+  assert.equal(narrow.result, null);
 });

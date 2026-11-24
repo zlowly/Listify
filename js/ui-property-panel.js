@@ -6,6 +6,7 @@
 
   const model = L.model;
   const layout = L.layout;
+  const autoLayoutParams = new WeakMap();
   const renderer = L.render;
   const shape = L.shape;
   const esc = ui.esc;
@@ -878,6 +879,7 @@
     bindCategoryStyle('prop-title', element.titleStyle);
     bindCategoryStyle('prop-song', element.songStyle);
     bindAddTable(element, category, ui.els.propertyPanel.querySelector('[data-group="tables"]'));
+    bindAutoLayout(element, category, ui.els.propertyPanel.querySelector('[data-group="tables"]'));
     bind('prop-delete-block', 'click', function () {
       L.app.deleteSelection();
     });
@@ -887,12 +889,79 @@
     });
   }
 
-  /* 表格组内容：全部表格卡片 + 添加表格按钮 */
+  function autoLayoutDefaultRows(element) {
+    const project = L.app.state.project;
+    const content = project.pageSize.height - project.margins.top - project.margins.bottom;
+    const rowHeight = element.songStyle.fontSize * element.songStyle.lineHeight + layout.CELL_PAD_Y * 2;
+    const titleHeight = element.showTitle !== false
+      ? element.titleStyle.fontSize * element.titleStyle.lineHeight + layout.TITLE_GAP
+      : 0;
+    const usable = content - layout.BLOCK_PADDING * 2 - titleHeight;
+    const pageRows = Math.max(1, Math.floor(usable / rowHeight));
+    const current = (element.tables || []).reduce(function (sum, table) {
+      return sum + Math.max(0, Number(table.rows) || 0);
+    }, 0);
+    return current > 0 ? Math.min(current, pageRows) : pageRows;
+  }
+
+  function autoLayoutFields(element) {
+    const remembered = autoLayoutParams.get(element);
+    const maxRows = remembered ? remembered.maxRows : autoLayoutDefaultRows(element);
+    const density = remembered ? remembered.density : 100;
+    return '<div class="auto-layout">' +
+      '<div class="field-row">' +
+        '<div class="field field-a"><label for="prop-auto-rows">最多行数</label>' +
+          '<div class="control"><input id="prop-auto-rows" class="input num-mid" type="number" min="1" max="500" step="1" value="' + maxRows + '"></div></div>' +
+        '<div class="field field-b"><label for="prop-auto-density">密度</label>' +
+          '<div class="control"><input id="prop-auto-density" class="input num-mid" type="number" min="20" max="100" step="5" value="' + density + '"><span class="unit">%</span></div></div>' +
+      '</div>' +
+      '<div class="auto-layout-actions">' +
+        '<button id="prop-auto-layout" class="btn btn-primary btn-sm">自动布局</button>' +
+        helpTip('保留字体、对齐与表格边距，按歌名宽度重新分割表格。密度越高，列数上限越大。') +
+      '</div>' +
+    '</div>';
+  }
+
+  function bindAutoLayout(element, category, group) {
+    bind('prop-auto-layout', 'click', function () {
+      const rowsInput = document.getElementById('prop-auto-rows');
+      const densityInput = document.getElementById('prop-auto-density');
+      const maxRows = Math.max(1, Math.round(Number(rowsInput && rowsInput.value) || 1));
+      const density = Math.max(20, Math.min(100, Math.round(Number(densityInput && densityInput.value) || 100)));
+      autoLayoutParams.set(element, { maxRows: maxRows, density: density });
+      ui.modal.confirm(
+        '自动布局',
+        '将保留字体、对齐与表格边距，但清除当前所有表格的列数、行数、列宽与多余表格，并按歌名重新分割。此操作可撤销。',
+        { confirmLabel: '重新排版' }
+      ).then(function (ok) {
+        if (!ok) return;
+        const outcome = L.app.autoLayoutCategory(element, {
+          maxRows: maxRows,
+          density: density / 100
+        });
+        if (!outcome.ok) {
+          ui.modal.alert('无法自动布局', '该分类暂时无法自动布局：可能存在过长歌名，或分类块宽度不足以容纳任一歌名。');
+          return;
+        }
+        refreshTableGroup(group, element, category);
+        if (outcome.result.overBudget) {
+          ui.toast('已按最少 ' + outcome.result.rows + ' 行排版，超过设定的 ' + maxRows + ' 行。');
+        } else if (outcome.result.simplified) {
+          ui.toast('歌名较多，已按单表简化排版。');
+        } else {
+          ui.toast('已自动布局为 ' + outcome.result.tables.length + ' 张表格。');
+        }
+      });
+    });
+  }
+
+  /* 表格组内容：自动布局入口 + 全部表格卡片 + 添加表格按钮 */
   function tableGroupBody(element) {
     const tables = element.tables;
-    return tables.map(function (table, index) {
-      return tableCard(table, index, index === tables.length - 1);
-    }).join('') +
+    return autoLayoutFields(element) +
+      tables.map(function (table, index) {
+        return tableCard(table, index, index === tables.length - 1);
+      }).join('') +
       '<button id="prop-add-table" class="btn btn-sm">＋ 添加表格</button>';
   }
 
@@ -988,6 +1057,7 @@
       bindTableCard(card, element, category);
     });
     bindAddTable(element, category, group);
+    bindAutoLayout(element, category, group);
     restorePanelFocus(focusState);
   }
 

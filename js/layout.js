@@ -11,6 +11,7 @@
   const MIN_COL_WIDTH = 24;
   const MIN_TABLE_WIDTH = 40;
   const SAFETY = 2;
+  const ARRANGE_DP_LIMIT = 150;
 
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');
@@ -122,6 +123,163 @@
     }).map(function (item) {
       return item.text;
     });
+  }
+
+  function measureWidths(texts, songStyle) {
+    return texts.map(function (text) {
+      return Math.max(MIN_COL_WIDTH, measureText(text, songStyle) + CELL_PAD_X * 2 + SAFETY);
+    });
+  }
+
+  function feasibleBands(widths, start, end, tableWidth, maxColumns) {
+    const length = end - start;
+    const cap = Math.min(length, maxColumns);
+    const list = [];
+    for (let columns = cap; columns >= 1; columns -= 1) {
+      const rows = Math.ceil(length / columns);
+      if (Math.ceil(length / rows) !== columns) continue;
+      let sum = 0;
+      for (let col = 0; col < columns; col += 1) {
+        const last = Math.min(start + (col + 1) * rows - 1, end - 1);
+        if (last < start + col * rows) continue;
+        sum += Math.max(MIN_COL_WIDTH, widths[last]);
+      }
+      if (sum <= tableWidth) list.push({ columns: columns, rows: rows });
+    }
+    return list;
+  }
+
+  function singleBand(widths, tableWidth, maxColumns) {
+    const candidates = feasibleBands(widths, 0, widths.length, tableWidth, maxColumns);
+    if (!candidates.length) return null;
+    const band = candidates[0];
+    return {
+      rows: band.rows,
+      bands: [{ columns: band.columns, rows: band.rows, count: widths.length }],
+      score: band.rows
+    };
+  }
+
+  function solveBands(widths, tableWidth, maxRows, lambda, maxColumns, maxStep, maxSpan) {
+    const count = widths.length;
+    const span = Math.max(1, Math.min(count, maxSpan || count));
+    const best = new Array(count + 1).fill(null);
+    best[0] = { last: Infinity, rows: 0, bands: 0, score: 0, prev: null, band: null };
+    for (let end = 1; end <= count; end += 1) {
+      const floor = Math.max(0, end - span);
+      for (let start = floor; start < end; start += 1) {
+        const previous = best[start];
+        if (!previous) continue;
+        const remaining = maxRows === Infinity ? Infinity : maxRows - previous.rows;
+        if (remaining <= 0) continue;
+        const first = previous.last === Infinity;
+        const upper = first ? maxColumns : Math.min(maxColumns, previous.last);
+        const step = first ? maxColumns : maxStep;
+        const candidates = feasibleBands(widths, start, end, tableWidth, maxColumns);
+        let chosen = null;
+        for (let index = 0; index < candidates.length; index += 1) {
+          const candidate = candidates[index];
+          if (candidate.rows > remaining) break;
+          if (candidate.columns > upper) continue;
+          if (upper - candidate.columns > step) break;
+          chosen = candidate;
+          break;
+        }
+        if (!chosen) continue;
+        const total = previous.rows + chosen.rows;
+        const bands = previous.bands + 1;
+        const score = total + lambda * bands;
+        const current = best[end];
+        if (!current || score < current.score || (score === current.score && total < current.rows)) {
+          best[end] = {
+            last: chosen.columns,
+            rows: total,
+            bands: bands,
+            score: score,
+            prev: previous,
+            band: { columns: chosen.columns, rows: chosen.rows, count: end - start }
+          };
+        }
+      }
+    }
+    const selected = best[count];
+    if (!selected) return null;
+    const bands = [];
+    let cursor = selected;
+    while (cursor && cursor.band) {
+      bands.unshift(cursor.band);
+      cursor = cursor.prev;
+    }
+    return { rows: selected.rows, bands: bands, score: selected.score, last: selected.last };
+  }
+
+  function arrangeTables(element, category, options) {
+    if (!element || !element.songStyle) return null;
+    const songs = category && Array.isArray(category.songs) ? category.songs : [];
+    if (!songs.length) return null;
+    const source = Array.isArray(element.tables) && element.tables[0]
+      ? element.tables[0]
+      : model.createTable();
+    const margins = model.normalizeMargins(source.margins);
+    const tableWidth = Math.max(MIN_TABLE_WIDTH, element.width - margins.left - margins.right);
+    const sorted = sortSongs(songs);
+    const settings = options || {};
+    const density = model.clamp(Number(settings.density) || 1, 0.2, 1);
+    const lambda = Number.isFinite(Number(settings.lambda)) ? Math.max(0, Number(settings.lambda)) : 0.5;
+    const baseColumns = Math.max(1, Math.min(50, Math.round(Number(settings.maxColumns) || 8)));
+    const maxColumns = Math.max(1, Math.min(baseColumns, Math.round(baseColumns * density)));
+    const maxStep = Math.max(0, Math.round(Number(settings.maxStep) || 2));
+    const widths = measureWidths(sorted, element.songStyle);
+    const requested = Number(settings.maxRows);
+    const hasBudget = Number.isFinite(requested) && requested > 0;
+    const budget = hasBudget ? Math.floor(requested) : Infinity;
+    const span = hasBudget
+      ? Math.min(sorted.length, Math.max(1, maxColumns * budget))
+      : sorted.length;
+    let overBudget = false;
+    let simplified = false;
+    let minimal = null;
+    if (sorted.length <= ARRANGE_DP_LIMIT) {
+      minimal = solveBands(widths, tableWidth, budget, 0, maxColumns, maxStep, span);
+      if (!minimal && hasBudget) {
+        minimal = solveBands(widths, tableWidth, Infinity, 0, maxColumns, maxStep, sorted.length);
+        overBudget = !!minimal;
+      }
+    } else {
+      minimal = singleBand(widths, tableWidth, maxColumns);
+      simplified = true;
+      overBudget = hasBudget && !!minimal && minimal.rows > budget;
+    }
+    if (!minimal) return null;
+    const minRows = minimal.rows;
+    const maxRows = hasBudget ? Math.max(minRows, budget) : minRows;
+    const solved = simplified
+      ? minimal
+      : solveBands(widths, tableWidth, maxRows, lambda, maxColumns, maxStep, span);
+    if (!solved) return null;
+    const align = ['left', 'center', 'right', 'justify'].indexOf(source.align) >= 0
+      ? source.align
+      : 'left';
+    const tables = solved.bands.map(function (band) {
+      return {
+        columns: band.columns,
+        rows: band.rows,
+        fill: 'column',
+        align: align,
+        widthMode: 'auto',
+        widths: [],
+        margins: model.normalizeMargins(margins)
+      };
+    });
+    return {
+      rows: solved.rows,
+      minRows: minRows,
+      overBudget: overBudget,
+      simplified: simplified,
+      density: density,
+      maxColumns: maxColumns,
+      tables: tables
+    };
   }
 
   /* 幂等的结构归一化：固定末表容量不足时追加复制上一表属性、行数为 0 的续表。
@@ -574,6 +732,7 @@
     wrapText: wrapText,
     virtualWidth: virtualWidth,
     sortSongs: sortSongs,
+    arrangeTables: arrangeTables,
     autoGapWidths: autoGapWidths,
     fitWidths: fitWidths,
     normalizeTables: normalizeTables,
