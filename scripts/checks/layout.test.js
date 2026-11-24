@@ -527,6 +527,30 @@ test('落点：空页回退上边距，缺失参数不抛错', function () {
 
 /* ---------- arrangeTables：单分类自动分割 ---------- */
 
+test('默认表格数：按歌名长度跨度估算', function () {
+  assert.equal(layout.estimateTableCount(['一'.repeat(2), '一'.repeat(3), '一'.repeat(4)]), 1);
+  assert.equal(layout.estimateTableCount([
+    '一'.repeat(2), '一'.repeat(3), '一'.repeat(4), '一'.repeat(5), '一'.repeat(6)
+  ]), 2);
+  assert.equal(layout.estimateTableCount([
+    '一'.repeat(1), '一'.repeat(2), '一'.repeat(3), '一'.repeat(4), '一'.repeat(5),
+    '一'.repeat(6), '一'.repeat(7), '一'.repeat(8), '一'.repeat(9), '一'.repeat(10)
+  ]), 5);
+});
+
+test('默认表格数：排除极端长和极端短歌名', function () {
+  const list = [];
+  for (let i = 0; i < 10; i += 1) list.push('一'.repeat(3));
+  list.push('短');
+  list.push('一'.repeat(30));
+  assert.equal(layout.estimateTableCount(list), 1);
+});
+
+test('默认表格数：空分类回退 1', function () {
+  assert.equal(layout.estimateTableCount([]), 1);
+  assert.equal(layout.estimateTableCount(null), 1);
+});
+
 function arrangeScene(name, width, list, options) {
   const element = categoryElement(name, width, [model.createTable()]);
   element.songStyle = SONG_STYLE;
@@ -551,7 +575,7 @@ function collectTexts(tables) {
 test('自动分割：等宽歌名按最大可行列数铺满且无空缺', function () {
   const list = [];
   for (let i = 0; i < 10; i += 1) list.push(String.fromCharCode(97 + i) + 'aa');
-  const scene = arrangeScene('等宽', 600, list, { maxRows: 10, density: 1 });
+  const scene = arrangeScene('等宽', 600, list, { maxRows: 10, tableCount: 1 });
   const result = scene.result;
 
   assert.ok(result);
@@ -561,6 +585,7 @@ test('自动分割：等宽歌名按最大可行列数铺满且无空缺', funct
   assert.equal(result.tables.length, 1);
   assert.equal(result.tables[0].columns, 5);
   assert.equal(result.tables[0].rows, 2);
+  assert.equal(result.tables[0].fill, 'row');
 
   scene.element.tables = result.tables;
   const tables = renderedTables(scene.element, '等宽', list);
@@ -572,10 +597,10 @@ test('自动分割：等宽歌名按最大可行列数铺满且无空缺', funct
   });
 });
 
-test('自动分割：全部歌名保留、无重复、单元格不溢出', function () {
+test('自动分割：全部歌名保留、行优先顺序、无重复、单元格不溢出', function () {
   const list = [];
   for (let i = 1; i <= 35; i += 1) list.push('a'.repeat(i));
-  const scene = arrangeScene('递增', 2000, list, { maxRows: 60, density: 1 });
+  const scene = arrangeScene('递增', 2000, list, { maxRows: 60, tableCount: 3 });
   const result = scene.result;
 
   assert.ok(result);
@@ -584,13 +609,16 @@ test('自动分割：全部歌名保留、无重复、单元格不溢出', funct
   }, 0);
   assert.ok(capacity >= list.length);
   assert.ok(result.tables.every(function (table) {
-    return table.rows > 0 && table.columns > 0 && table.fill === 'column';
+    return table.rows > 0 && table.columns > 0 && table.fill === 'row';
   }));
+  for (let i = 1; i < result.tables.length; i += 1) {
+    assert.ok(result.tables[i - 1].columns > result.tables[i].columns, '列数应自上而下严格递减');
+  }
+  assert.equal(new Set(result.tables.map(function (table) { return table.columns; })).size, result.tables.length);
 
   scene.element.tables = result.tables;
   const tables = renderedTables(scene.element, '递增', list);
-  assert.equal(collectTexts(tables).length, list.length);
-  assert.equal(new Set(collectTexts(tables)).size, list.length);
+  assert.deepEqual(collectTexts(tables), layout.sortSongs(list));
   tables.forEach(function (table) {
     assert.equal(table.fallback, false);
     table.cells.forEach(function (cell) {
@@ -599,25 +627,123 @@ test('自动分割：全部歌名保留、无重复、单元格不溢出', funct
   });
 });
 
-test('自动分割：密度降低时列更宽、行数不减少', function () {
+test('自动分割：表格数控制切分，短歌名表格列数更多', function () {
   const list = [];
-  for (let i = 0; i < 10; i += 1) list.push('abc');
-  const compact = arrangeScene('紧凑', 400, list, { maxRows: 10, density: 1 }).result;
-  const loose = arrangeScene('疏松', 400, list, { maxRows: 10, density: 0.5 }).result;
+  for (let i = 1; i <= 35; i += 1) list.push('a'.repeat(i));
+  const single = arrangeScene('单表', 2000, list, { maxRows: 60, tableCount: 1 }).result;
+  const split = arrangeScene('三表', 2000, list, { maxRows: 60, tableCount: 3 }).result;
 
-  assert.ok(compact);
-  assert.ok(loose);
-  assert.equal(compact.maxColumns, 8);
-  assert.equal(loose.maxColumns, 4);
-  assert.equal(compact.rows, 2);
-  assert.equal(loose.rows, 3);
-  assert.ok(loose.rows >= compact.rows);
+  assert.ok(single);
+  assert.ok(split);
+  assert.equal(single.tables.length, 1);
+  assert.equal(split.tables.length, 3);
+  assert.ok(split.tables[0].columns > split.tables[split.tables.length - 1].columns);
+  assert.ok(split.rows <= single.rows);
 });
 
-test('自动分割：高度上限低于最小行数时夹取并标记超预算', function () {
+test('自动分割：分段容量与歌名数一致，不因补位造成列宽不足', function () {
+  const list = [];
+  for (let i = 1; i <= 18; i += 1) list.push('a'.repeat(i));
+  const scene = arrangeScene('递增两表', 960, list, { maxRows: 100, tableCount: 2 });
+  const result = scene.result;
+
+  assert.ok(result);
+  assert.equal(result.tables.length, 2);
+  assert.ok(result.tables[0].columns > result.tables[1].columns);
+  scene.element.tables = result.tables;
+  const tables = renderedTables(scene.element, '递增两表', list);
+  assert.deepEqual(collectTexts(tables), layout.sortSongs(list));
+  tables.forEach(function (table) {
+    table.cells.forEach(function (cell) {
+      if (cell) assert.equal(cell.overflow, false);
+    });
+  });
+});
+
+test('自动分割：历史重复列数场景保持列数唯一', function () {
+  const cases = [
+    { width: 960, count: 20, tableCount: 3 },
+    { width: 960, count: 18, tableCount: 2 },
+    { width: 960, count: 100, tableCount: 5 }
+  ];
+  cases.forEach(function (item) {
+    const list = [];
+    for (let i = 0; i < item.count; i += 1) list.push('a'.repeat((i % 20) + 1));
+    const scene = arrangeScene('重复列数', item.width, list, {
+      maxRows: 100,
+      tableCount: item.tableCount
+    });
+    const result = scene.result;
+    assert.ok(result, '应成功切分 ' + item.count + ' 首');
+    const columns = result.tables.map(function (table) { return table.columns; });
+    assert.equal(new Set(columns).size, columns.length, '列数应两两不同');
+    for (let i = 1; i < columns.length; i += 1) {
+      assert.ok(columns[i - 1] > columns[i], '列数应自上而下严格递减');
+    }
+    assert.equal(result.requestedTableCount, item.tableCount);
+    assert.equal(result.tableCountReduced, false);
+
+    scene.element.tables = result.tables;
+    const tables = renderedTables(scene.element, '重复列数', list);
+    assert.deepEqual(collectTexts(tables), layout.sortSongs(list));
+    tables.forEach(function (table) {
+      table.cells.forEach(function (cell) {
+        if (cell) assert.equal(cell.overflow, false);
+      });
+    });
+  });
+});
+
+test('自动分割：请求数量超过唯一列数时减少并标记', function () {
+  const few = [];
+  for (let i = 0; i < 5; i += 1) few.push('a'.repeat(i + 1));
+  const reduced = arrangeScene('少歌多表', 960, few, { maxRows: 100, tableCount: 20 }).result;
+
+  assert.ok(reduced);
+  assert.equal(reduced.requestedTableCount, 20);
+  assert.equal(reduced.tableCountReduced, true);
+  assert.equal(reduced.tableCount, reduced.tables.length);
+  assert.ok(reduced.tables.length < 20);
+  const columns = reduced.tables.map(function (table) { return table.columns; });
+  assert.equal(new Set(columns).size, columns.length);
+  for (let i = 1; i < columns.length; i += 1) {
+    assert.ok(columns[i - 1] > columns[i]);
+  }
+
+  const many = [];
+  for (let i = 0; i < 40; i += 1) many.push('a'.repeat((i % 20) + 1));
+  const capped = arrangeScene('多歌多表', 960, many, { maxRows: 100, tableCount: 9 }).result;
+
+  assert.ok(capped);
+  assert.equal(capped.requestedTableCount, 9);
+  assert.equal(capped.tableCountReduced, true);
+  assert.ok(capped.tables.length <= 8);
+  assert.equal(new Set(capped.tables.map(function (table) { return table.columns; })).size, capped.tables.length);
+});
+
+test('默认表格数：不超过唯一列数上限与歌名数', function () {
+  const wide = [];
+  for (let i = 1; i <= 60; i += 1) wide.push('a'.repeat(i));
+  assert.equal(layout.estimateTableCount(wide), 8);
+  assert.equal(layout.estimateTableCount(['a', 'a'.repeat(20), 'a'.repeat(40)]), 3);
+});
+
+test('自动分割：超过 150 首仍按表格数切分', function () {
+  const list = [];
+  for (let i = 0; i < 151; i += 1) list.push('歌名' + String(i).padStart(3, '0'));
+  const result = arrangeScene('大分类', 960, list, { maxRows: 40, tableCount: 3 }).result;
+
+  assert.ok(result);
+  assert.equal(result.tables.length, 3);
+  assert.equal(result.tables.reduce(function (sum, table) {
+    return sum + table.columns * table.rows;
+  }, 0) >= list.length, true);
+});
+
+test('自动分割：高度上限低于实际行数时标记超预算但仍应用', function () {
   const list = [];
   for (let i = 0; i < 10; i += 1) list.push('abc');
-  const result = arrangeScene('超预算', 600, list, { maxRows: 1, density: 1 }).result;
+  const result = arrangeScene('超预算', 600, list, { maxRows: 1, tableCount: 1 }).result;
 
   assert.ok(result);
   assert.equal(result.minRows, 2);

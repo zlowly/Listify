@@ -807,12 +807,26 @@ button { cursor: pointer; }
   margin-bottom: 8px;
   padding-bottom: 2px;
 }
+.auto-layout-rows { margin-bottom: 7px; }
+/* 「最大表格数」标签更长，独占一行；按钮随后，空位不足时整组换行。 */
+.auto-layout-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.auto-layout-count {
+  flex: 1 1 150px;
+  margin-bottom: 0;
+}
 .auto-layout-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
+  flex: 0 0 auto;
 }
+.auto-layout-actions .help-tip { margin-left: 0; }
 
 .table-card {
   border: 1px solid var(--line);

@@ -889,35 +889,47 @@
     });
   }
 
-  function autoLayoutDefaultRows(element) {
+  function autoLayoutAutoRows(element) {
     const project = L.app.state.project;
     const content = project.pageSize.height - project.margins.top - project.margins.bottom;
     const rowHeight = element.songStyle.fontSize * element.songStyle.lineHeight + layout.CELL_PAD_Y * 2;
-    const titleHeight = element.showTitle !== false
-      ? element.titleStyle.fontSize * element.titleStyle.lineHeight + layout.TITLE_GAP
+    const showTitle = element.showTitle !== false;
+    const titleLines = showTitle
+      ? layout.wrapText(
+          element.category || '',
+          Math.max(1, element.width - layout.BLOCK_PADDING * 2),
+          element.titleStyle
+        )
+      : [];
+    const titleHeight = showTitle
+      ? Math.max(1, titleLines.length) * element.titleStyle.fontSize * element.titleStyle.lineHeight + layout.TITLE_GAP
       : 0;
-    const usable = content - layout.BLOCK_PADDING * 2 - titleHeight;
-    const pageRows = Math.max(1, Math.floor(usable / rowHeight));
-    const current = (element.tables || []).reduce(function (sum, table) {
-      return sum + Math.max(0, Number(table.rows) || 0);
-    }, 0);
-    return current > 0 ? Math.min(current, pageRows) : pageRows;
+    const sourceTable = Array.isArray(element.tables) && element.tables[0];
+    const margins = model.normalizeMargins(sourceTable && sourceTable.margins);
+    const usable = content - layout.BLOCK_PADDING * 2 - titleHeight - margins.top - margins.bottom;
+    return Math.max(1, Math.floor(usable / rowHeight));
+  }
+
+  function autoLayoutTableCount(element) {
+    const category = model.getCategory(L.app.state.project, element.category);
+    return category ? layout.estimateTableCount(category.songs) : 1;
   }
 
   function autoLayoutFields(element) {
     const remembered = autoLayoutParams.get(element);
-    const maxRows = remembered ? remembered.maxRows : autoLayoutDefaultRows(element);
-    const density = remembered ? remembered.density : 100;
+    const maxRows = remembered ? remembered.maxRows : 0;
+    const tableCount = remembered ? remembered.tableCount : autoLayoutTableCount(element);
+    const maxTables = layout.MAX_ARRANGE_TABLES;
     return '<div class="auto-layout">' +
-      '<div class="field-row">' +
-        '<div class="field field-a"><label for="prop-auto-rows">最多行数</label>' +
-          '<div class="control"><input id="prop-auto-rows" class="input num-mid" type="number" min="1" max="500" step="1" value="' + maxRows + '"></div></div>' +
-        '<div class="field field-b"><label for="prop-auto-density">密度</label>' +
-          '<div class="control"><input id="prop-auto-density" class="input num-mid" type="number" min="20" max="100" step="5" value="' + density + '"><span class="unit">%</span></div></div>' +
-      '</div>' +
-      '<div class="auto-layout-actions">' +
-        '<button id="prop-auto-layout" class="btn btn-primary btn-sm">自动布局</button>' +
-        helpTip('保留字体、对齐与表格边距，按歌名宽度重新分割表格。密度越高，列数上限越大。') +
+      '<div class="field auto-layout-rows"><label for="prop-auto-rows">最多行数</label>' +
+        '<div class="control"><input id="prop-auto-rows" class="input num-mid" type="number" min="0" max="500" step="1" value="' + maxRows + '"><span class="unit">行</span></div></div>' +
+      '<div class="auto-layout-run">' +
+        '<div class="field auto-layout-count"><label for="prop-auto-count">最大表格数</label>' +
+          '<div class="control"><input id="prop-auto-count" class="input num-mid" type="number" min="1" max="' + maxTables + '" step="1" value="' + tableCount + '"><span class="unit">张</span></div></div>' +
+        '<div class="auto-layout-actions">' +
+          '<button id="prop-auto-layout" class="btn btn-primary btn-sm">自动布局</button>' +
+          helpTip('按歌名宽度升序、行优先填充；各表列数互不相同且自上而下严格递减；最大表格数按歌名长度分布估算，输入的最大表格数无法满足唯一列数时会自动减少实际表格数。最多行数 0 表示按页面可用高度自动。') +
+        '</div>' +
       '</div>' +
     '</div>';
   }
@@ -925,32 +937,34 @@
   function bindAutoLayout(element, category, group) {
     bind('prop-auto-layout', 'click', function () {
       const rowsInput = document.getElementById('prop-auto-rows');
-      const densityInput = document.getElementById('prop-auto-density');
-      const maxRows = Math.max(1, Math.round(Number(rowsInput && rowsInput.value) || 1));
-      const density = Math.max(20, Math.min(100, Math.round(Number(densityInput && densityInput.value) || 100)));
-      autoLayoutParams.set(element, { maxRows: maxRows, density: density });
+      const countInput = document.getElementById('prop-auto-count');
+      const maxRows = Math.max(0, Math.min(500, Math.round(Number(rowsInput && rowsInput.value) || 0)));
+      const tableCount = Math.max(1, Math.min(layout.MAX_ARRANGE_TABLES, Math.round(Number(countInput && countInput.value) || 1)));
+      autoLayoutParams.set(element, { maxRows: maxRows, tableCount: tableCount });
+      const budget = maxRows > 0 ? maxRows : autoLayoutAutoRows(element);
       ui.modal.confirm(
         '自动布局',
-        '将保留字体、对齐与表格边距，但清除当前所有表格的列数、行数、列宽与多余表格，并按歌名重新分割。此操作可撤销。',
+        '将保留字体、对齐与表格边距，但清除当前所有表格的列数、行数、列宽与多余表格，并按歌名宽度重新分割。此操作可撤销。',
         { confirmLabel: '重新排版' }
       ).then(function (ok) {
         if (!ok) return;
         const outcome = L.app.autoLayoutCategory(element, {
-          maxRows: maxRows,
-          density: density / 100
+          maxRows: budget,
+          tableCount: tableCount
         });
         if (!outcome.ok) {
           ui.modal.alert('无法自动布局', '该分类暂时无法自动布局：可能存在过长歌名，或分类块宽度不足以容纳任一歌名。');
           return;
         }
         refreshTableGroup(group, element, category);
-        if (outcome.result.overBudget) {
-          ui.toast('已按最少 ' + outcome.result.rows + ' 行排版，超过设定的 ' + maxRows + ' 行。');
-        } else if (outcome.result.simplified) {
-          ui.toast('歌名较多，已按单表简化排版。');
-        } else {
-          ui.toast('已自动布局为 ' + outcome.result.tables.length + ' 张表格。');
+        const messages = ['已自动布局为 ' + outcome.result.tables.length + ' 张表格'];
+        if (outcome.result.tableCountReduced) {
+          messages.push('为保证各表列数唯一，已从输入的最大表格数 ' + outcome.result.requestedTableCount + ' 张减少');
         }
+        if (outcome.result.overBudget) {
+          messages.push('已按实际 ' + outcome.result.rows + ' 行排版，超过可用的 ' + budget + ' 行');
+        }
+        ui.toast(messages.join('；') + '。');
       });
     });
   }

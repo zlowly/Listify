@@ -11,7 +11,10 @@
   const MIN_COL_WIDTH = 24;
   const MIN_TABLE_WIDTH = 40;
   const SAFETY = 2;
-  const ARRANGE_DP_LIMIT = 150;
+  const ARRANGE_MAX_COLUMNS = 8;
+  const MAX_ARRANGE_TABLES = 20;
+  const CHINESE_CHAR_UNITS = 2;
+  const MAX_TABLE_SPAN_CHARS = 2;
 
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');
@@ -125,92 +128,116 @@
     });
   }
 
+  function quantile(sorted, ratio) {
+    if (!sorted.length) return 0;
+    if (sorted.length === 1) return sorted[0];
+    const position = (sorted.length - 1) * ratio;
+    const base = Math.floor(position);
+    const rest = position - base;
+    const next = sorted[Math.min(base + 1, sorted.length - 1)];
+    return sorted[base] + (next - sorted[base]) * rest;
+  }
+
+  /* 默认表格数：用四分位距剔除个别极端长/短歌名，
+     再按每张表最多跨 2 个中文字符宽度估算。 */
+  function estimateTableCount(songs) {
+    const list = Array.isArray(songs) ? songs : [];
+    if (!list.length) return 1;
+    const widths = list.map(function (text) { return virtualWidth(text); }).sort(function (a, b) {
+      return a - b;
+    });
+    let minWidth = widths[0];
+    let maxWidth = widths[widths.length - 1];
+    if (widths.length >= 4) {
+      const q1 = quantile(widths, 0.25);
+      const q3 = quantile(widths, 0.75);
+      const iqr = q3 - q1;
+      const lower = q1 - iqr * 1.5;
+      const upper = q3 + iqr * 1.5;
+      const kept = widths.filter(function (width) { return width >= lower && width <= upper; });
+      if (kept.length) {
+        minWidth = kept[0];
+        maxWidth = kept[kept.length - 1];
+      }
+    }
+    const span = Math.max(0, maxWidth - minWidth);
+    const tableCount = Math.ceil(span / (CHINESE_CHAR_UNITS * MAX_TABLE_SPAN_CHARS));
+    return Math.max(1, Math.min(list.length, ARRANGE_MAX_COLUMNS, tableCount || 1));
+  }
+
   function measureWidths(texts, songStyle) {
     return texts.map(function (text) {
       return Math.max(MIN_COL_WIDTH, measureText(text, songStyle) + CELL_PAD_X * 2 + SAFETY);
     });
   }
 
-  function feasibleBands(widths, start, end, tableWidth, maxColumns) {
-    const length = end - start;
-    const cap = Math.min(length, maxColumns);
-    const list = [];
+  /* 行优先时，列宽由该列最宽的歌名决定。不能依赖排序后的最后一行，
+     因为等视觉宽度的英文歌名在实际字体下可能更宽。 */
+  function rowBandWidth(widths, start, end, columns) {
+    const count = end - start;
+    const rows = Math.ceil(count / columns);
+    let sum = 0;
+    for (let col = 0; col < columns; col += 1) {
+      let maxWidth = 0;
+      for (let row = 0; row < rows; row += 1) {
+        const index = start + row * columns + col;
+        if (index < end) maxWidth = Math.max(maxWidth, widths[index]);
+      }
+      sum += maxWidth;
+    }
+    return sum;
+  }
+
+  function bandColumns(widths, start, end, tableWidth, maxColumns) {
+    const count = end - start;
+    const cap = Math.min(count, maxColumns);
     for (let columns = cap; columns >= 1; columns -= 1) {
-      const rows = Math.ceil(length / columns);
-      if (Math.ceil(length / rows) !== columns) continue;
-      let sum = 0;
-      for (let col = 0; col < columns; col += 1) {
-        const last = Math.min(start + (col + 1) * rows - 1, end - 1);
-        if (last < start + col * rows) continue;
-        sum += Math.max(MIN_COL_WIDTH, widths[last]);
-      }
-      if (sum <= tableWidth) list.push({ columns: columns, rows: rows });
-    }
-    return list;
-  }
-
-  function singleBand(widths, tableWidth, maxColumns) {
-    const candidates = feasibleBands(widths, 0, widths.length, tableWidth, maxColumns);
-    if (!candidates.length) return null;
-    const band = candidates[0];
-    return {
-      rows: band.rows,
-      bands: [{ columns: band.columns, rows: band.rows, count: widths.length }],
-      score: band.rows
-    };
-  }
-
-  function solveBands(widths, tableWidth, maxRows, lambda, maxColumns, maxStep, maxSpan) {
-    const count = widths.length;
-    const span = Math.max(1, Math.min(count, maxSpan || count));
-    const best = new Array(count + 1).fill(null);
-    best[0] = { last: Infinity, rows: 0, bands: 0, score: 0, prev: null, band: null };
-    for (let end = 1; end <= count; end += 1) {
-      const floor = Math.max(0, end - span);
-      for (let start = floor; start < end; start += 1) {
-        const previous = best[start];
-        if (!previous) continue;
-        const remaining = maxRows === Infinity ? Infinity : maxRows - previous.rows;
-        if (remaining <= 0) continue;
-        const first = previous.last === Infinity;
-        const upper = first ? maxColumns : Math.min(maxColumns, previous.last);
-        const step = first ? maxColumns : maxStep;
-        const candidates = feasibleBands(widths, start, end, tableWidth, maxColumns);
-        let chosen = null;
-        for (let index = 0; index < candidates.length; index += 1) {
-          const candidate = candidates[index];
-          if (candidate.rows > remaining) break;
-          if (candidate.columns > upper) continue;
-          if (upper - candidate.columns > step) break;
-          chosen = candidate;
-          break;
-        }
-        if (!chosen) continue;
-        const total = previous.rows + chosen.rows;
-        const bands = previous.bands + 1;
-        const score = total + lambda * bands;
-        const current = best[end];
-        if (!current || score < current.score || (score === current.score && total < current.rows)) {
-          best[end] = {
-            last: chosen.columns,
-            rows: total,
-            bands: bands,
-            score: score,
-            prev: previous,
-            band: { columns: chosen.columns, rows: chosen.rows, count: end - start }
-          };
-        }
+      const rows = Math.ceil(count / columns);
+      if (Math.ceil(count / rows) !== columns) continue;
+      if (rowBandWidth(widths, start, end, columns) <= tableWidth) {
+        return { columns: columns, rows: rows };
       }
     }
-    const selected = best[count];
-    if (!selected) return null;
-    const bands = [];
-    let cursor = selected;
-    while (cursor && cursor.band) {
-      bands.unshift(cursor.band);
-      cursor = cursor.prev;
+    return null;
+  }
+
+  /* 按剩余内容宽度估算下一张表应承载的歌名数，使各表内容量接近。 */
+  function targetBandCount(widths, start, tablesLeft) {
+    const count = widths.length - start;
+    if (tablesLeft <= 1) return count;
+    let remainingWidth = 0;
+    for (let index = start; index < widths.length; index += 1) remainingWidth += widths[index];
+    const targetWidth = remainingWidth / tablesLeft;
+    let used = 0;
+    let take = 0;
+    while (take < count && used < targetWidth) {
+      used += widths[start + take];
+      take += 1;
     }
-    return { rows: selected.rows, bands: bands, score: selected.score, last: selected.last };
+    return Math.max(1, take);
+  }
+
+  /* 选一张非末表：容量必须正好等于分段长度，避免下一张表补位后列宽失配。 */
+  function chooseBand(widths, start, remainingSongs, tablesLeft, maxColumns, tableWidth) {
+    const target = targetBandCount(widths, start, tablesLeft);
+    const maxTake = remainingSongs - (tablesLeft - 1);
+    const maxSpread = Math.max(2, target, maxTake);
+    for (let spread = Math.max(2, Math.round(target * 0.15)); spread <= maxSpread; spread += 1) {
+      const low = Math.max(1, target - spread);
+      const high = Math.min(maxTake, target + spread);
+      for (let columns = Math.min(maxColumns, remainingSongs); columns >= 1; columns -= 1) {
+        let length = Math.max(columns, Math.ceil(low / columns) * columns);
+        let best = null;
+        for (; length <= high; length += columns) {
+          if (rowBandWidth(widths, start, start + length, columns) > tableWidth) continue;
+          if (!best || Math.abs(length - target) < Math.abs(best.length - target)) {
+            best = { columns: columns, rows: length / columns, length: length };
+          }
+        }
+        if (best) return best;
+      }
+    }
+    return null;
   }
 
   function arrangeTables(element, category, options) {
@@ -224,59 +251,73 @@
     const tableWidth = Math.max(MIN_TABLE_WIDTH, element.width - margins.left - margins.right);
     const sorted = sortSongs(songs);
     const settings = options || {};
-    const density = model.clamp(Number(settings.density) || 1, 0.2, 1);
-    const lambda = Number.isFinite(Number(settings.lambda)) ? Math.max(0, Number(settings.lambda)) : 0.5;
-    const baseColumns = Math.max(1, Math.min(50, Math.round(Number(settings.maxColumns) || 8)));
-    const maxColumns = Math.max(1, Math.min(baseColumns, Math.round(baseColumns * density)));
-    const maxStep = Math.max(0, Math.round(Number(settings.maxStep) || 2));
+    const maxColumns = Math.max(1, Math.min(50, Math.round(Number(settings.maxColumns) || ARRANGE_MAX_COLUMNS)));
+    const requestedTableCount = Math.max(1, Math.round(Number(settings.tableCount) || 1));
     const widths = measureWidths(sorted, element.songStyle);
+    if (widths.some(function (width) { return width > tableWidth; })) return null;
     const requested = Number(settings.maxRows);
     const hasBudget = Number.isFinite(requested) && requested > 0;
     const budget = hasBudget ? Math.floor(requested) : Infinity;
-    const span = hasBudget
-      ? Math.min(sorted.length, Math.max(1, maxColumns * budget))
-      : sorted.length;
-    let overBudget = false;
-    let simplified = false;
-    let minimal = null;
-    if (sorted.length <= ARRANGE_DP_LIMIT) {
-      minimal = solveBands(widths, tableWidth, budget, 0, maxColumns, maxStep, span);
-      if (!minimal && hasBudget) {
-        minimal = solveBands(widths, tableWidth, Infinity, 0, maxColumns, maxStep, sorted.length);
-        overBudget = !!minimal;
-      }
-    } else {
-      minimal = singleBand(widths, tableWidth, maxColumns);
-      simplified = true;
-      overBudget = hasBudget && !!minimal && minimal.rows > budget;
-    }
-    if (!minimal) return null;
-    const minRows = minimal.rows;
-    const maxRows = hasBudget ? Math.max(minRows, budget) : minRows;
-    const solved = simplified
-      ? minimal
-      : solveBands(widths, tableWidth, maxRows, lambda, maxColumns, maxStep, span);
-    if (!solved) return null;
     const align = ['left', 'center', 'right', 'justify'].indexOf(source.align) >= 0
       ? source.align
       : 'left';
-    const tables = solved.bands.map(function (band) {
-      return {
-        columns: band.columns,
-        rows: band.rows,
-        fill: 'column',
-        align: align,
-        widthMode: 'auto',
-        widths: [],
-        margins: model.normalizeMargins(margins)
-      };
-    });
+
+    /* 每张表的列数必须两两不同，因此下一张表最多取上一张列数减 1。
+       请求的表格数只是上限：唯一列数或内容宽度放不下时，从大到小重试，
+       采用第一个完整可行的数量。 */
+    function planTables(tableCount) {
+      const tables = [];
+      let previousColumns = maxColumns;
+      let start = 0;
+      for (let index = 0; index < tableCount; index += 1) {
+        const tablesLeft = tableCount - index;
+        const remainingSongs = sorted.length - start;
+        const band = tablesLeft === 1
+          ? bandColumns(widths, start, sorted.length, tableWidth, previousColumns)
+          : chooseBand(widths, start, remainingSongs, tablesLeft, previousColumns, tableWidth);
+        if (!band) return null;
+        tables.push({
+          columns: band.columns,
+          rows: band.rows,
+          fill: 'row',
+          align: align,
+          widthMode: 'auto',
+          widths: [],
+          margins: model.normalizeMargins(margins)
+        });
+        start += band.rows * band.columns;
+        previousColumns = band.columns - 1;
+      }
+      return tables;
+    }
+
+    function uniqueColumns(tables) {
+      for (let index = 1; index < tables.length; index += 1) {
+        if (tables[index - 1].columns <= tables[index].columns) return false;
+      }
+      return true;
+    }
+
+    let tables = null;
+    const maxAttempt = Math.min(requestedTableCount, maxColumns, sorted.length);
+    for (let attempt = maxAttempt; attempt >= 1; attempt -= 1) {
+      const plan = planTables(attempt);
+      if (plan && uniqueColumns(plan)) {
+        tables = plan;
+        break;
+      }
+    }
+    if (!tables) return null;
+
+    let rows = 0;
+    tables.forEach(function (table) { rows += table.rows; });
     return {
-      rows: solved.rows,
-      minRows: minRows,
-      overBudget: overBudget,
-      simplified: simplified,
-      density: density,
+      rows: rows,
+      minRows: rows,
+      overBudget: hasBudget && rows > budget,
+      tableCount: tables.length,
+      requestedTableCount: requestedTableCount,
+      tableCountReduced: tables.length < requestedTableCount,
       maxColumns: maxColumns,
       tables: tables
     };
@@ -728,10 +769,12 @@
     CELL_PAD_X: CELL_PAD_X,
     CELL_PAD_Y: CELL_PAD_Y,
     MIN_COL_WIDTH: MIN_COL_WIDTH,
+    MAX_ARRANGE_TABLES: MAX_ARRANGE_TABLES,
     measureText: measureText,
     wrapText: wrapText,
     virtualWidth: virtualWidth,
     sortSongs: sortSongs,
+    estimateTableCount: estimateTableCount,
     arrangeTables: arrangeTables,
     autoGapWidths: autoGapWidths,
     fitWidths: fitWidths,
