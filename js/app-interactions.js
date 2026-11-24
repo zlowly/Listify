@@ -36,6 +36,427 @@
         if (x < bounds.x || y < bounds.y || x > bounds.x + bounds.width || y > bounds.y + bounds.height) return null;
         return { element: element, bounds: bounds };
       }
+
+      const snap = L.snap;
+      const SNAP_INSET = 0.5;
+
+      // 同一坐标只保留优先级最高的目标；目标按扫描顺序稳定保留。
+      function addSnapTarget(list, item) {
+        if (!item || !Number.isFinite(item.value)) return;
+        for (let i = 0; i < list.length; i += 1) {
+          if (Math.abs(list[i].value - item.value) <= 1e-6) {
+            if (item.priority < list[i].priority) list[i] = item;
+            return;
+          }
+        }
+        list.push(item);
+      }
+
+      function tableSnapshot(element) {
+        if (!element || element.type !== 'category') return [];
+        const category = model.getCategory(state.project, element.category);
+        const computed = layout.layoutCategory(category, element, { editMode: true });
+        return (computed.tables || []).map(function (table, index) {
+          const margins = table.margins || { top: 0, right: 0, bottom: 0, left: 0 };
+          const left = element.x + table.x;
+          const top = element.y + table.y;
+          return {
+            index: index,
+            left: left,
+            right: left + table.tableWidth,
+            top: top,
+            bottom: top + table.height,
+            width: table.tableWidth,
+            height: table.height,
+            widths: (table.widths || []).slice(),
+            margins: {
+              top: Number(margins.top) || 0,
+              right: Number(margins.right) || 0,
+              bottom: Number(margins.bottom) || 0,
+              left: Number(margins.left) || 0
+            }
+          };
+        });
+      }
+
+      // 宽度与表格边距的简单反比关系在表格被最小宽度或 x 位置钳制后不再成立，
+      // 这类退化的表格只参与移动和分隔线吸附，不参与改宽吸附。
+      function tableWidthRelationValid(element, table, width) {
+        const w = width == null ? element.width : width;
+        const expected = w - table.margins.left - table.margins.right;
+        return Math.abs(table.width - expected) <= SNAP_INSET;
+      }
+
+      function buildSnapContext(page, element, options) {
+        const opts = options || {};
+        const size = state.project.pageSize;
+        const margins = state.project.margins;
+        const pageRect = { x: 0, y: 0, width: size.width, height: size.height };
+        const content = {
+          left: margins.left,
+          right: size.width - margins.right,
+          top: margins.top,
+          bottom: size.height - margins.bottom
+        };
+        const targets = { x: [], y: [], divider: [] };
+
+        addSnapTarget(targets.x, {
+          value: content.left, priority: snap.PRIORITY.page, role: 'page', side: 'left', span: pageRect
+        });
+        addSnapTarget(targets.x, {
+          value: content.right, priority: snap.PRIORITY.page, role: 'page', side: 'right', span: pageRect
+        });
+        addSnapTarget(targets.x, {
+          value: size.width / 2, priority: snap.PRIORITY.page, role: 'page', side: 'center', span: pageRect
+        });
+        addSnapTarget(targets.y, {
+          value: content.top, priority: snap.PRIORITY.page, role: 'page', side: 'top', span: pageRect
+        });
+        addSnapTarget(targets.y, {
+          value: content.bottom, priority: snap.PRIORITY.page, role: 'page', side: 'bottom', span: pageRect
+        });
+        addSnapTarget(targets.y, {
+          value: size.height / 2, priority: snap.PRIORITY.page, role: 'page', side: 'center', span: pageRect
+        });
+        addSnapTarget(targets.divider, {
+          value: content.left, priority: snap.PRIORITY.page, role: 'page', side: 'left', span: pageRect
+        });
+        addSnapTarget(targets.divider, {
+          value: content.right, priority: snap.PRIORITY.page, role: 'page', side: 'right', span: pageRect
+        });
+
+        const draggedId = element ? element.id : null;
+        page.elements.forEach(function (other) {
+          if (!other || other.type !== 'category') return;
+          const isDragged = other.id === draggedId;
+          const bounds = renderer.elementBounds(state.project, page, other);
+          const blockSpan = {
+            x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height
+          };
+          if (!isDragged) {
+            addSnapTarget(targets.x, {
+              value: bounds.x, priority: snap.PRIORITY.block, role: 'block', side: 'left',
+              elementId: other.id, span: blockSpan
+            });
+            addSnapTarget(targets.x, {
+              value: bounds.x + bounds.width / 2, priority: snap.PRIORITY.block, role: 'block', side: 'center',
+              elementId: other.id, span: blockSpan
+            });
+            addSnapTarget(targets.x, {
+              value: bounds.x + bounds.width, priority: snap.PRIORITY.block, role: 'block', side: 'right',
+              elementId: other.id, span: blockSpan
+            });
+            addSnapTarget(targets.y, {
+              value: bounds.y, priority: snap.PRIORITY.block, role: 'block', side: 'top',
+              elementId: other.id, span: blockSpan
+            });
+            addSnapTarget(targets.y, {
+              value: bounds.y + bounds.height / 2, priority: snap.PRIORITY.block, role: 'block', side: 'center',
+              elementId: other.id, span: blockSpan
+            });
+            addSnapTarget(targets.y, {
+              value: bounds.y + bounds.height, priority: snap.PRIORITY.block, role: 'block', side: 'bottom',
+              elementId: other.id, span: blockSpan
+            });
+          }
+
+          tableSnapshot(other).forEach(function (table) {
+            const tableSpan = {
+              x: table.left, y: table.top, width: table.width, height: table.height
+            };
+            if (!isDragged) {
+              if (Math.abs(table.left - bounds.x) > SNAP_INSET) {
+                addSnapTarget(targets.x, {
+                  value: table.left, priority: snap.PRIORITY.table, role: 'table', side: 'left',
+                  elementId: other.id, tableIndex: table.index, span: tableSpan
+                });
+              }
+              if (Math.abs(table.right - (bounds.x + bounds.width)) > SNAP_INSET) {
+                addSnapTarget(targets.x, {
+                  value: table.right, priority: snap.PRIORITY.table, role: 'table', side: 'right',
+                  elementId: other.id, tableIndex: table.index, span: tableSpan
+                });
+              }
+            }
+            if (!(table.height > 0)) return;
+            let dividerX = table.left;
+            for (let col = 0; col < table.widths.length - 1; col += 1) {
+              dividerX += table.widths[col];
+              if (opts.divider &&
+                  other.id === opts.divider.elementId &&
+                  table.index === opts.divider.tableIndex &&
+                  col === opts.divider.dividerIndex) continue;
+              addSnapTarget(targets.divider, {
+                value: dividerX, priority: snap.PRIORITY.divider, role: 'divider',
+                elementId: other.id, tableIndex: table.index, dividerIndex: col,
+                span: { x: dividerX, y: table.top, width: 0, height: table.height }
+              });
+            }
+          });
+        });
+
+        return {
+          pageRect: pageRect,
+          threshold: snap.pageThreshold(viewport.scale),
+          release: snap.RELEASE_SCREEN / viewport.scale,
+          targets: targets,
+          movingTables: element ? tableSnapshot(element) : [],
+          bounds: opts.bounds || (element ? renderer.elementBounds(state.project, page, element) : null)
+        };
+      }
+
+      function attachSnap(drag, page, element, options) {
+        if (!element || element.type !== 'category') return;
+        drag.snap = buildSnapContext(page, element, options);
+        drag.snapHold = { x: null, y: null };
+      }
+
+      function chooseSnapAnchors(anchors, targets, context, hold, isValid) {
+        let best = null;
+        for (let i = 0; i < anchors.length; i += 1) {
+          const anchor = anchors[i];
+          const useHold = hold && hold.anchor && hold.anchor.id === anchor.id ? hold : null;
+          const result = snap.choose({
+            anchor: anchor,
+            targets: targets,
+            threshold: context.threshold,
+            release: context.release,
+            hold: useHold,
+            isValid: isValid
+          });
+          if (!result) continue;
+          if (useHold && result.target &&
+              Math.abs(result.target.value - useHold.target.value) <= 1e-6) {
+            return result;
+          }
+          if (!best) {
+            best = result;
+            continue;
+          }
+          const distance = Math.abs(result.target.value - result.anchor.value);
+          const bestDistance = Math.abs(best.target.value - best.anchor.value);
+          if (distance < bestDistance - 1e-9 ||
+              (Math.abs(distance - bestDistance) <= 1e-9 &&
+               result.target.priority < best.target.priority)) {
+            best = result;
+          }
+        }
+        return best;
+      }
+
+      // 参考线的跨度取被拖元素与目标的并集，并裁剪到页面。
+      function makeSnapGuide(axis, result, movingRect, pageRect) {
+        const target = result.target;
+        const span = target.span || pageRect;
+        let guide;
+        if (axis === 'x') {
+          const y1 = Math.max(pageRect.y, Math.min(movingRect.y, span.y));
+          const y2 = Math.min(
+            pageRect.y + pageRect.height,
+            Math.max(movingRect.y + movingRect.height, span.y + span.height)
+          );
+          guide = {
+            axis: 'x',
+            value: target.value,
+            span: { x: target.value, y: y1, width: 0, height: Math.max(0, y2 - y1) }
+          };
+        } else {
+          const x1 = Math.max(pageRect.x, Math.min(movingRect.x, span.x));
+          const x2 = Math.min(
+            pageRect.x + pageRect.width,
+            Math.max(movingRect.x + movingRect.width, span.x + span.width)
+          );
+          guide = {
+            axis: 'y',
+            value: target.value,
+            span: { x: x1, y: target.value, width: Math.max(0, x2 - x1), height: 0 }
+          };
+        }
+        if (axis === 'x' && result.anchor.kind === 'table' &&
+            Number.isFinite(result.anchor.offsetY) && Number.isFinite(result.anchor.height)) {
+          guide.marker = {
+            x: target.value,
+            y: movingRect.y + result.anchor.offsetY + result.anchor.height / 2,
+            length: 6
+          };
+        }
+        return guide;
+      }
+
+      function applyMoveSnap(drag, rawX, rawY) {
+        const context = drag.snap;
+        const start = drag.startBounds;
+        let xResult = null;
+        let yResult = null;
+        if (!drag.altKey) {
+          const xAnchors = [
+            { id: 'block-left', value: rawX, kind: 'block', side: 'left' },
+            { id: 'block-center', value: rawX + start.width / 2, kind: 'block', side: 'center' },
+            { id: 'block-right', value: rawX + start.width, kind: 'block', side: 'right' }
+          ];
+          context.movingTables.forEach(function (table) {
+            if (Math.abs(table.left - start.x) > SNAP_INSET) {
+              xAnchors.push({
+                id: 'table-' + table.index + '-left',
+                value: table.left + (rawX - start.x),
+                kind: 'table',
+                side: 'left',
+                tableIndex: table.index,
+                offsetY: table.top - start.y,
+                height: table.height
+              });
+            }
+            if (Math.abs(table.right - (start.x + start.width)) > SNAP_INSET) {
+              xAnchors.push({
+                id: 'table-' + table.index + '-right',
+                value: table.right + (rawX - start.x),
+                kind: 'table',
+                side: 'right',
+                tableIndex: table.index,
+                offsetY: table.top - start.y,
+                height: table.height
+              });
+            }
+          });
+          const yAnchors = [
+            { id: 'block-top', value: rawY, kind: 'block', side: 'top' },
+            { id: 'block-middle', value: rawY + start.height / 2, kind: 'block', side: 'center' },
+            { id: 'block-bottom', value: rawY + start.height, kind: 'block', side: 'bottom' }
+          ];
+          xResult = chooseSnapAnchors(xAnchors, context.targets.x, context, drag.snapHold.x);
+          yResult = chooseSnapAnchors(yAnchors, context.targets.y, context, drag.snapHold.y);
+        }
+        drag.snapHold.x = xResult;
+        drag.snapHold.y = yResult;
+
+        const finalX = rawX + (xResult ? xResult.delta : 0);
+        const finalY = rawY + (yResult ? yResult.delta : 0);
+        surface.snapGuides = [];
+        if (xResult) {
+          surface.snapGuides.push(makeSnapGuide('x', xResult, {
+            x: finalX, y: finalY, width: start.width, height: start.height
+          }, context.pageRect));
+        }
+        if (yResult) {
+          surface.snapGuides.push(makeSnapGuide('y', yResult, {
+            x: finalX, y: finalY, width: start.width, height: start.height
+          }, context.pageRect));
+        }
+        return { x: finalX, y: finalY };
+      }
+
+      function widthAnchors(drag, side, dx) {
+        const element = drag.element;
+        const start = drag.startBounds;
+        const anchors = [];
+        if (side === 'e') {
+          anchors.push({
+            id: 'block-right', value: start.x + start.width + dx, kind: 'block', side: 'right', margin: 0
+          });
+          drag.snap.movingTables.forEach(function (table) {
+            if (Math.abs(table.right - (start.x + start.width)) <= SNAP_INSET) return;
+            if (!tableWidthRelationValid(element, table, start.width)) return;
+            anchors.push({
+              id: 'table-' + table.index + '-right',
+              value: table.right + dx,
+              kind: 'table',
+              side: 'right',
+              tableIndex: table.index,
+              margin: table.margins.right,
+              offsetY: table.top - start.y,
+              height: table.height
+            });
+          });
+        } else {
+          anchors.push({
+            id: 'block-left', value: start.x + dx, kind: 'block', side: 'left', margin: 0
+          });
+          drag.snap.movingTables.forEach(function (table) {
+            if (Math.abs(table.left - start.x) <= SNAP_INSET) return;
+            if (!tableWidthRelationValid(element, table, start.width)) return;
+            anchors.push({
+              id: 'table-' + table.index + '-left',
+              value: table.left + dx,
+              kind: 'table',
+              side: 'left',
+              tableIndex: table.index,
+              margin: table.margins.left,
+              offsetY: table.top - start.y,
+              height: table.height
+            });
+          });
+        }
+        return anchors;
+      }
+
+      function applyWidthSnap(drag, side, dx) {
+        const context = drag.snap;
+        const start = drag.startBounds;
+        const pageWidth = state.project.pageSize.width;
+        const anchors = widthAnchors(drag, side, dx);
+        const isValid = function (anchor, target) {
+          const kind = target.role === 'table' ? 'table' : 'block';
+          const width = snap.widthFromEdge({
+            side: side,
+            kind: kind,
+            target: target.value,
+            elementX: start.x,
+            elementRight: start.x + start.width,
+            margin: Number(anchor.margin) || 0
+          });
+          return Number.isFinite(width) && width >= 80 && width <= pageWidth * 3;
+        };
+        const result = chooseSnapAnchors(anchors, context.targets.x, context, drag.snapHold.x, isValid);
+        if (!result) {
+          drag.snapHold.x = null;
+          surface.snapGuides = [];
+          return null;
+        }
+        const width = snap.widthFromEdge({
+          side: side,
+          kind: result.target.role === 'table' ? 'table' : 'block',
+          target: result.target.value,
+          elementX: start.x,
+          elementRight: start.x + start.width,
+          margin: Number(result.anchor.margin) || 0
+        });
+        if (!Number.isFinite(width)) {
+          drag.snapHold.x = null;
+          surface.snapGuides = [];
+          return null;
+        }
+        drag.snapHold.x = result;
+        const finalWidth = clamp(width, 80, pageWidth * 3);
+        const finalX = side === 'e' ? start.x : start.x + start.width - finalWidth;
+        surface.snapGuides = [makeSnapGuide('x', result, {
+          x: finalX, y: start.y, width: finalWidth, height: start.height
+        }, context.pageRect)];
+        return { x: finalX, width: finalWidth };
+      }
+
+      function onSnapModifierChange(event) {
+        const drag = surface.drag;
+        if (!drag || !drag.snap) return;
+        if (event.key !== 'Alt' && event.key !== 'Option') return;
+        if (!!event.altKey === !!drag.altKey) return;
+        if (drag.lastClientX == null || drag.lastClientY == null) return;
+        onPointerMove({
+          clientX: drag.lastClientX,
+          clientY: drag.lastClientY,
+          altKey: !!event.altKey,
+          preventDefault: function () {}
+        });
+      }
+
+      function bindSnapModifier() {
+        window.addEventListener('keydown', onSnapModifierChange);
+        window.addEventListener('keyup', onSnapModifierChange);
+      }
+
+      function unbindSnapModifier() {
+        window.removeEventListener('keydown', onSnapModifierChange);
+        window.removeEventListener('keyup', onSnapModifierChange);
+      }
     
       function onPointerDown(event) {
         if (event.button !== 0) return;
@@ -45,6 +466,7 @@
         const point = appCtx.chrome.overlayPoint(event);
         const page = actions.currentPage();
         if (!page) return;
+        surface.snapGuides = [];
     
         const pageHandle = actions.editingBackground() ? null : appCtx.chrome.pageSizeHandleAt(point.x, point.y);
         if (pageHandle) {
@@ -119,6 +541,9 @@
               startBounds: handle.bounds
             };
           }
+          if (surface.drag.element && surface.drag.element.type === 'category') {
+            attachSnap(surface.drag, page, surface.drag.element, { bounds: surface.drag.startBounds });
+          }
           actions.pushUndo(surface.drag.background ? '调整背景图片' : '调整元素大小');
           beginPointer(event);
           return;
@@ -132,9 +557,18 @@
             tableIndex: divider.divider.tableIndex,
             dividerIndex: divider.divider.dividerIndex,
             startWidths: divider.divider.widths.slice(),
+            startBoundary: divider.divider.x,
+            dividerSpan: { y: divider.divider.y, height: divider.divider.height },
             startClientX: event.clientX,
             startClientY: event.clientY
           };
+          attachSnap(surface.drag, page, divider.element, {
+            divider: {
+              elementId: divider.element.id,
+              tableIndex: divider.divider.tableIndex,
+              dividerIndex: divider.divider.dividerIndex
+            }
+          });
           actions.pushUndo('调整列宽');
           beginPointer(event);
           return;
@@ -173,8 +607,10 @@
             startClientX: event.clientX,
             startClientY: event.clientY,
             startX: selectedHit.element.x,
-            startY: selectedHit.element.y
+            startY: selectedHit.element.y,
+            startBounds: selectedHit.bounds
           };
+          attachSnap(surface.drag, page, selectedHit.element, { bounds: selectedHit.bounds });
           actions.pushUndo('移动元素');
           beginPointer(event);
           return;
@@ -212,8 +648,10 @@
             startClientX: event.clientX,
             startClientY: event.clientY,
             startX: hit.element.x,
-            startY: hit.element.y
+            startY: hit.element.y,
+            startBounds: hit.bounds
           };
+          attachSnap(surface.drag, page, hit.element, { bounds: hit.bounds });
           actions.pushUndo('移动元素');
           beginPointer(event);
           return;
@@ -261,6 +699,16 @@
       }
     
       function beginPointer(event) {
+        if (surface.drag) {
+          surface.drag.lastClientX = event.clientX;
+          surface.drag.lastClientY = event.clientY;
+          surface.drag.altKey = !!event.altKey;
+          if (surface.drag.snap && !surface.drag.snapHold) {
+            surface.drag.snapHold = { x: null, y: null };
+          }
+          if (surface.drag.snap) bindSnapModifier();
+        }
+        surface.snapGuides = [];
         if (surface.overlay.setPointerCapture) surface.overlay.setPointerCapture(event.pointerId);
         renderer.setBlurCacheFrozen(true);
         event.preventDefault();
@@ -274,6 +722,16 @@
           return;
         }
         event.preventDefault();
+        surface.drag.lastClientX = event.clientX;
+        surface.drag.lastClientY = event.clientY;
+        surface.drag.altKey = !!event.altKey;
+        if (surface.drag.altKey) {
+          if (surface.drag.snapHold) {
+            surface.drag.snapHold.x = null;
+            surface.drag.snapHold.y = null;
+          }
+          surface.snapGuides = [];
+        }
         const dx = (event.clientX - surface.drag.startClientX) / viewport.scale;
         const dy = (event.clientY - surface.drag.startClientY) / viewport.scale;
     
@@ -304,8 +762,18 @@
         }
     
         if (surface.drag.type === 'move') {
-          surface.drag.element.x = Math.round(surface.drag.startX + dx);
-          surface.drag.element.y = Math.round(surface.drag.startY + dy);
+          const drag = surface.drag;
+          let x = drag.startX + dx;
+          let y = drag.startY + dy;
+          if (drag.snap) {
+            const snapped = applyMoveSnap(drag, x, y);
+            x = snapped.x;
+            y = snapped.y;
+          } else {
+            surface.snapGuides = [];
+          }
+          drag.element.x = Math.round(x);
+          drag.element.y = Math.round(y);
           appCtx.viewport.scheduleRedraw(['content', 'overlay']);
           return;
         }
@@ -411,7 +879,13 @@
         const oldWidth = element.width;
         let width;
         let x = element.x;
-        if (surface.drag.handle === 'e') {
+        const snapped = element.type === 'category' && surface.drag.snap && !surface.drag.altKey
+          ? applyWidthSnap(surface.drag, surface.drag.handle === 'e' ? 'e' : 'w', dx)
+          : null;
+        if (snapped) {
+          x = snapped.x;
+          width = snapped.width;
+        } else if (surface.drag.handle === 'e') {
           width = clamp(start.width + dx, minWidth, state.project.pageSize.width * 3);
           x = start.x;
         } else {
@@ -427,16 +901,50 @@
       }
     
       function dividerDrag(dx) {
-        const element = surface.drag.element;
-        const widths = surface.drag.startWidths.slice();
-        const index = surface.drag.dividerIndex;
+        const drag = surface.drag;
+        const element = drag.element;
+        const index = drag.dividerIndex;
+        if (index < 0 || index + 1 >= drag.startWidths.length) return;
+        if (drag.snap && !drag.altKey) {
+          const rawBoundary = drag.startBoundary + dx;
+          const result = chooseSnapAnchors(
+            [{ id: 'divider', value: rawBoundary, kind: 'divider' }],
+            drag.snap.targets.divider,
+            drag.snap,
+            drag.snapHold.x
+          );
+          if (result) {
+            const snapped = snap.applyDividerDelta({
+              widths: drag.startWidths,
+              dividerIndex: index,
+              // startWidths 对应拖动开始时的边界；结果要相对它计算，
+              // 不能直接用相对当前原始边界的结果，否则 dx 会被抵消。
+              delta: result.target.value - drag.startBoundary,
+              minWidth: layout.MIN_COL_WIDTH
+            });
+            if (snapped) {
+              drag.snapHold.x = result;
+              layout.setManualWidths(element, drag.tableIndex, snapped);
+              surface.snapGuides = [makeSnapGuide('x', result, {
+                x: rawBoundary,
+                y: drag.dividerSpan.y,
+                width: 0,
+                height: drag.dividerSpan.height
+              }, drag.snap.pageRect)];
+              return;
+            }
+          }
+        }
+        drag.snapHold.x = null;
+        surface.snapGuides = [];
+        const widths = drag.startWidths.slice();
         if (index < 0 || index + 1 >= widths.length) return;
         const left = widths[index] + dx;
         const right = widths[index + 1] - dx;
         if (left < layout.MIN_COL_WIDTH || right < layout.MIN_COL_WIDTH) return;
         widths[index] = left;
         widths[index + 1] = right;
-        layout.setManualWidths(element, surface.drag.tableIndex, widths);
+        layout.setManualWidths(element, drag.tableIndex, widths);
       }
     
       function onPointerLeave() {
@@ -493,6 +1001,8 @@
         if (!surface.drag) return;
         const finished = surface.drag;
         surface.drag = null;
+        surface.snapGuides = [];
+        unbindSnapModifier();
         renderer.setBlurCacheFrozen(false);
     
         if (finished.type === 'shape-draw') {

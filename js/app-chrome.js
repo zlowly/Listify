@@ -67,7 +67,57 @@
         surface.overlayCtx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
         surface.overlayCtx.clearRect(0, 0, viewport.width, viewport.height);
         drawSelection(surface.overlayCtx, page);
+        drawSnapGuides(surface.overlayCtx);
         drawShapePreview(surface.overlayCtx);
+      }
+
+      function drawSnapGuides(ctx) {
+        const guides = surface.snapGuides;
+        if (!Array.isArray(guides) || !guides.length) return;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(37, 99, 235, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        guides.forEach(function (guide) {
+          if (!guide || !guide.span) return;
+          const start = screenFromPage(
+            guide.axis === 'x' ? guide.value : guide.span.x,
+            guide.axis === 'x' ? guide.span.y : guide.value
+          );
+          const end = screenFromPage(
+            guide.axis === 'x' ? guide.value : guide.span.x + guide.span.width,
+            guide.axis === 'x' ? guide.span.y + guide.span.height : guide.value
+          );
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+
+          const tick = 2.5;
+          ctx.beginPath();
+          if (guide.axis === 'x') {
+            ctx.moveTo(start.x - tick, start.y);
+            ctx.lineTo(start.x + tick, start.y);
+            ctx.moveTo(end.x - tick, end.y);
+            ctx.lineTo(end.x + tick, end.y);
+          } else {
+            ctx.moveTo(start.x, start.y - tick);
+            ctx.lineTo(start.x, start.y + tick);
+            ctx.moveTo(end.x, end.y - tick);
+            ctx.lineTo(end.x, end.y + tick);
+          }
+          ctx.stroke();
+
+          if (guide.marker) {
+            const marker = screenFromPage(guide.marker.x, guide.marker.y);
+            const half = (Number(guide.marker.length) || 6) / 2;
+            ctx.beginPath();
+            ctx.moveTo(marker.x - half, marker.y);
+            ctx.lineTo(marker.x + half, marker.y);
+            ctx.stroke();
+          }
+        });
+        ctx.restore();
       }
 
       function drawShapePreview(ctx) {
