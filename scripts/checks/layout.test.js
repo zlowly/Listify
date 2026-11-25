@@ -44,6 +44,9 @@ function project() {
 
 function categoryElement(name, width, tables) {
   const element = model.createCategoryElement(name, 0, 0, project(), width);
+  // 布局基线固定用 44/28 号字；默认初始值由 model.test.js 单独覆盖。
+  element.titleStyle.fontSize = 44;
+  element.songStyle.fontSize = 28;
   element.tables = tables;
   return element;
 }
