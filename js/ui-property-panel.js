@@ -161,6 +161,15 @@
     }
   }
 
+  /* 聚焦高亮与实际焦点同步：焦点已不在任何表格卡片内（删表、重建后焦点丢失）时清除 */
+  function syncTableFocusHighlight() {
+    if (!L.app || L.app.state.focusTableIndex == null) return;
+    const active = document.activeElement;
+    if (active && active.closest && ui.els.propertyPanel.contains(active) &&
+      active.closest('.table-card')) return;
+    L.app.setFocusTableIndex(null);
+  }
+
   /* 预览框跟随页面比例：等比装进 96×96 的箱，页面比例优先于最短边下限 */
   function previewBox(pageSize) {
     const pw = Math.max(1, Number(pageSize && pageSize.width) || 1);
@@ -192,6 +201,7 @@
       renderer.paintBackgroundPreviews(ui.els.propertyPanel);
     } finally {
       restorePanelFocus(focusState);
+      syncTableFocusHighlight();
     }
   };
 
@@ -870,8 +880,10 @@
     });
     bindCategoryStyle('prop-title', element.titleStyle);
     bindCategoryStyle('prop-song', element.songStyle);
-    bindAddTable(element, category, ui.els.propertyPanel.querySelector('[data-group="tables"]'));
-    bindAutoLayout(element, category, ui.els.propertyPanel.querySelector('[data-group="tables"]'));
+    const tablesGroup = ui.els.propertyPanel.querySelector('[data-group="tables"]');
+    bindAddTable(element, category, tablesGroup);
+    bindAutoLayout(element, category, tablesGroup);
+    bindTableFocus(tablesGroup);
     bind('prop-delete-block', 'click', function () {
       L.app.deleteSelection();
     });
@@ -977,6 +989,22 @@
       helpTip('只有最后一个表格可以是动态行（行数 0）。列宽拖动后整表变为固定列宽。表格边距相对分类块边缘，上下边距相加。');
   }
 
+  /* 表格卡片的聚焦委托：聚焦组内任一控件时在画布上高亮对应表格（chrome 层） */
+  function bindTableFocus(group) {
+    if (!group) return;
+    group.addEventListener('focusin', function (event) {
+      const card = event.target.closest('.table-card');
+      if (!card) return;
+      L.app.setFocusTableIndex(Number(card.getAttribute('data-table-index')));
+    });
+    group.addEventListener('focusout', function (event) {
+      const card = event.target.closest('.table-card');
+      if (!card) return;
+      if (event.relatedTarget && card.contains(event.relatedTarget)) return;
+      L.app.setFocusTableIndex(null);
+    });
+  }
+
   /* 添加表格按钮绑定：结构动作只做表格组级刷新（只更新受影响区域） */
   function bindAddTable(element, category, group) {
     bind('prop-add-table', 'click', function () {
@@ -1048,6 +1076,7 @@
     card.replaceWith(next);
     bindTableCard(next, element, category);
     restorePanelFocus(focusState);
+    syncTableFocusHighlight();
   }
 
   /* 只替换表格组内容（卡片 + 添加按钮）与组头计数，
@@ -1065,6 +1094,7 @@
     bindAddTable(element, category, group);
     bindAutoLayout(element, category, group);
     restorePanelFocus(focusState);
+    syncTableFocusHighlight();
   }
 
   function textStyleFields(prefix, style) {

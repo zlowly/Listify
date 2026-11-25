@@ -18,6 +18,8 @@
     project: model.createDefaultProject(),
     currentPageId: null,
     selection: { type: 'page' },
+    // 属性面板「表格」卡片聚焦的表格下标（null = 无聚焦）；chrome 据此画聚焦高亮
+    focusTableIndex: null,
     shapeTool: { active: false, target: 'content', pageId: null, preview: null }
   };
   state.currentPageId = state.project.pages[0].id;
@@ -729,6 +731,14 @@ const viewport = {
     ui.renderAll();
   }
 
+  /* 属性面板表格卡片的聚焦状态：仅影响编辑装饰层（drawSelection 所在的 overlay），不进导出 */
+  function setFocusTableIndex(index) {
+    const next = Number.isInteger(index) ? index : null;
+    if (state.focusTableIndex === next) return;
+    state.focusTableIndex = next;
+    changed({ property: false, layers: ['overlay'] });
+  }
+
   /* ---------- 属性意图动作（供 UI 面板写入） ---------- */
 
   const ELEMENT_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'blur', 'text', 'showTitle',
@@ -1438,6 +1448,7 @@ const viewport = {
     jumpToCategory: jumpToCategory,
     openPlaylistEditor: openPlaylistEditor,
     changed: changed,
+    setFocusTableIndex: setFocusTableIndex,
     fit: ctx.viewport.fit,
     redraw: ctx.viewport.redraw,
     handleResize: ctx.viewport.handleResize,

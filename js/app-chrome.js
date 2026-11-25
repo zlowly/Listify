@@ -513,7 +513,11 @@
           }
         }
     
-        if (element.type === 'category') drawTableDividers(ctx, page, element);
+        if (element.type === 'category') {
+          drawTableDividers(ctx, page, element);
+          drawTableBadges(ctx, page, element);
+          drawTableFocus(ctx, page, element);
+        }
       }
     
       function drawBackgroundSelection(ctx, item) {
@@ -575,6 +579,65 @@
           drawRoundHandle(ctx, x, y + h / 2, active ? 5 : 3.5, active ? '#1d4ed8' : '#60a5fa', '#ffffff');
         });
         ctx.restore();
+      }
+
+      /* 每张表格的页面坐标渲染盒：与 tableDividers 同源的 layoutCategory 结果，逐帧现算以跟随重排 */
+      function tableBoxes(page, element) {
+        const computed = layout.layoutCategory(
+          model.getCategory(state.project, element.category), element, { editMode: true });
+        return (computed.tables || []).map(function (table) {
+          let width = 0;
+          (table.widths || []).forEach(function (w) { width += w; });
+          return {
+            x: element.x + table.x,
+            y: element.y + table.y,
+            width: width,
+            height: table.height
+          };
+        });
+      }
+
+      /* 聚焦高亮：属性面板「表格」卡片聚焦时，高亮对应表格的渲染盒 */
+      function drawTableFocus(ctx, page, element) {
+        const index = state.focusTableIndex;
+        if (!Number.isInteger(index)) return;
+        const box = tableBoxes(page, element)[index];
+        if (!box || !(box.width > 0) || !(box.height > 0)) return;
+        const x = viewport.offsetX + box.x * viewport.scale;
+        const y = viewport.offsetY + box.y * viewport.scale;
+        const width = box.width * viewport.scale;
+        const height = box.height * viewport.scale;
+        ctx.save();
+        ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
+        ctx.fillRect(x, y, width, height);
+        ctx.strokeStyle = '#2563eb';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.strokeRect(x, y, width, height);
+        ctx.restore();
+      }
+
+      /* 序号角标：与属性卡片"表格 N"对应的常驻标记，屏幕定尺寸（不随缩放变化） */
+      function drawTableBadges(ctx, page, element) {
+        const boxes = tableBoxes(page, element);
+        const size = 14;
+        boxes.forEach(function (box, index) {
+          if (!(box.width > 0) || !(box.height > 0)) return;
+          const x = viewport.offsetX + box.x * viewport.scale - size / 2 - 2;
+          const y = viewport.offsetY + box.y * viewport.scale - size / 2 - 2;
+          ctx.save();
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(x, y, size, size, 4);
+          else ctx.rect(x, y, size, size);
+          ctx.fillStyle = '#2563eb';
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(index + 1), x + size / 2, y + size / 2 + 0.5);
+          ctx.restore();
+        });
       }
     
       function drawPageSizeHandle(ctx, rect) {
