@@ -301,35 +301,41 @@ const viewport = {
 
   /* ---------- page and selection actions ---------- */
 
+  // 统一插入落点解析：纯逻辑在 model.insertTarget（Node 回归可测），此处仅转接。
+  function insertTarget(selection, project, page) {
+    return model.insertTarget(selection, project, page);
+  }
+
   /* 静态节点（工具条按钮）可直接命令式更新；属性面板里的入口按钮每次重渲染都会重建，
      其按下态必须在渲染期从 state.shapeTool 派生。 */
-  // 工具栏背景组：被全局背景覆盖的非来源页整组禁用（aria-disabled 保留点击以给出提示）。
-  function updateBackgroundToolButtons() {
+  // 统一插入组按钮态：aria-label 随落点声明，被覆盖页选中背景时禁用（aria-disabled 保留点击以给出提示）。
+  function updateInsertButtons() {
     const page = currentPage();
-    const covered = !!page && !model.canEditPageBackground(state.project, page);
-    ['btn-add-bg-text', 'btn-add-bg-image', 'btn-add-bg-shape'].forEach(function (id) {
+    const resolved = insertTarget(state.selection, state.project, page);
+    const labels = {
+      'btn-add-text': ['添加文字', '添加背景文字'],
+      'btn-add-image': ['添加图片（也可 Ctrl+V 粘贴）', '添加背景图片'],
+      'btn-add-shape': ['添加图形（拖拽绘制，单击插入方形，画一次即退出）', '添加背景图形（拖拽绘制，单击插入方形，画一次即退出）']
+    };
+    Object.keys(labels).forEach(function (id) {
       const button = document.getElementById(id);
       if (!button) return;
-      button.setAttribute('aria-disabled', covered ? 'true' : 'false');
-      button.classList.toggle('is-disabled', covered);
-      button.title = covered ? '全局背景生效中，请先取消全局背景。' : '';
+      const isBackground = resolved.target === 'background';
+      button.setAttribute('aria-label', isBackground ? labels[id][1] : labels[id][0]);
+      button.setAttribute('aria-disabled', resolved.disabled ? 'true' : 'false');
+      button.classList.toggle('is-disabled', resolved.disabled);
+      button.title = resolved.disabled ? resolved.reason : '';
     });
   }
 
   function updateShapeToolButton() {
-    // 落点由所点按钮直接决定：当前落点对应按钮显示按下态，另一个按钮不显示。
-    const buttons = [
-      ['btn-add-shape', 'content'],
-      ['btn-add-bg-shape', 'background']
-    ];
+    // 落点在工具激活时锁定：单按钮，按下态即表示工具激活。
+    const button = document.getElementById('btn-add-shape');
     const active = state.shapeTool.active;
-    buttons.forEach(function (entry) {
-      const button = document.getElementById(entry[0]);
-      if (!button) return;
-      const isActive = active && state.shapeTool.target === entry[1];
-      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      button.classList.toggle('is-active', isActive);
-    });
+    if (button) {
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.classList.toggle('is-active', active);
+    }
     const pane = document.getElementById('canvas-pane');
     if (pane) pane.classList.toggle('shape-tool-active', active);
   }
@@ -343,29 +349,29 @@ const viewport = {
     if (ctx.chrome) ctx.chrome.refreshHoverCursor();
   }
 
-  function toggleShapeTool(target) {
+  function toggleShapeTool() {
     const page = currentPage();
     if (!page) return;
-    const nextTarget = target === 'background' ? 'background' : 'content';
-    if (state.shapeTool.active &&
-        state.shapeTool.target === nextTarget &&
-        state.shapeTool.pageId === page.id) {
+    if (state.shapeTool.active && state.shapeTool.pageId === page.id) {
       exitShapeTool();
       ui.renderAll();
       return;
     }
-    if (nextTarget === 'background' && !model.canEditPageBackground(state.project, page)) {
-      ui.toast('全局背景生效中，请先取消全局背景。');
-      return;
+    const resolved = insertTarget(state.selection, state.project, page);
+    if (resolved.target === 'background') {
+      if (resolved.disabled) {
+        ui.toast(resolved.reason);
+        return;
+      }
     }
     state.shapeTool.active = true;
-    state.shapeTool.target = nextTarget;
+    state.shapeTool.target = resolved.target;
     state.shapeTool.pageId = page.id;
     state.shapeTool.preview = null;
     state.selection = { type: 'page' };
     updateShapeToolButton();
     ui.renderAll();
-    ui.toast(nextTarget === 'background'
+    ui.toast(resolved.target === 'background'
       ? '图形工具：拖拽或单击，把图形添加到背景层；画一次即退出，Esc 取消。'
       : '图形工具：拖拽或单击，把图形添加到内容层；画一次即退出，Esc 取消。');
   }
@@ -382,6 +388,13 @@ const viewport = {
     const page = currentPage();
     if (!page || !model.canEditPageBackground(state.project, page)) return;
     state.selection = { type: 'background' };
+    ui.renderAll();
+  }
+
+  // 选中图层面板的常驻「内容层」分组头行：插入落点切到内容层。
+  // 不退出图形工具——落点在激活时已锁定，激活期间改变选中 MUST NOT 改变本会话落点。
+  function selectContentLayer() {
+    state.selection = { type: 'content-layer' };
     ui.renderAll();
   }
 
@@ -928,6 +941,27 @@ const viewport = {
 
   /* ---------- content creation ---------- */
 
+  // 统一插入入口：按 insertTarget 的解析结果分发到内容层或背景层。
+  function insertText() {
+    const page = currentPage();
+    if (!page) return;
+    if (insertTarget(state.selection, state.project, page).target === 'background') {
+      addBackgroundText();
+    } else {
+      addText();
+    }
+  }
+
+  function insertImage() {
+    const page = currentPage();
+    if (!page) return;
+    if (insertTarget(state.selection, state.project, page).target === 'background') {
+      ctx.backgrounds.pickBackgroundImage(null);
+    } else {
+      pickFreeImage();
+    }
+  }
+
   function addText() {
     const page = currentPage();
     if (!page) return;
@@ -1320,6 +1354,7 @@ const viewport = {
     selectPage: selectPage,
     selectElement: selectElement,
     selectBackground: selectBackground,
+    selectContentLayer: selectContentLayer,
     selectBackgroundImage: selectBackgroundImage,
     selectBackgroundItem: selectBackgroundItem,
     selectBackgroundShape: selectBackgroundShape,
@@ -1346,8 +1381,11 @@ const viewport = {
     setBackgroundColor: setBackgroundColor,
     setBackgroundImageField: setBackgroundImageField,
     addText: addText,
+    insertText: insertText,
+    insertImage: insertImage,
     addBackgroundText: addBackgroundText,
-    updateBackgroundToolButtons: updateBackgroundToolButtons,
+    updateInsertButtons: updateInsertButtons,
+    insertTarget: insertTarget,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
@@ -1383,6 +1421,7 @@ const viewport = {
     selectedElement: selectedElement,
     selectPage: selectPage,
     selectBackground: selectBackground,
+    selectContentLayer: selectContentLayer,
     selectBackgroundImage: selectBackgroundImage,
     selectBackgroundItem: selectBackgroundItem,
     selectBackgroundShape: selectBackgroundShape,
@@ -1417,8 +1456,11 @@ const viewport = {
     autoLayoutCategory: autoLayoutCategory,
     resizeElementWidth: resizeElementWidth,
     addText: addText,
+    insertText: insertText,
+    insertImage: insertImage,
     addBackgroundText: addBackgroundText,
-    updateBackgroundToolButtons: updateBackgroundToolButtons,
+    updateInsertButtons: updateInsertButtons,
+    insertTarget: insertTarget,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,

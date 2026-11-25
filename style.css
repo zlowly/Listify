@@ -439,6 +439,7 @@ button { cursor: pointer; }
 }
 .layer-sub { color: var(--muted); font-size: 10px; }
 .layer-bg-row { background: #fbfcfd; }
+.layer-element-row,
 .layer-bg-image-row {
   margin-left: 18px;
   border-left: 2px solid #e2e8f0;

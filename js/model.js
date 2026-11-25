@@ -722,6 +722,24 @@
     return !!page && !!page.background && !isBackgroundCovered(project, page);
   }
 
+  // 统一插入落点解析（纯逻辑，Node 回归可测）：图层面板选中背景（背景行或背景条目）
+  // → 背景层；其余（内容层分组头、内容元素行、无选中、页面）一律 → 内容层。
+  // 被全局背景覆盖的非来源页选中背景时，返回禁用与提示文案。
+  function insertTarget(selection, project, page) {
+    const sel = selection || { type: 'page' };
+    if (sel.type === 'background' || sel.type === 'backgroundItem') {
+      if (page && !canEditPageBackground(project, page)) {
+        return {
+          target: 'background',
+          disabled: true,
+          reason: '全局背景生效中，请先取消全局背景。'
+        };
+      }
+      return { target: 'background', disabled: false };
+    }
+    return { target: 'content', disabled: false };
+  }
+
   // 画布空态判定：无歌单分类、当前页无内容元素、有效背景也没有条目（图片或图形）。
   function isPageEmpty(project, page) {
     if (!project) return true;
@@ -1299,6 +1317,7 @@
     effectiveBackground: effectiveBackground,
     isBackgroundCovered: isBackgroundCovered,
     canEditPageBackground: canEditPageBackground,
+    insertTarget: insertTarget,
     isPageEmpty: isPageEmpty,
     setGlobalBackgroundPage: setGlobalBackgroundPage,
     clearGlobalBackground: clearGlobalBackground,

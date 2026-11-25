@@ -234,35 +234,15 @@
       L.app.openPlaylistEditor();
     });
     document.getElementById('btn-add-text').addEventListener('click', function () {
-      L.app.addText();
+      L.app.insertText();
     });
     document.getElementById('btn-add-image').addEventListener('click', function () {
-      L.app.pickFreeImage();
+      L.app.insertImage();
     });
     const addShapeButton = document.getElementById('btn-add-shape');
     if (addShapeButton) {
       addShapeButton.addEventListener('click', function () {
-        L.app.toggleShapeTool('content');
-      });
-    }
-    const bgShapeButton = document.getElementById('btn-add-bg-shape');
-    if (bgShapeButton) {
-      bgShapeButton.addEventListener('click', function () {
-        L.app.toggleShapeTool('background');
-      });
-    }
-    const bgTextButton = document.getElementById('btn-add-bg-text');
-    if (bgTextButton) {
-      bgTextButton.addEventListener('click', function () {
-        if (ui.backgroundToolsCovered()) return;
-        L.app.addBackgroundText();
-      });
-    }
-    const bgImageButton = document.getElementById('btn-add-bg-image');
-    if (bgImageButton) {
-      bgImageButton.addEventListener('click', function () {
-        if (ui.backgroundToolsCovered()) return;
-        L.app.pickBackgroundImage(null);
+        L.app.toggleShapeTool();
       });
     }
     document.getElementById('btn-new').addEventListener('click', function () {
@@ -426,7 +406,7 @@
     ui.updateSelectionLabel();
     ui.updateEmptyHint();
     if (L.app) {
-      L.app.updateBackgroundToolButtons();
+      L.app.updateInsertButtons();
       L.app.redraw();
     }
   };
@@ -582,6 +562,17 @@
     const selection = L.app.state.selection;
     if (!page) return;
     const rows = [];
+    // 常驻「内容层」分组头行：与背景行对称的落点指示，空内容层时仍显示。
+    const contentLayerSelected = selection.type === 'content-layer';
+    rows.push('<div class="layer-row layer-content-header-row' + (contentLayerSelected ? ' selected' : '') +
+      '" data-layer-kind="contentLayer">' +
+      '<button type="button" class="layer-row-main" aria-label="内容层，点击后插入操作落到内容层">' +
+      '<span class="layer-icon" aria-hidden="true">▤</span>' +
+      '<span class="layer-name">内容层' +
+        (page.elements.length ? '' : '<span class="layer-sub"> 空</span>') + '</span>' +
+      '<span class="pill">顶层</span>' +
+      '</button>' +
+      '</div>');
     const imageNumbers = elementImageNumbers(page.elements);
     const elements = page.elements.slice().reverse();
     elements.forEach(function (element, reverseIndex) {
@@ -616,7 +607,7 @@
         sub = '自由图形';
       }
       const label = name + (imageNumber ? ' ' + imageNumber : '');
-      rows.push('<div class="layer-row' + (selected ? ' selected' : '') +
+      rows.push('<div class="layer-row layer-element-row' + (selected ? ' selected' : '') +
         '" data-layer-kind="element" data-layer-id="' + esc(element.id) + '">' +
         '<button type="button" class="layer-row-main" draggable="true"' + (cropTitle ? ' title="' + esc(cropTitle) + '"' : '') + ' aria-label="' +
           esc(label + '，' + sub + '，拖动可调整层级') + '">' +
@@ -718,6 +709,10 @@
       main.addEventListener('click', function () {
         if (kind === 'element') {
           L.app.selectElement(row.getAttribute('data-layer-id'));
+          return;
+        }
+        if (kind === 'contentLayer') {
+          L.app.selectContentLayer();
           return;
         }
         if (kind === 'bgSet') {
@@ -835,18 +830,6 @@
     const project = L.app.state.project;
     const page = L.app.currentPage();
     ui.els.emptyHint.hidden = !model.isPageEmpty(project, page);
-  };
-
-  // 工具栏背景组按钮在被全局背景覆盖时的点击拦截：给提示并吞掉本次点击。
-  ui.backgroundToolsCovered = function () {
-    const app = L.app;
-    if (!app || !app.state) return false;
-    const page = app.currentPage ? app.currentPage() : null;
-    if (page && !model.canEditPageBackground(app.state.project, page)) {
-      ui.toast('全局背景生效中，请先取消全局背景。');
-      return true;
-    }
-    return false;
   };
 
   ui.toast = function (message, type) {
