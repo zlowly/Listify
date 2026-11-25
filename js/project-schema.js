@@ -99,6 +99,17 @@
         validateShapeItem(item, itemLabel, fail);
         return;
       }
+      if (item.kind === 'text') {
+        if (typeof item.text !== 'string' || !item.style) {
+          fail(itemLabel + '的文字内容或样式无效。');
+        }
+        if (!isFiniteNumber(item.x) || !isFiniteNumber(item.y) ||
+            !isFiniteNumber(item.width) || item.width <= 0 ||
+            !isFiniteNumber(item.height) || item.height <= 0) {
+          fail(itemLabel + '的矩形无效。');
+        }
+        return;
+      }
       if (item.kind !== 'image' && !(item.kind == null && opts.allowMissingKind)) {
         fail(itemLabel + '类型无效。');
         return;
@@ -541,8 +552,23 @@
     return L.shape.clampShape(shape);
   }
 
+  function buildBackgroundText(raw) {
+    const defaults = L.model.createBackgroundText(null, raw.text);
+    if (raw.id) defaults.id = raw.id;
+    defaults.x = Number(raw.x) || 0;
+    defaults.y = Number(raw.y) || 0;
+    defaults.width = Number(raw.width) || defaults.width;
+    defaults.height = Number(raw.height) || defaults.height;
+    defaults.text = typeof raw.text === 'string' ? raw.text : defaults.text;
+    defaults.style = raw.style && typeof raw.style === 'object'
+      ? L.model.normalizeStyle(raw.style)
+      : defaults.style;
+    return defaults;
+  }
+
   function buildBackgroundItem(raw) {
     if (raw && raw.kind === 'shape') return buildShapeItem(raw);
+    if (raw && raw.kind === 'text') return buildBackgroundText(raw);
     return buildBackgroundImage(raw || {});
   }
 

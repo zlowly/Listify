@@ -395,6 +395,11 @@
           drawShape(ctx, item, opts);
           return;
         }
+        if (item && item.kind === 'text') {
+          // 背景文字与自由文字同构（x/y/width/text/style），页面级剪裁已由外层完成。
+          drawFreeText(ctx, item);
+          return;
+        }
         const image = item;
         if (!image || !image.assetId) return;
         const img = L.assets.getCachedImage(image.assetId);
@@ -961,6 +966,8 @@
       let visible = null;
       if (item.kind === 'shape') {
         rect = { x: item.x, y: item.y, width: item.width, height: item.height };
+      } else if (item.kind === 'text') {
+        rect = { x: item.x, y: item.y, width: item.width, height: item.height };
       } else {
         if (!item.assetId) continue;
         const img = L.assets.getCachedImage(item.assetId);
@@ -976,6 +983,9 @@
       let hit;
       if (item.kind === 'shape') {
         hit = shape.shapeContains(item, local.x, local.y);
+      } else if (item.kind === 'text') {
+        hit = Math.abs(local.x - centerX) <= rect.width / 2 &&
+          Math.abs(local.y - centerY) <= rect.height / 2;
       } else {
         const visibleX = visible.x + visible.width / 2 - centerX;
         const visibleY = visible.y + visible.height / 2 - centerY;
@@ -986,7 +996,7 @@
         return {
           background: background,
           item: item,
-          image: item.kind === 'shape' ? null : item,
+          image: item.kind === 'image' ? item : null,
           index: i,
           rect: visible || rect
         };
@@ -1001,7 +1011,7 @@
     const items = background && (background.items || background.images);
     if (Array.isArray(items)) {
       items.forEach(function (item) {
-        if (item && item.kind !== 'shape' && item.assetId) ids.add(item.assetId);
+        if (item && item.kind === 'image' && item.assetId) ids.add(item.assetId);
       });
     }
     page.elements.forEach(function (element) {
@@ -1016,7 +1026,7 @@
       const background = page && page.background;
       const items = background && (background.items || background.images);
       (items || []).forEach(function (item) {
-        if (item && item.kind !== 'shape' && item.assetId) ids.add(item.assetId);
+        if (item && item.kind === 'image' && item.assetId) ids.add(item.assetId);
       });
     });
     return Array.from(ids);

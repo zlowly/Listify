@@ -519,8 +519,8 @@
       function drawBackgroundSelection(ctx, item) {
         const bounds = actions.backgroundItemBounds(item);
         if (!(bounds.width > 0) || !(bounds.height > 0)) return;
-        const img = item.kind !== 'shape' && item.assetId ? L.assets.getCachedImage(item.assetId) : null;
-        const box = item.kind === 'shape'
+        const img = item.kind === 'image' && item.assetId ? L.assets.getCachedImage(item.assetId) : null;
+        const box = item.kind === 'shape' || item.kind === 'text'
           ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: item.rotation }
           : (renderer.backgroundVisibleBox(state.project.pageSize, item, img) || {
             x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, rotation: item.rotation
@@ -548,7 +548,7 @@
           drawPivotCross(ctx, surface.drag.center);
         }
         ctx.restore();
-        if (item.kind !== 'shape' && img && model.hasCrop(item)) {
+        if (item.kind === 'image' && img && model.hasCrop(item)) {
           const frame = renderer.backgroundImageRect(state.project.pageSize, item, img);
           const natural = L.assets.imageSize(img);
           drawCropGuides(ctx, frame, natural, item.crop, item.rotation);
@@ -595,7 +595,7 @@
         const backgroundItem = actions.selectedBackgroundItem();
         if (backgroundItem) {
           const bounds = actions.backgroundItemBounds(backgroundItem);
-          const img = backgroundItem.kind !== 'shape' && backgroundItem.assetId
+          const img = backgroundItem.kind === 'image' && backgroundItem.assetId
             ? L.assets.getCachedImage(backgroundItem.assetId)
             : null;
           const box = backgroundItem.kind === 'shape'

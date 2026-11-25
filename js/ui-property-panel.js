@@ -220,6 +220,7 @@
         return;
       }
       if (item.kind === 'shape') renderShapeProperties(item, { background: true, page: page });
+      else if (item.kind === 'text') renderBackgroundTextProperties(item, page);
       else renderBackgroundImageProperties(page, item);
       return;
     }
@@ -291,7 +292,7 @@
     const covered = model.isBackgroundCovered(project, page);
     const isSource = !!(source && source.id === page.id);
     const items = page.background.items || page.background.images || [];
-    const imageCount = items.filter(function (item) { return item.kind !== 'shape'; }).length;
+    const imageCount = items.filter(function (item) { return item.kind === 'image'; }).length;
     const shapeCount = items.filter(function (item) { return item.kind === 'shape'; }).length;
     const count = items.length;
     const box = previewBox(project.pageSize);
@@ -299,9 +300,6 @@
     const badges = '<span class="pill pill-gray">图片 ' + imageCount + ' · 图形 ' + shapeCount + '</span>' +
       (isSource ? '<span class="pill pill-blue">全局来源</span>' : '');
     const preview = backgroundPreview(page, '', box);
-    const shapeTool = L.app.state.shapeTool;
-    const shapeArmed = !!(shapeTool && shapeTool.active && shapeTool.target === 'background' &&
-      shapeTool.pageId === page.id);
     const tip = '背景位于内容下方。选择或更换背景会整套替换填充色、图片与图形；' +
       '勾选后所有页使用本页背景，改本页会同步所有页。';
     let body;
@@ -322,10 +320,6 @@
           '</div>' +
         '</div>' +
         '<div class="bg-actions">' +
-          '<button id="prop-bg-add-shape" class="btn btn-sm' + (shapeArmed ? ' is-active' : '') +
-            '" type="button" aria-label="添加背景图形（画一次即退出）" aria-pressed="' +
-            (shapeArmed ? 'true' : 'false') + '">＋ 图形</button>' +
-          '<button id="prop-bg-add-image" class="btn btn-sm" type="button" aria-label="添加背景图片">＋ 图片</button>' +
           '<button id="prop-bg-pick" class="btn btn-sm" type="button">' + (count ? '更换背景' : '选择背景') + '</button>' +
           '<button id="prop-bg-copy-from" class="btn btn-sm" type="button">复制背景…</button>' +
           '<button id="prop-bg-clear" class="btn btn-sm" type="button"' + (count ? '' : ' disabled') + '>清空背景</button>' +
@@ -348,8 +342,6 @@
       if (label) label.textContent = value;
     });
     bind('prop-bg-pick', 'click', function () { openPresetPicker('whole', null); });
-    bind('prop-bg-add-image', 'click', function () { openPresetPicker('add', null); });
-    bind('prop-bg-add-shape', 'click', function () { L.app.toggleShapeTool('background'); });
     bind('prop-bg-copy-from', 'click', function () {
       if (openCopyBackground) openCopyBackground(page.id);
     });
@@ -1134,6 +1126,60 @@
     });
     bindShadowOutline('prop-text', element.style);
     bind('prop-delete-block', 'click', function () { L.app.deleteSelection(); });
+  }
+
+  // 背景文字条目：字段构造与自由文字共用，写入走 setBackgroundItemField intent 方法。
+  function renderBackgroundTextProperties(item, page) {
+    const project = L.app.state.project;
+    const isSource = page && project.globalBackgroundPageId === page.id;
+    ui.els.propertyPanel.innerHTML =
+      propGroup('info', '背景文字',
+        '<p class="hint">所属背景：第 ' + pageNumber(project, page) + ' 页' +
+          (isSource ? '（全局来源，修改会影响所有页面）' : '') + '</p>') +
+      propGroup('content', '内容',
+        fieldHelp('文字', '<textarea id="prop-bgtext-content" class="input" rows="3" style="height:auto;padding:6px 7px;resize:vertical">' +
+          esc(item.text) + '</textarea>')) +
+      propGroup('layout', '位置与尺寸',
+        fieldPair(
+          '位置 X', numberInput('prop-bgtext-x', Math.round(item.x), -5000, 10000, 1, false, 10),
+          '位置 Y', numberInput('prop-bgtext-y', Math.round(item.y), -5000, 20000, 1, false, 10)
+        ) +
+        fieldHelp('宽度', numberInput('prop-bgtext-w', Math.round(item.width), 40, 5000, 1, false, 10) + '<span class="unit">px</span>',
+          '高度随文字自动增长。')) +
+      propGroup('style', '文字样式',
+        textStyleFields('prop-bgtext', item.style)) +
+      propGroup('actions', '', '<button id="prop-bgtext-delete" class="btn btn-danger btn-sm">删除背景文字</button>', { plain: true });
+
+    bind('prop-bgtext-content', 'input', function () {
+      L.app.setBackgroundItemField('text', valueOf('prop-bgtext-content'));
+    });
+    bind('prop-bgtext-x', 'input', function () {
+      L.app.setBackgroundItemField('x', Number(valueOf('prop-bgtext-x')) || 0);
+    });
+    bind('prop-bgtext-y', 'input', function () {
+      L.app.setBackgroundItemField('y', Number(valueOf('prop-bgtext-y')) || 0);
+    });
+    bind('prop-bgtext-w', 'input', function () {
+      L.app.setBackgroundItemField('width', Math.max(40, Number(valueOf('prop-bgtext-w')) || 40));
+    });
+    bindFontList('prop-bgtext', item.style);
+    bind('prop-bgtext-size', 'input', function () {
+      L.app.setBackgroundItemStyleField('fontSize', Math.max(6, Number(valueOf('prop-bgtext-size')) || 6));
+    });
+    bind('prop-bgtext-weight', 'change', function () {
+      L.app.setBackgroundItemStyleField('fontWeight', Number(valueOf('prop-bgtext-weight')));
+    });
+    bind('prop-bgtext-color', 'input', function () {
+      L.app.setBackgroundItemStyleField('color', valueOf('prop-bgtext-color'));
+    });
+    bind('prop-bgtext-lineheight', 'input', function () {
+      L.app.setBackgroundItemStyleField('lineHeight', Math.max(0.8, Number(valueOf('prop-bgtext-lineheight')) || 0.8));
+    });
+    bind('prop-bgtext-align', 'change', function () {
+      L.app.setBackgroundItemStyleField('align', valueOf('prop-bgtext-align'));
+    });
+    bindShadowOutline('prop-bgtext', item.style);
+    bind('prop-bgtext-delete', 'click', function () { L.app.deleteSelection(); });
   }
 
   /* 方形与菱形共用外接框；菱形内夹角由宽高推导，不单独持久化 */

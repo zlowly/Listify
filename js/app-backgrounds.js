@@ -32,7 +32,7 @@
 
       function imageItems(page) {
         return items(page).filter(function (item) {
-          return item && item.kind !== 'shape';
+          return item && item.kind === 'image';
         });
       }
 
@@ -41,7 +41,7 @@
           return item.kind === 'shape' ? null : item.assetId;
         }).filter(Boolean));
         (previous && (previous.items || previous.images) || []).forEach(function (item) {
-          if (item && item.kind !== 'shape' && item.assetId && !keep.has(item.assetId)) {
+          if (item && item.kind === 'image' && item.assetId && !keep.has(item.assetId)) {
             actions.releaseUnusedAsset(item.assetId);
           }
         });
@@ -107,7 +107,7 @@
         actions.pushUndo('更换背景');
         page.background = model.clonePageBackground(background);
         releaseBackgroundAssets(previous, page.background);
-        const firstImage = items(page).find(function (item) { return item.kind !== 'shape'; });
+        const firstImage = items(page).find(function (item) { return item.kind === 'image'; });
         state.selection = firstImage
           ? { type: 'backgroundItem', itemId: firstImage.id }
           : { type: 'background' };
@@ -153,7 +153,7 @@
           await appCtx.draft.persistDraftAssetQuietly(assetId);
           const background = page.background;
           const target = imageId
-            ? items(page).find(function (item) { return item.id === imageId && item.kind !== 'shape'; })
+            ? items(page).find(function (item) { return item.id === imageId && item.kind === 'image'; })
             : null;
           if (target) {
             const oldAssetId = target.assetId;
@@ -224,7 +224,7 @@
         const page = currentEditablePage();
         if (!page) return;
         const image = items(page).find(function (item) {
-          return item.id === imageId && item.kind !== 'shape';
+          return item.id === imageId && item.kind === 'image';
         });
         if (!image) return;
         deleteBackgroundItem(imageId);
@@ -265,7 +265,7 @@
         const page = currentEditablePage();
         if (!page) return;
         const image = items(page).find(function (item) {
-          return item.id === imageId && item.kind !== 'shape';
+          return item.id === imageId && item.kind === 'image';
         });
         if (!image) return;
         if (fit === 'none') {
@@ -285,7 +285,7 @@
         const page = currentEditablePage();
         if (!page) return;
         const image = items(page).find(function (item) {
-          return item.id === imageId && item.kind !== 'shape';
+          return item.id === imageId && item.kind === 'image';
         });
         if (!image) return;
         image[key] = value;

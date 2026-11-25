@@ -14,7 +14,7 @@
       const background = page && page.background;
       const items = background && (background.items || background.images) || [];
       items.forEach(function (item) {
-        if (item && item.kind !== 'shape' && item.assetId) ids.add(item.assetId);
+        if (item && item.kind === 'image' && item.assetId) ids.add(item.assetId);
       });
       (page.elements || []).forEach(function (element) {
         if (element.type === 'image' && element.assetId) ids.add(element.assetId);

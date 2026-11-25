@@ -487,7 +487,7 @@
           if (handle.type === 'rotate' || handle.type === 'rotate-background') {
             const isBackground = handle.type === 'rotate-background';
             const target = isBackground ? (handle.item || handle.image) : handle.element;
-            if (isBackground && target.kind !== 'shape') actions.ensureCustomBackgroundImage(target);
+            if (isBackground && target.kind === 'image') actions.ensureCustomBackgroundImage(target);
             const pp = appCtx.viewport.toPage(point.x, point.y);
             const centerX = target.x + target.width / 2;
             const centerY = target.y + target.height / 2;
@@ -513,7 +513,7 @@
           }
           if (handle.type === 'resize-background') {
             const target = handle.item || handle.image;
-            if (target.kind !== 'shape') actions.ensureCustomBackgroundImage(target);
+            if (target.kind === 'image') actions.ensureCustomBackgroundImage(target);
             const bounds = actions.backgroundItemBounds
               ? actions.backgroundItemBounds(target)
               : actions.backgroundImageBounds(target);
@@ -621,7 +621,7 @@
           const selectionId = state.selection.itemId || state.selection.imageId;
           const backgroundPriority = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
           if (backgroundPriority && backgroundPriority.item.id === selectionId) {
-            if (backgroundPriority.item.kind !== 'shape') actions.ensureCustomBackgroundImage(backgroundPriority.item);
+            if (backgroundPriority.item.kind === 'image') actions.ensureCustomBackgroundImage(backgroundPriority.item);
             surface.drag = {
               type: 'move-background',
               image: backgroundPriority.item,
@@ -661,7 +661,7 @@
           const backgroundHit = renderer.hitTestBackground(state.project, page, pt.x, pt.y);
           if (backgroundHit) {
             const item = backgroundHit.item;
-            if (item.kind !== 'shape') actions.ensureCustomBackgroundImage(item);
+            if (item.kind === 'image') actions.ensureCustomBackgroundImage(item);
             state.selection = {
               type: 'backgroundItem',
               itemId: item.id

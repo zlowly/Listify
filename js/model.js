@@ -6,7 +6,7 @@
   const DEFAULT_TITLE_STYLE = {
     fontFamilies: ['sans-serif'],
     fontFamily: DEFAULT_FONT,
-    fontSize: 44,
+    fontSize: 64,
     fontWeight: 700,
     color: '#1f2937',
     lineHeight: 1.2,
@@ -16,7 +16,7 @@
   const DEFAULT_SONG_STYLE = {
     fontFamilies: ['sans-serif'],
     fontFamily: DEFAULT_FONT,
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 400,
     color: '#374151',
     lineHeight: 1.35,
@@ -645,6 +645,22 @@
     };
   }
 
+  // 背景文字条目：固定页面坐标矩形（与背景图形一致），不走图片的 fit 定位，
+  // 也不参与内容层文字的样式继承，默认样式为独立固定值。
+  function createBackgroundText(project, text) {
+    const size = project && project.pageSize ? project.pageSize : { width: 1080, height: 1920 };
+    return {
+      id: uid('bgtext'),
+      kind: 'text',
+      x: Math.round(size.width / 2 - 240),
+      y: Math.round(size.height / 2 - 60),
+      width: 480,
+      height: 120,
+      text: typeof text === 'string' ? text : '双击编辑文字',
+      style: normalizeStyle(copyStyle(DEFAULT_TEXT_STYLE))
+    };
+  }
+
   function cloneBackgroundImage(image) {
     return Object.assign({}, DEFAULT_BACKGROUND_IMAGE, image, {
       kind: 'image',
@@ -656,6 +672,9 @@
     if (!item) return item;
     if (item.kind === 'shape') {
       return Object.assign(clone(item), { id: uid('bgshape'), kind: 'shape' });
+    }
+    if (item.kind === 'text') {
+      return Object.assign(clone(item), { id: uid('bgtext'), kind: 'text' });
     }
     return cloneBackgroundImage(item);
   }
@@ -746,7 +765,7 @@
 
   function createTable(overrides) {
     return Object.assign({
-      columns: 3,
+      columns: 4,
       rows: 0,
       fill: 'column',
       align: 'left',
@@ -1270,6 +1289,7 @@
     normalizeShadow: normalizeShadow,
     normalizeOutline: normalizeOutline,
     createBackgroundImage: createBackgroundImage,
+    createBackgroundText: createBackgroundText,
     cloneBackgroundImage: cloneBackgroundImage,
     cloneBackgroundItem: cloneBackgroundItem,
     createPageBackground: createPageBackground,

@@ -245,6 +245,26 @@
         L.app.toggleShapeTool('content');
       });
     }
+    const bgShapeButton = document.getElementById('btn-add-bg-shape');
+    if (bgShapeButton) {
+      bgShapeButton.addEventListener('click', function () {
+        L.app.toggleShapeTool('background');
+      });
+    }
+    const bgTextButton = document.getElementById('btn-add-bg-text');
+    if (bgTextButton) {
+      bgTextButton.addEventListener('click', function () {
+        if (ui.backgroundToolsCovered()) return;
+        L.app.addBackgroundText();
+      });
+    }
+    const bgImageButton = document.getElementById('btn-add-bg-image');
+    if (bgImageButton) {
+      bgImageButton.addEventListener('click', function () {
+        if (ui.backgroundToolsCovered()) return;
+        L.app.pickBackgroundImage(null);
+      });
+    }
     document.getElementById('btn-new').addEventListener('click', function () {
       L.app.newProject();
     });
@@ -406,6 +426,7 @@
     ui.updateSelectionLabel();
     ui.updateEmptyHint();
     if (L.app) {
+      L.app.updateBackgroundToolButtons();
       L.app.redraw();
     }
   };
@@ -628,15 +649,16 @@
       const bgSelected = selection.type === 'background';
       const items = background.items || background.images || [];
       const bgNumbers = backgroundImageNumbers(items);
-      const imageCount = items.filter(function (item) { return item.kind !== 'shape'; }).length;
+      const imageCount = items.filter(function (item) { return item.kind === 'image'; }).length;
       const shapeCount = items.filter(function (item) { return item.kind === 'shape'; }).length;
+      const textCount = items.filter(function (item) { return item.kind === 'text'; }).length;
       rows.push('<div class="layer-row layer-bg-row' + (bgSelected ? ' selected' : '') +
         '" data-layer-kind="bgSet">' +
         '<button type="button" class="layer-row-main" aria-label="' +
-          esc('背景，图片 ' + imageCount + '，图形 ' + shapeCount + (isSource ? '，全局来源' : '')) + '">' +
+          esc('背景，图片 ' + imageCount + '，图形 ' + shapeCount + '，文字 ' + textCount + (isSource ? '，全局来源' : '')) + '">' +
         '<span class="layer-icon" aria-hidden="true">▦</span>' +
         '<span class="layer-name">背景' +
-          '<span class="layer-sub"> 图片 ' + imageCount + ' · 图形 ' + shapeCount + (isSource ? ' · 全局来源' : '') + '</span></span>' +
+          '<span class="layer-sub"> 图片 ' + imageCount + ' · 图形 ' + shapeCount + ' · 文字 ' + textCount + (isSource ? ' · 全局来源' : '') + '</span></span>' +
         (isSource ? '<span class="pill pill-blue">全局</span>' : '') +
         '<span class="pill pill-blue">底层</span>' +
         '</button>' +
@@ -647,17 +669,22 @@
         const itemSelected = (selection.type === 'backgroundItem' && selection.itemId === item.id) ||
           (selection.type === 'backgroundImage' && selection.imageId === item.id);
         const isShape = item.kind === 'shape';
-        const icon = isShape ? layerShapeMark(item) : (layerThumb(item.assetId, item) || '▧');
-        const name = isShape
-          ? '图形 · ' + (item.shape === 'diamond' ? '菱形' : '方形')
-          : '图片';
-        const number = isShape ? 0 : (bgNumbers.get(item.id) || 0);
+        const isText = item.kind === 'text';
+        const icon = isText ? 'T' : (isShape ? layerShapeMark(item) : (layerThumb(item.assetId, item) || '▧'));
+        const name = isText
+          ? '文字'
+          : (isShape
+            ? '图形 · ' + (item.shape === 'diamond' ? '菱形' : '方形')
+            : '图片');
+        const number = (isShape || isText) ? 0 : (bgNumbers.get(item.id) || 0);
         const label = name + (number ? ' ' + number : '');
-        let sub = isShape
-          ? '背景图形'
-          : (item.fit === 'none' ? '自定义' : fitLabel(item.fit));
+        let sub = isText
+          ? '背景文字'
+          : (isShape
+            ? '背景图形'
+            : (item.fit === 'none' ? '自定义' : fitLabel(item.fit)));
         let cropTitle = '';
-        if (!isShape && model.hasCrop(item)) {
+        if (!isShape && !isText && model.hasCrop(item)) {
           const crop = model.cropValues(item);
           sub += ' · 已裁剪';
           cropTitle = '已裁剪：上' + crop.top + ' 右' + crop.right + ' 下' + crop.bottom + ' 左' + crop.left;
@@ -808,6 +835,18 @@
     const project = L.app.state.project;
     const page = L.app.currentPage();
     ui.els.emptyHint.hidden = !model.isPageEmpty(project, page);
+  };
+
+  // 工具栏背景组按钮在被全局背景覆盖时的点击拦截：给提示并吞掉本次点击。
+  ui.backgroundToolsCovered = function () {
+    const app = L.app;
+    if (!app || !app.state) return false;
+    const page = app.currentPage ? app.currentPage() : null;
+    if (page && !model.canEditPageBackground(app.state.project, page)) {
+      ui.toast('全局背景生效中，请先取消全局背景。');
+      return true;
+    }
+    return false;
   };
 
   ui.toast = function (message, type) {

@@ -129,6 +129,35 @@ test('validateProject：合法 v4 项目零错误', function () {
   assert.deepEqual(errorsOf(validRaw()), { ok: true, errors: [] });
 });
 
+test('背景文字条目：v5 校验通过', function () {
+  const raw = validRaw();
+  raw.pages[0].background.items.push({
+    id: 'bgtext-1',
+    kind: 'text',
+    x: 100,
+    y: 200,
+    width: 480,
+    height: 120,
+    text: '底纹文字',
+    style: { fontFamily: 'sans-serif', fontSize: 48, color: '#111827' }
+  });
+  assert.deepEqual(errorsOf(raw), { ok: true, errors: [] });
+});
+
+test('validateProject：背景文字条目缺内容或矩形无效时报错', function () {
+  const missingText = validRaw();
+  missingText.pages[0].background.items.push({
+    id: 'bgtext-2', kind: 'text', x: 0, y: 0, width: 100, height: 50
+  });
+  assert.ok(errorsOf(missingText).errors.length > 0);
+
+  const badRect = validRaw();
+  badRect.pages[0].background.items.push({
+    id: 'bgtext-3', kind: 'text', x: 0, y: 0, width: 0, height: 50, text: 'x', style: {}
+  });
+  assert.ok(errorsOf(badRect).errors.length > 0);
+});
+
 /* ---------- 错误分类 ---------- */
 
 test('validateProject：非对象项目', function () {

@@ -56,7 +56,7 @@
     
       function imageItems(background) {
         return (background && (background.items || background.images) || []).filter(function (item) {
-          return item && item.kind !== 'shape';
+          return item && item.kind === 'image';
         });
       }
 
@@ -94,7 +94,7 @@
         addPresetImage(background, preset, assetId, 'whole');
         if (!actions.replacePageBackground(background)) return;
         const firstImage = (page.background.items || []).find(function (item) {
-          return item.kind !== 'shape';
+          return item.kind === 'image';
         });
         state.selection = firstImage
           ? { type: 'backgroundItem', itemId: firstImage.id }
@@ -119,7 +119,7 @@
         const page = editablePage();
         if (!page) return;
         const target = (page.background.items || []).find(function (img) {
-          return img.id === ctx.imageId && img.kind !== 'shape';
+          return img.id === ctx.imageId && img.kind === 'image';
         }) || null;
         if (!target) {
           ui.toast('找不到要替换的背景图片。', 'error');

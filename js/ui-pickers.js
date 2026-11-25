@@ -22,7 +22,7 @@
       const index = project.pages.indexOf(page);
       const isSource = project.globalBackgroundPageId === page.id;
       const items = page.background.items || page.background.images || [];
-      const imageCount = items.filter(function (item) { return item.kind !== 'shape'; }).length;
+      const imageCount = items.filter(function (item) { return item.kind === 'image'; }).length;
       const shapeCount = items.filter(function (item) { return item.kind === 'shape'; }).length;
       return '<button type="button" class="bg-copy-row" data-copy-page="' + esc(page.id) + '">' +
         previewOf(page) +

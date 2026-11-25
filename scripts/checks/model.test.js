@@ -713,6 +713,42 @@ test('图片效果：复制页面背景保留效果字段', function () {
   assert.equal(image.brightness, 1.2);
 });
 
+test('背景文字：创建固定坐标条目，样式独立不继承', function () {
+  const project = model.createDefaultProject();
+  const item = model.createBackgroundText(project, '底纹文字');
+  assert.equal(item.kind, 'text');
+  assert.equal(item.text, '底纹文字');
+  assert.equal(typeof item.id, 'string');
+  assert.ok(item.id.indexOf('bgtext') === 0);
+  // 固定页面坐标矩形，居中放置。
+  assert.equal(item.x, Math.round(project.pageSize.width / 2 - 240));
+  assert.equal(item.y, Math.round(project.pageSize.height / 2 - 60));
+  assert.equal(item.width, 480);
+  assert.equal(item.height, 120);
+  // 默认样式来自 DEFAULT_TEXT_STYLE 的独立拷贝，不带引用。
+  assert.equal(item.style.fontSize, model.DEFAULT_TEXT_STYLE.fontSize);
+  item.style.fontSize = 12;
+  assert.equal(model.DEFAULT_TEXT_STYLE.fontSize, 48);
+});
+
+test('背景文字：复制背景换新 ID 且深拷贝样式', function () {
+  const background = model.createPageBackground('#ffffff');
+  const item = model.createBackgroundText(null, '底纹');
+  background.items.push(item);
+  background.items.push(model.createBackgroundImage('asset-1', 'cover'));
+
+  const copy = model.clonePageBackground(background);
+  assert.equal(copy.items.length, 2);
+  assert.equal(copy.items[0].kind, 'text');
+  assert.notEqual(copy.items[0].id, item.id);
+  assert.equal(copy.items[0].text, '底纹');
+  copy.items[0].style.fontSize = 12;
+  assert.notEqual(item.style.fontSize, 12);
+  // 图片条目仍走原有克隆分支。
+  assert.equal(copy.items[1].kind, 'image');
+  assert.notEqual(copy.items[1].id, background.items[1].id);
+});
+
 test('图片效果：替换图片只改 assetId，效果字段保持不变', function () {
   const image = model.createBackgroundImage('asset-old', 'cover');
   image.brightness = 1.3;
@@ -974,4 +1010,33 @@ test('空态判定：仅改填充色仍为空，清空背景条目后恢复为�
 
   page.background = model.createPageBackground();
   assert.equal(model.isPageEmpty(project, page), true);
+});
+
+test('新建分类块默认初始值：分类名 64、歌名 32、首表 4 列', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+  const element = model.createCategoryElement('流行', 0, 0, project, 960, page);
+
+  assert.equal(element.titleStyle.fontSize, 64);
+  assert.equal(element.songStyle.fontSize, 32);
+  assert.equal(element.tables.length, 1);
+  assert.equal(element.tables[0].columns, 4);
+  assert.equal(element.tables[0].rows, 0);
+});
+
+test('新建分类块：有来源时继承样式而不套用默认值', function () {
+  const project = model.createDefaultProject();
+  const page = project.pages[0];
+  const source = model.createCategoryElement('来源', 0, 0, project, 960, page);
+  source.titleStyle.fontSize = 40;
+  source.songStyle.fontSize = 20;
+  source.tables[0].columns = 5;
+  page.elements.push(source);
+
+  const element = model.createCategoryElement('新块', 0, 500, project, 960, page);
+
+  assert.equal(element.titleStyle.fontSize, 40);
+  assert.equal(element.songStyle.fontSize, 20);
+  // 表格结构不继承，仍使用默认 4 列。
+  assert.equal(element.tables[0].columns, 4);
 });

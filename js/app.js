@@ -190,7 +190,7 @@ const viewport = {
 
   function selectedBackgroundImage() {
     const item = selectedBackgroundItem();
-    return item && item.kind !== 'shape' ? item : null;
+    return item && item.kind === 'image' ? item : null;
   }
 
   function selectedBackgroundShape() {
@@ -200,7 +200,7 @@ const viewport = {
 
   function backgroundItemBounds(item) {
     if (!item) return { x: 0, y: 0, width: 0, height: 0 };
-    if (item.kind === 'shape') {
+    if (item.kind === 'shape' || item.kind === 'text') {
       return { x: item.x, y: item.y, width: item.width, height: item.height };
     }
     const loaded = item.assetId ? L.assets.getCachedImage(item.assetId) : null;
@@ -303,14 +303,35 @@ const viewport = {
 
   /* 静态节点（工具条按钮）可直接命令式更新；属性面板里的入口按钮每次重渲染都会重建，
      其按下态必须在渲染期从 state.shapeTool 派生。 */
+  // 工具栏背景组：被全局背景覆盖的非来源页整组禁用（aria-disabled 保留点击以给出提示）。
+  function updateBackgroundToolButtons() {
+    const page = currentPage();
+    const covered = !!page && !model.canEditPageBackground(state.project, page);
+    ['btn-add-bg-text', 'btn-add-bg-image', 'btn-add-bg-shape'].forEach(function (id) {
+      const button = document.getElementById(id);
+      if (!button) return;
+      button.setAttribute('aria-disabled', covered ? 'true' : 'false');
+      button.classList.toggle('is-disabled', covered);
+      button.title = covered ? '全局背景生效中，请先取消全局背景。' : '';
+    });
+  }
+
   function updateShapeToolButton() {
-    const button = document.getElementById('btn-add-shape');
-    if (!button) return;
-    const contentActive = state.shapeTool.active && state.shapeTool.target === 'content';
-    button.setAttribute('aria-pressed', contentActive ? 'true' : 'false');
-    button.classList.toggle('is-active', contentActive);
+    // 落点由所点按钮直接决定：当前落点对应按钮显示按下态，另一个按钮不显示。
+    const buttons = [
+      ['btn-add-shape', 'content'],
+      ['btn-add-bg-shape', 'background']
+    ];
+    const active = state.shapeTool.active;
+    buttons.forEach(function (entry) {
+      const button = document.getElementById(entry[0]);
+      if (!button) return;
+      const isActive = active && state.shapeTool.target === entry[1];
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      button.classList.toggle('is-active', isActive);
+    });
     const pane = document.getElementById('canvas-pane');
-    if (pane) pane.classList.toggle('shape-tool-active', state.shapeTool.active);
+    if (pane) pane.classList.toggle('shape-tool-active', active);
   }
 
   function exitShapeTool() {
@@ -378,7 +399,7 @@ const viewport = {
     const page = currentPage();
     if (!page) return;
     const image = backgroundItems(page).find(function (item) {
-      return item.id === imageId && item.kind !== 'shape';
+      return item.id === imageId && item.kind === 'image';
     });
     if (!image) return;
     selectBackgroundItem(imageId);
@@ -490,7 +511,7 @@ const viewport = {
     const page = currentPage();
     const backgroundItem = selectedBackgroundItem();
     if (page && backgroundItem && model.canEditPageBackground(state.project, page)) {
-      const label = backgroundItem.kind === 'shape' ? '图形' : '图片';
+      const label = backgroundItem.kind === 'shape' ? '图形' : backgroundItem.kind === 'text' ? '文字' : '图片';
       ui.modal.confirm('删除背景' + label, '确定删除当前背景' + label + '吗？',
         { confirmLabel: '删除', danger: true }).then(function (ok) {
         if (!ok) return;
@@ -702,12 +723,30 @@ const viewport = {
     'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom',
     'shape', 'mode', 'color', 'radius', 'strokeWidth'];
   const ELEMENT_STYLE_FIELDS = ['fontSize', 'fontWeight', 'color', 'lineHeight', 'align', 'fontFamily', 'fontFamilies'];
+  const BACKGROUND_TEXT_FIELDS = ['x', 'y', 'width', 'text'];
+  const BACKGROUND_TEXT_STYLE_FIELDS = ['fontSize', 'fontWeight', 'color', 'lineHeight', 'align', 'fontFamily', 'fontFamilies'];
 
   function setElementField(field, value) {
     const element = selectedElement();
     if (!element || ELEMENT_FIELDS.indexOf(field) === -1) return;
     element[field] = value;
     changed({ property: false });
+  }
+
+  /* 背景文字条目的字段写入：UI 不直改模型，统一走这里调度重绘。 */
+  function setBackgroundItemField(field, value) {
+    const item = selectedBackgroundItem();
+    if (!item || item.kind !== 'text' || BACKGROUND_TEXT_FIELDS.indexOf(field) === -1) return;
+    item[field] = value;
+    changed({ property: false, layers: ['bg', 'overlay'] });
+  }
+
+  function setBackgroundItemStyleField(field, value) {
+    const item = selectedBackgroundItem();
+    if (!item || item.kind !== 'text' || !item.style ||
+        BACKGROUND_TEXT_STYLE_FIELDS.indexOf(field) === -1) return;
+    item.style[field] = value;
+    changed({ property: false, layers: ['bg', 'overlay'] });
   }
 
   function cachedNatural(assetId) {
@@ -764,7 +803,7 @@ const viewport = {
     if (!page) return null;
     const items = page.background.items || page.background.images || [];
     return items.find(function (item) {
-      return item.id === imageId && item.kind !== 'shape';
+      return item.id === imageId && item.kind === 'image';
     }) || null;
   }
 
@@ -899,6 +938,18 @@ const viewport = {
     ui.toast('已添加文字，双击可编辑。');
   }
 
+  // 背景层加字：条目写入 page.background.items，行为对齐背景图形（固定坐标、选中、一条撤销）。
+  function addBackgroundText() {
+    const page = currentPage();
+    if (!page || !model.canEditPageBackground(state.project, page)) return;
+    pushUndo('添加背景文字');
+    const item = model.createBackgroundText(state.project, '背景文字');
+    page.background.items.push(item);
+    state.selection = { type: 'backgroundItem', itemId: item.id };
+    ui.renderAll();
+    ui.toast('已添加背景文字，在图层面板或画布选中后编辑。');
+  }
+
   function pickFreeImage(elementId) {
     pendingImageElementId = elementId || null;
     const input = document.getElementById('free-image-file');
@@ -911,7 +962,7 @@ const viewport = {
     return state.project.pages.some(function (page) {
       const items = page.background && (page.background.items || page.background.images) || [];
       const backgroundReferenced = items.some(function (item) {
-        return item.kind !== 'shape' && item.assetId === assetId;
+        return item.kind === 'image' && item.assetId === assetId;
       });
       const elementReferenced = page.elements.some(function (element) {
         return element.type === 'image' && element.assetId === assetId;
@@ -1280,6 +1331,8 @@ const viewport = {
     resizeElementWidth: resizeElementWidth,
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
+    setBackgroundItemField: setBackgroundItemField,
+    setBackgroundItemStyleField: setBackgroundItemStyleField,
     setElementCrop: setElementCrop,
     resetElementCrop: resetElementCrop,
     setElementVisibleSize: setElementVisibleSize,
@@ -1293,6 +1346,8 @@ const viewport = {
     setBackgroundColor: setBackgroundColor,
     setBackgroundImageField: setBackgroundImageField,
     addText: addText,
+    addBackgroundText: addBackgroundText,
+    updateBackgroundToolButtons: updateBackgroundToolButtons,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
@@ -1362,6 +1417,8 @@ const viewport = {
     autoLayoutCategory: autoLayoutCategory,
     resizeElementWidth: resizeElementWidth,
     addText: addText,
+    addBackgroundText: addBackgroundText,
+    updateBackgroundToolButtons: updateBackgroundToolButtons,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
@@ -1369,6 +1426,8 @@ const viewport = {
     exitShapeTool: exitShapeTool,
     setImageKeepRatio: setImageKeepRatio,
     setElementField: setElementField,
+    setBackgroundItemField: setBackgroundItemField,
+    setBackgroundItemStyleField: setBackgroundItemStyleField,
     setElementCrop: setElementCrop,
     resetElementCrop: resetElementCrop,
     setElementVisibleSize: setElementVisibleSize,
