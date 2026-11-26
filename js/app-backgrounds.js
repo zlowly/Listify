@@ -196,6 +196,19 @@
       async function handleDroppedBackgroundFile(mode, context, file) {
         if (!file) return;
         const ctx = context || {};
+        if (mode === 'free') {
+          // 工具栏「预设图库」（内容层）拖入：物化为自由图片，不走背景链路。
+          try {
+            const assetId = await L.assets.addFile(file);
+            const image = await L.assets.loadImage(assetId);
+            model.ensureAssetMeta(state.project, assetId, file.name, file.type);
+            await appCtx.draft.persistDraftAssetQuietly(assetId);
+            actions.insertFreeImageAsset(assetId, image);
+          } catch (err) {
+            ui.toast('图片读取失败：' + (err && err.message ? err.message : '未知错误'), 'error');
+          }
+          return;
+        }
         if (mode === 'whole') {
           pendingBackgroundImageId = null;
           pendingBackgroundWhole = true;

@@ -316,7 +316,6 @@ const viewport = {
     const resolved = insertTarget(state.selection, state.project, page);
     const labels = {
       'btn-add-text': ['添加文字', '添加背景文字'],
-      'btn-add-image': ['添加图片（也可 Ctrl+V 粘贴）', '添加背景图片'],
       'btn-add-shape': ['添加图形（拖拽绘制，单击插入方形，画一次即退出）', '添加背景图形（拖拽绘制，单击插入方形，画一次即退出）']
     };
     Object.keys(labels).forEach(function (id) {
@@ -328,6 +327,15 @@ const viewport = {
       button.classList.toggle('is-disabled', resolved.disabled);
       button.title = resolved.disabled ? resolved.reason : '';
     });
+    // 添加图片：标签来自 ui 的来源记忆（落点 + 上次来源）。
+    const imageButton = document.getElementById('btn-add-image');
+    if (imageButton) {
+      const isBackground = resolved.target === 'background';
+      imageButton.setAttribute('aria-label', ui.imageSourceLabel(isBackground));
+      imageButton.setAttribute('aria-disabled', resolved.disabled ? 'true' : 'false');
+      imageButton.classList.toggle('is-disabled', resolved.disabled);
+      imageButton.title = resolved.disabled ? resolved.reason : '';
+    }
   }
 
   function updateShapeToolButton() {
@@ -962,14 +970,53 @@ const viewport = {
     }
   }
 
-  function insertImage() {
+  // 添加图片来源分流：local 用户手势文件选择、paste 程序读取剪贴板、preset 预置图库。
+  // 落点由 insertTarget 决定（背景层/内容层），来源缺省时取 ui 记忆的上次来源。
+  function insertImage(source) {
     const page = currentPage();
     if (!page) return;
-    if (insertTarget(state.selection, state.project, page).target === 'background') {
+    const resolved = insertTarget(state.selection, state.project, page);
+    const isBackground = resolved.target === 'background';
+    if (!source) source = ui.currentImageSource(isBackground ? 'background' : 'content');
+    if (source === 'paste') {
+      pasteClipboardImage();
+      return;
+    }
+    if (source === 'preset') {
+      ui.openPresetPicker(isBackground ? 'add' : 'free');
+      return;
+    }
+    if (isBackground) {
       ctx.backgrounds.pickBackgroundImage(null);
     } else {
       pickFreeImage();
     }
+  }
+
+  // 「粘贴剪贴板」菜单项：读取系统剪贴板图片后复用 Ctrl+V 粘贴管线。
+  // file:// 等环境不支持程序式读取，降级为提示使用 Ctrl+V。
+  async function pasteClipboardImage() {
+    if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+      ui.toast('当前环境不支持读取剪贴板，请直接按 Ctrl+V 粘贴。');
+      return;
+    }
+    let images;
+    try {
+      const items = await navigator.clipboard.read();
+      images = [];
+      for (const item of items || []) {
+        const type = (item.types || []).find(function (t) { return String(t).indexOf('image/') === 0; });
+        if (type) images.push({ blob: await item.getType(type), mime: type, name: '' });
+      }
+    } catch (err) {
+      ui.toast('当前环境不支持读取剪贴板，请直接按 Ctrl+V 粘贴。');
+      return;
+    }
+    if (!images.length) {
+      ui.toast('剪贴板中没有图片。');
+      return;
+    }
+    handlePastedImages(images);
   }
 
   function addText() {
@@ -999,6 +1046,19 @@ const viewport = {
     const input = document.getElementById('free-image-file');
     input.value = '';
     input.click();
+  }
+
+  // 预置图库内容层入口（openPresetPicker('free')）：把已物化的资产按自由图片尺寸规则插入内容层。
+  function insertFreeImageAsset(assetId, image) {
+    const page = currentPage();
+    if (!page) return false;
+    pushUndo('添加预置图片');
+    const element = buildFreeImageElement(assetId, image, 0);
+    page.elements.push(element);
+    state.selection = { type: 'element', id: element.id };
+    ui.renderAll();
+    ui.toast('已添加预置图片。');
+    return true;
   }
 
   function assetIsReferenced(assetId) {
@@ -1396,12 +1456,13 @@ const viewport = {
     addBackgroundText: addBackgroundText,
     updateInsertButtons: updateInsertButtons,
     insertTarget: insertTarget,
+    insertTargetInfo: function () {
+      return insertTarget(state.selection, state.project, currentPage());
+    },
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
-    toggleShapeTool: toggleShapeTool,
-    exitShapeTool: exitShapeTool,
-    moveLayer: moveLayer,
+    insertFreeImageAsset: insertFreeImageAsset,
     deleteSelection: deleteSelection,
     addPageDialog: addPageDialog,
     deleteCurrentPage: deleteCurrentPage,
@@ -1472,9 +1533,13 @@ const viewport = {
     addBackgroundText: addBackgroundText,
     updateInsertButtons: updateInsertButtons,
     insertTarget: insertTarget,
+    insertTargetInfo: function () {
+      return insertTarget(state.selection, state.project, currentPage());
+    },
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
+    insertFreeImageAsset: insertFreeImageAsset,
     toggleShapeTool: toggleShapeTool,
     exitShapeTool: exitShapeTool,
     setImageKeepRatio: setImageKeepRatio,

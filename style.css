@@ -1040,6 +1040,59 @@ button { cursor: pointer; }
 
 .canvas-toolbar-pages { flex: 1 1 auto; min-height: 0; }
 .canvas-toolbar .icon-btn { width: 32px; height: 32px; }
+
+/* ---------- 分裂按钮（添加图片）与向右弹出来源菜单 ---------- */
+.tool-split {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.tool-split .icon-btn { flex: 0 0 auto; }
+.tool-split .caret-btn {
+  width: 12px;
+  padding: 0;
+  margin-left: -1px;
+  border-radius: 0 6px 6px 0;
+  color: var(--faint);
+}
+.tool-split .caret-btn:hover,
+.tool-split .caret-btn[aria-expanded="true"] {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+.tool-split .caret-btn svg { pointer-events: none; }
+
+.tool-flyout {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 0;
+  z-index: 20;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  text-align: left;
+  color: var(--text);
+  white-space: nowrap;
+}
+.menu-item:hover { background: var(--panel-2); }
+.menu-item .check { width: 14px; flex: 0 0 14px; color: var(--blue); font-size: 12px; visibility: hidden; }
+.menu-item[aria-checked="true"] .check { visibility: visible; }
+.menu-item .glyph { flex: 0 0 auto; color: var(--muted); display: inline-flex; }
 .shape-tool-active #content-canvas,
 .shape-tool-active #overlay { cursor: crosshair; }
 
@@ -1408,25 +1461,6 @@ button { cursor: pointer; }
   background-size: 12px 12px;
   background-position: 0 0, 6px 6px;
 }
-.preset-local-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--panel);
-  cursor: pointer;
-  text-align: left;
-}
-.preset-local-row:hover { border-color: var(--blue); background: var(--blue-soft); }
-.preset-local-row:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
-.preset-local-icon { font-size: 18px; color: var(--faint); line-height: 1; }
-.preset-local-row:hover .preset-local-icon { color: var(--blue); }
-.preset-local-text { font-size: 12px; color: var(--text); }
-.preset-local-sub { color: var(--muted); }
 .preset-name {
   margin-top: 6px;
   font-size: 12px;

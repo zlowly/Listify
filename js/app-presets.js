@@ -49,6 +49,7 @@
           if (mode === 'whole') applyPresetWhole(preset, assetId);
           else if (mode === 'add') applyPresetAdd(preset, ctx, assetId);
           else if (mode === 'replace') applyPresetReplace(preset, ctx, assetId, loaded);
+          else if (mode === 'free') applyPresetFree(preset, assetId, loaded);
         } catch (err) {
           ui.toast('预置素材应用失败：' + err.message, 'error');
         }
@@ -115,8 +116,14 @@
         notifyDarkPreset(preset);
       }
 
-      function applyPresetReplace(preset, ctx, assetId, loaded) {
-        const page = editablePage();
+      // 内容层入口（工具栏分裂按钮「预设图库」）：把已物化资产交给 app 的自由图片插入链路。
+      function applyPresetFree(preset, assetId, loaded) {
+        if (!loaded) return;
+        if (!appCtx.actions.insertFreeImageAsset(assetId, loaded)) return;
+        notifyDarkPreset(preset);
+      }
+
+      function applyPresetReplace(preset, ctx, assetId, loaded) {        const page = editablePage();
         if (!page) return;
         const target = (page.background.items || []).find(function (img) {
           return img.id === ctx.imageId && img.kind === 'image';

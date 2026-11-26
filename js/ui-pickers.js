@@ -77,6 +77,7 @@
   //   whole   页面属性入口：预置整套应用（新建/复用「预置·X」集并指派当前页；本地→新建集+图→指派）
   //   add     图层面板加图：追加到当前页背景
   //   replace 图片属性替换：替换选中的背景图片（保留定位/透明度/模糊）
+  //   free    工具栏添加图片（内容层）：物化为自由图片
   function openPresetPicker(mode, context) {
     const ctx = context || {};
     const body = document.createElement('div');
@@ -123,12 +124,12 @@
     loadPicker();
   }
 
-  // 索引加载失败：报错但保留本地图片入口（spec：清单加载失败不影响本地图片）。
+  // 索引加载失败：报错并保留重试；拖入图片文件的链路不受影响。
   function renderPresetIndexError(body, mode, ctx, handle, retry) {
     body.innerHTML = '';
     const notice = document.createElement('div');
     notice.className = 'preset-picker-error';
-    notice.textContent = '预置素材索引加载失败，请重试；本地图片仍可使用。';
+    notice.textContent = '预置素材索引加载失败，请重试。';
     body.appendChild(notice);
     const retryBtn = document.createElement('button');
     retryBtn.type = 'button';
@@ -136,24 +137,7 @@
     retryBtn.textContent = '重新加载预置素材';
     retryBtn.addEventListener('click', retry);
     body.appendChild(retryBtn);
-    body.appendChild(createLocalRow(mode, ctx, handle));
-    body.appendChild(createHint('预置素材加载失败时，仍可点击上方“本地图片”，或直接把图片文件拖入本弹窗。'));
-  }
-
-  // 本地图片入口：网格下方整行虚线按钮，任何标签下都无需滚动即可见。
-  function createLocalRow(mode, ctx, handle) {
-    const local = document.createElement('button');
-    local.type = 'button';
-    local.className = 'preset-local-row';
-    local.title = '从本机选择图片文件，或直接把图片拖入本弹窗';
-    local.innerHTML = '<span class="preset-local-icon">＋</span>' +
-      '<span class="preset-local-text">本地图片<span class="preset-local-sub"> — 或直接把图片文件拖入本弹窗</span></span>';
-    local.addEventListener('click', function () {
-      handle.close(true);
-      if (mode === 'whole') L.app.pickBackgroundImageWhole();
-      else L.app.pickBackgroundImage(mode === 'replace' ? ctx.imageId : null);
-    });
-    return local;
+    body.appendChild(createHint('预置素材加载失败时，仍可把图片文件拖入本弹窗。'));
   }
 
   // 素材指引区：两行两组（素材库 / 在线生成器），均为代码内静态常量。
@@ -331,7 +315,6 @@
     }
     renderTiles();
 
-    body.appendChild(createLocalRow(mode, ctx, handle));
     body.appendChild(createLinks());
     body.appendChild(createHint('预置素材免费可离线使用；透明图默认以原大小作为叠加装饰。不够用时可在上面两个生成器里做一张，导出 PNG 后直接拖进本弹窗。'));
   }

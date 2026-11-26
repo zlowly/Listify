@@ -239,6 +239,7 @@
     document.getElementById('btn-add-image').addEventListener('click', function () {
       L.app.insertImage();
     });
+    initImageSourceMenu();
     const addShapeButton = document.getElementById('btn-add-shape');
     if (addShapeButton) {
       addShapeButton.addEventListener('click', function () {
@@ -384,6 +385,107 @@
 
     initToolbarTips();
     initPropTips();
+  };
+
+  /* ---------- 添加图片来源分裂按钮 ---------- */
+  // 来源记忆仅存内存：内容层/背景层各一份，默认本地文件；不写入项目或本地存储。
+  const imageSourceMemory = { content: 'local', background: 'local' };
+  const IMAGE_SOURCE_NAMES = { local: '本地文件', paste: '粘贴剪贴板', preset: '预设图库' };
+
+  function currentImageLayer() {
+    if (!L.app || !L.app.insertTargetInfo) return 'content';
+    const resolved = L.app.insertTargetInfo();
+    return resolved && resolved.target === 'background' ? 'background' : 'content';
+  }
+
+  // 主按钮 aria-label：落点（内容/背景）+ 当前默认来源。
+  function imageSourceLabel(isBackground) {
+    const source = imageSourceMemory[isBackground ? 'background' : 'content'];
+    if (isBackground) return '添加背景图片（来源：' + IMAGE_SOURCE_NAMES[source] + '）';
+    return '添加图片（来源：' + IMAGE_SOURCE_NAMES[source] + '，也可 Ctrl+V 粘贴）';
+  }
+
+  function initImageSourceMenu() {
+    const split = document.querySelector('.tool-split[data-split="image"]');
+    if (!split) return;
+    const caret = document.getElementById('btn-add-image-more');
+    const menu = split.querySelector('.tool-flyout');
+    if (!caret || !menu) return;
+
+    function syncChecked() {
+      const layer = currentImageLayer();
+      menu.querySelectorAll('.menu-item').forEach(function (item) {
+        item.setAttribute('aria-checked', item.dataset.source === imageSourceMemory[layer] ? 'true' : 'false');
+      });
+    }
+
+    function openMenu() {
+      syncChecked();
+      menu.hidden = false;
+      caret.setAttribute('aria-expanded', 'true');
+      const checked = menu.querySelector('.menu-item[aria-checked="true"]') || menu.querySelector('.menu-item');
+      if (checked) checked.focus();
+      setTimeout(function () { document.addEventListener('pointerdown', onOutside); }, 0);
+    }
+
+    function closeMenu(refocus) {
+      if (menu.hidden) return;
+      menu.hidden = true;
+      caret.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('pointerdown', onOutside);
+      if (refocus) caret.focus();
+    }
+
+    function onOutside(event) {
+      if (!split.contains(event.target)) closeMenu(false);
+    }
+
+    // 菜单项是原生 button：Enter/空格由浏览器产生 click，无需在此重复处理。
+    function choose(source) {
+      if (!IMAGE_SOURCE_NAMES[source]) return;
+      imageSourceMemory[currentImageLayer()] = source;
+      closeMenu(true);
+      if (L.app) {
+        L.app.updateInsertButtons();
+        L.app.insertImage(source);
+      }
+    }
+
+    caret.addEventListener('click', function () {
+      if (menu.hidden) openMenu();
+      else closeMenu(true);
+    });
+    caret.addEventListener('keydown', function (event) {
+      if (event.key === 'ArrowDown' && menu.hidden) {
+        event.preventDefault();
+        openMenu();
+      }
+    });
+    menu.addEventListener('keydown', function (event) {
+      const items = Array.prototype.slice.call(menu.querySelectorAll('.menu-item'));
+      const index = items.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        items[(index + 1) % items.length].focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        items[(index - 1 + items.length) % items.length].focus();
+      } else if (event.key === 'Escape') {
+        event.stopPropagation();
+        closeMenu(true);
+      } else if (event.key === 'Tab') {
+        closeMenu(false);
+      }
+    });
+    menu.addEventListener('click', function (event) {
+      const item = event.target.closest('.menu-item');
+      if (item) choose(item.dataset.source);
+    });
+  }
+
+  ui.imageSourceLabel = imageSourceLabel;
+  ui.currentImageSource = function (layer) {
+    return imageSourceMemory[layer === 'background' ? 'background' : 'content'];
   };
 
   ui.setPanel = function (panel) {
