@@ -20,12 +20,20 @@
     selection: { type: 'page' },
     // 属性面板「表格」卡片聚焦的表格下标（null = 无聚焦）；chrome 据此画聚焦高亮
     focusTableIndex: null,
-    shapeTool: { active: false, target: 'content', pageId: null, preview: null }
+    shapeTool: { active: false, target: 'content', pageId: null, preview: null, kind: 'rect' }
   };
   state.currentPageId = state.project.pages[0].id;
 
   let pendingImageElementId = null;
   let uiRenderDepth = 0;
+
+  // 图形工具当前变体（工具栏分裂菜单记忆）：rect / circle / line。
+  const SHAPE_TOOL_NAMES = { rect: '方形', circle: '圆形', line: '直线' };
+
+  function setShapeToolKind(kind) {
+    if (SHAPE_TOOL_NAMES[kind]) state.shapeTool.kind = kind;
+    updateShapeToolButton();
+  }
 
   let lastExternalDraftNotice = 0;
 
@@ -345,6 +353,7 @@ const viewport = {
     if (button) {
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
       button.classList.toggle('is-active', active);
+      button.setAttribute('aria-label', '添加图形（' + SHAPE_TOOL_NAMES[state.shapeTool.kind] + '，拖拽绘制，画一次即退出）');
     }
     const pane = document.getElementById('canvas-pane');
     if (pane) pane.classList.toggle('shape-tool-active', active);
@@ -903,7 +912,7 @@ const viewport = {
   const SHAPE_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'blur',
     'brightness', 'hue', 'fadeMode', 'fadeAngle',
     'fadePosition', 'fadeWidth', 'fadeTop', 'fadeBottom',
-    'shape', 'mode', 'color', 'radius', 'strokeWidth'];
+    'shape', 'mode', 'color', 'radius', 'strokeWidth', 'taper'];
 
   function shapeEditTarget() {
     const element = selectedElement();
@@ -934,6 +943,22 @@ const viewport = {
     if (!target || shape.SHAPE_KINDS.indexOf(kind) === -1) return;
     target.item.shape = kind;
     shape.clampShape(target.item);
+    shapeChanged(target.background);
+  }
+
+  // 直线属性面板的 长度/角度 输入：框随方向 —— 长度即框宽，角度即旋转，框中心锚定。
+  function setLineShapeGeometry(length, angleDeg) {
+    const target = shapeEditTarget();
+    if (!target || target.item.shape !== 'line') return;
+    const item = target.item;
+    const centerX = item.x + item.width / 2;
+    const centerY = item.y + item.height / 2;
+    item.width = Math.max(1, length);
+    item.rotation = angleDeg || 0;
+    item.height = Math.max(1, item.strokeWidth || L.shape.DEFAULT_SHAPE.strokeWidth);
+    item.x = centerX - item.width / 2;
+    item.y = centerY - item.height / 2;
+    shape.clampShape(item);
     shapeChanged(target.background);
   }
 
@@ -1447,6 +1472,7 @@ const viewport = {
     setElementStyleField: setElementStyleField,
     setShapeField: setShapeField,
     setShapeKind: setShapeKind,
+    setLineShapeGeometry: setLineShapeGeometry,
     setShapeAngle: setShapeAngle,
     setBackgroundColor: setBackgroundColor,
     setBackgroundImageField: setBackgroundImageField,
@@ -1463,6 +1489,9 @@ const viewport = {
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,
     insertFreeImageAsset: insertFreeImageAsset,
+    toggleShapeTool: toggleShapeTool,
+    exitShapeTool: exitShapeTool,
+    moveLayer: moveLayer,
     deleteSelection: deleteSelection,
     addPageDialog: addPageDialog,
     deleteCurrentPage: deleteCurrentPage,
@@ -1536,6 +1565,7 @@ const viewport = {
     insertTargetInfo: function () {
       return insertTarget(state.selection, state.project, currentPage());
     },
+    setShapeToolKind: setShapeToolKind,
     pickFreeImage: pickFreeImage,
     handleFreeImageFile: handleFreeImageFile,
     handlePastedImages: handlePastedImages,

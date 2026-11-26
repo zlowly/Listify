@@ -710,6 +710,52 @@ test('buildProject：v5 图形字段往返一致（含负圆角）', async funct
   assert.equal(Object.prototype.hasOwnProperty.call(structure.pages[0].background, 'images'), false);
 });
 
+test('buildProject：v5 circle/line 往返一致，taper 仅 line 写入', async function () {
+  const raw = validRaw();
+  raw.assets = [];
+  raw.pages[0].elements.push(shapeElement({
+    id: 'el-circle', shape: 'circle', mode: 'fill', radius: 0
+  }));
+  raw.pages[0].elements.push(shapeElement({
+    id: 'el-line', shape: 'line', width: 300, height: 8, rotation: 45, taper: 60, radius: 0
+  }));
+
+  const built = await io.buildProject(raw);
+  const structure = plain(io.serializeProjectStructure(built.project));
+  const shapes = structure.pages[0].elements.filter(function (item) { return item.type === 'shape'; });
+  const circle = shapes.find(function (item) { return item.id === 'el-circle'; });
+  const line = shapes.find(function (item) { return item.id === 'el-line'; });
+  assert.equal(circle.shape, 'circle');
+  assert.equal(circle.flip, undefined);
+  assert.equal(circle.taper, undefined);
+  assert.equal(line.shape, 'line');
+  assert.equal(line.width, 300);
+  assert.equal(line.height, 8);
+  assert.equal(line.rotation, 45);
+  assert.equal(line.taper, 60);
+  assert.equal(line.x1, undefined);
+  assert.equal(line.flip, undefined);
+});
+
+test('buildProject：旧 flip 直线迁移为 长度×线粗+方向，框中心锚定', async function () {
+  const raw = validRaw();
+  raw.assets = [];
+  raw.pages[0].elements.push(shapeElement({
+    id: 'el-flip', shape: 'line', flip: true, radius: 0
+  }));
+
+  const built = await io.buildProject(raw);
+  const structure = plain(io.serializeProjectStructure(built.project));
+  const line = structure.pages[0].elements.find(function (item) { return item.id === 'el-flip'; });
+  assert.equal(line.shape, 'line');
+  assert.equal(Math.round(line.width * 100) / 100, Math.round(Math.hypot(240, 160) * 100) / 100);
+  assert.equal(Math.round(line.rotation * 100) / 100,
+    Math.round((15 + Math.atan2(-160, 240) * 180 / Math.PI) * 100) / 100);
+  assert.equal(line.height, 8);
+  assert.equal(line.flip, undefined);
+  assert.equal(line.x1, undefined);
+});
+
 /* ---------- 版本迁移：背景入库 → 每页背景 ---------- */
 
 test('buildProject：v4 背景 images 按原顺序迁移为 v5 items', async function () {

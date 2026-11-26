@@ -123,17 +123,37 @@
       function drawShapePreview(ctx) {
         const preview = state.shapeTool && state.shapeTool.preview;
         if (!preview) return;
-        const x = viewport.offsetX + preview.x * viewport.scale;
-        const y = viewport.offsetY + preview.y * viewport.scale;
-        const width = preview.width * viewport.scale;
-        const height = preview.height * viewport.scale;
         ctx.save();
         ctx.strokeStyle = '#2563eb';
         ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([6, 4]);
-        if (width > 0 && height > 0) ctx.fillRect(x, y, width, height);
-        ctx.strokeRect(x, y, Math.max(1, width), Math.max(1, height));
+        if (preview.shape === 'line') {
+          // 框随方向：直线预览直接画两端点间的线段（页面坐标）。
+          const p1 = screenFromPage(preview.x1, preview.y1);
+          const p2 = screenFromPage(preview.x2, preview.y2);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+          return;
+        }
+        const x = viewport.offsetX + preview.x * viewport.scale;
+        const y = viewport.offsetY + preview.y * viewport.scale;
+        const width = preview.width * viewport.scale;
+        const height = preview.height * viewport.scale;
+        const kind = preview.shape || 'rect';
+        if (kind === 'circle' && width > 0 && height > 0) {
+          ctx.beginPath();
+          ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          if (width > 0 && height > 0) ctx.fillRect(x, y, width, height);
+          ctx.strokeRect(x, y, Math.max(1, width), Math.max(1, height));
+        }
         ctx.setLineDash([]);
         ctx.restore();
       }
@@ -360,11 +380,29 @@
         ctx.restore();
       }
     
+      // 直线的两个端点手柄（屏幕坐标，随元素旋转）。
+      function lineEndpointPoints(item) {
+        const segment = L.shape.lineSegment(item);
+        const cx = item.x + item.width / 2;
+        const cy = item.y + item.height / 2;
+        const radians = model.rotationRadians(item);
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        return segment.map(function (p, index) {
+          const rotated = { x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos };
+          const screen = screenFromPage(cx + rotated.x, cy + rotated.y);
+          return { name: index === 0 ? 'p1' : 'p2', x: screen.x, y: screen.y, cursor: 'move' };
+        });
+      }
+
       function handlePoints(bounds, element) {
         if (element.type === 'image') {
           return imageHandlePoints(renderer.elementVisibleBox(element));
         }
-        if (element.type === 'shape') return imageHandlePoints(element);
+        if (element.type === 'shape') {
+          if (element.shape === 'line') return lineEndpointPoints(element);
+          return imageHandlePoints(element);
+        }
         const x = viewport.offsetX + bounds.x * viewport.scale;
         const y = viewport.offsetY + bounds.y * viewport.scale;
         const w = bounds.width * viewport.scale;
@@ -493,7 +531,11 @@
           ctx.strokeRect(x, y, bounds.width * viewport.scale, bounds.height * viewport.scale);
         }
         handlePoints(bounds, element).forEach(function (handle) {
-          drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
+          if (element.type === 'shape' && element.shape === 'line') {
+            drawRoundHandle(ctx, handle.x, handle.y, 5, '#2563eb', '#ffffff');
+          } else {
+            drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
+          }
         });
         if (element.type === 'image' || element.type === 'shape') {
           const rp = rotateHandlePoint(imageBox || element);
@@ -542,9 +584,15 @@
         });
         ctx.closePath();
         ctx.stroke();
-        imageHandlePoints(box).forEach(function (handle) {
-          drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
-        });
+        if (item.kind === 'shape' && item.shape === 'line') {
+          lineEndpointPoints(item).forEach(function (handle) {
+            drawRoundHandle(ctx, handle.x, handle.y, 5, '#2563eb', '#ffffff');
+          });
+        } else {
+          imageHandlePoints(box).forEach(function (handle) {
+            drawSquareHandle(ctx, handle.x, handle.y, 8, '#2563eb', '#ffffff');
+          });
+        }
         const rp = rotateHandlePoint(box);
         drawRotateHandle(ctx, rp);
         if (surface.drag && surface.drag.type === 'rotate' && surface.drag.background) {
@@ -670,6 +718,20 @@
           if (rpBg && Math.abs(screenX - rpBg.handle.x) <= ROTATE_HANDLE_HIT && Math.abs(screenY - rpBg.handle.y) <= ROTATE_HANDLE_HIT) {
             return { type: 'rotate-background', item: backgroundItem, image: backgroundItem, cursor: ROTATE_CURSOR };
           }
+          if (backgroundItem.kind === 'shape' && backgroundItem.shape === 'line') {
+            for (const point of lineEndpointPoints(backgroundItem)) {
+              if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
+                return {
+                  type: 'line-endpoint',
+                  item: backgroundItem,
+                  background: true,
+                  endpoint: point.name,
+                  cursor: point.cursor
+                };
+              }
+            }
+            return null;
+          }
           for (const point of imageHandlePoints(box)) {
             if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
               return {
@@ -694,6 +756,14 @@
           }
         }
         const bounds = renderer.elementBounds(state.project, page, element);
+        if (element.type === 'shape' && element.shape === 'line') {
+          for (const point of handlePoints(bounds, element)) {
+            if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {
+              return { type: 'line-endpoint', element: element, endpoint: point.name, cursor: point.cursor };
+            }
+          }
+          return null;
+        }
         const points = handlePoints(bounds, element);
         for (const point of points) {
           if (Math.abs(screenX - point.x) <= 8 && Math.abs(screenY - point.y) <= 8) {

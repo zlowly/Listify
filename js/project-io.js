@@ -56,8 +56,11 @@
     };
   }
 
+  const SHAPE_KINDS = ['rect', 'diamond', 'circle', 'line'];
+
   function serializeShape(shape, identity) {
     const fade = L.model.fadeValues(shape);
+    const kind = SHAPE_KINDS.indexOf(shape.shape) >= 0 ? shape.shape : 'rect';
     return Object.assign({
       id: shape.id,
       x: shape.x,
@@ -65,11 +68,16 @@
       width: shape.width,
       height: shape.height,
       rotation: Number(shape.rotation) || 0,
-      shape: shape.shape === 'diamond' ? 'diamond' : 'rect',
+      shape: kind,
       mode: shape.mode === 'stroke' ? 'stroke' : 'fill',
       color: shape.color || L.shape.DEFAULT_SHAPE.color,
       radius: Number(shape.radius) || 0,
       strokeWidth: Number(shape.strokeWidth) || 0,
+      x1: undefined,
+      y1: undefined,
+      x2: undefined,
+      y2: undefined,
+      taper: kind === 'line' ? (Number(shape.taper) || 0) : undefined,
       opacity: shape.opacity == null ? 1 : shape.opacity,
       blur: shape.blur == null ? 0 : shape.blur,
       brightness: shape.brightness == null ? 1 : shape.brightness,
@@ -358,20 +366,50 @@
             if (element.type === 'shape') {
               const fadeMode = L.model.FADE_MODES.indexOf(element.fadeMode) >= 0 ? element.fadeMode : 'off';
               const fadeDefaults = L.model.fadeDefaults(fadeMode);
+              const shapeKind = SHAPE_KINDS.indexOf(element.shape) >= 0 ? element.shape : 'rect';
+              const lineShape = shapeKind === 'line';
+              // 直线迁移：旧 flip/端点数据统一换算为「长度 × 线粗 + 方向（旋转）」，线段中点（= 旧框中心）锚定。
+              const lineGeom = lineShape ? (function () {
+                const w = L.projectSchema.isFiniteNumber(element.width) ? element.width : 0;
+                const h = L.projectSchema.isFiniteNumber(element.height) ? element.height : 0;
+                const oldRotation = L.projectSchema.isFiniteNumber(element.rotation) ? element.rotation : 0;
+                let length = w;
+                let extraDeg = 0;
+                if (L.projectSchema.isFiniteNumber(element.x1) &&
+                    L.projectSchema.isFiniteNumber(element.y1) &&
+                    L.projectSchema.isFiniteNumber(element.x2) &&
+                    L.projectSchema.isFiniteNumber(element.y2)) {
+                  length = Math.hypot(element.x2 - element.x1, element.y2 - element.y1) || w;
+                  extraDeg = Math.atan2(element.y2 - element.y1, element.x2 - element.x1) * 180 / Math.PI;
+                } else if (element.flip === true && h > 0) {
+                  length = Math.hypot(w, h) || w;
+                  extraDeg = Math.atan2(-h, w) * 180 / Math.PI;
+                }
+                const rad = (oldRotation + extraDeg) * Math.PI / 180;
+                const halfLen = Math.max(1, length) / 2;
+                return {
+                  width: Math.max(1, length),
+                  rotation: oldRotation + extraDeg,
+                  x: (L.projectSchema.isFiniteNumber(element.x) ? element.x : 0) + w / 2 - halfLen * Math.cos(rad),
+                  y: (L.projectSchema.isFiniteNumber(element.y) ? element.y : 0) + h / 2 - halfLen * Math.sin(rad)
+                };
+              })() : null;
               return L.shape.clampShape({
                 id: element.id,
                 type: 'shape',
-                x: element.x,
-                y: element.y,
-                width: element.width,
+                x: lineGeom ? lineGeom.x : element.x,
+                y: lineGeom ? lineGeom.y : element.y,
+                width: lineGeom ? lineGeom.width : element.width,
                 height: element.height,
-                rotation: L.projectSchema.isFiniteNumber(element.rotation) ? element.rotation : 0,
-                shape: element.shape === 'diamond' ? 'diamond' : 'rect',
+                rotation: lineGeom ? lineGeom.rotation : (L.projectSchema.isFiniteNumber(element.rotation) ? element.rotation : 0),
+                shape: shapeKind,
                 mode: element.mode === 'stroke' ? 'stroke' : 'fill',
                 color: typeof element.color === 'string' ? element.color : L.shape.DEFAULT_SHAPE.color,
                 radius: L.projectSchema.isFiniteNumber(element.radius) ? element.radius : 0,
                 strokeWidth: L.projectSchema.isFiniteNumber(element.strokeWidth)
                   ? element.strokeWidth : L.shape.DEFAULT_SHAPE.strokeWidth,
+                taper: lineShape && L.projectSchema.isFiniteNumber(element.taper)
+                  ? Math.max(0, element.taper) : 0,
                 opacity: element.opacity == null ? 1 : element.opacity,
                 blur: L.projectSchema.isFiniteNumber(element.blur) ? element.blur : 0,
                 brightness: L.projectSchema.isFiniteNumber(element.brightness) ? element.brightness : 1,

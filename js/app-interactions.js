@@ -484,6 +484,18 @@
     
         const handle = appCtx.chrome.handleAt(point.x, point.y);
         if (handle) {
+          if (handle.type === 'line-endpoint') {
+            actions.pushUndo('调整直线');
+            surface.drag = {
+              type: 'line-endpoint',
+              pageId: page.id,
+              item: handle.item || handle.element,
+              background: !!handle.background,
+              endpoint: handle.endpoint
+            };
+            beginPointer(event);
+            return;
+          }
           if (handle.type === 'rotate' || handle.type === 'rotate-background') {
             const isBackground = handle.type === 'rotate-background';
             const target = isBackground ? (handle.item || handle.image) : handle.element;
@@ -744,12 +756,39 @@
           drag.currentX = pp.x;
           drag.currentY = pp.y;
           drag.moved = Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) > 6;
-          state.shapeTool.preview = {
-            x: Math.min(drag.startX, pp.x),
-            y: Math.min(drag.startY, pp.y),
-            width: Math.abs(pp.x - drag.startX),
-            height: Math.abs(pp.y - drag.startY)
-          };
+          const kind = state.shapeTool.kind || 'rect';
+          const current = { x: pp.x, y: pp.y };
+          // Ctrl = 约束（默认自由）：圆形正方形外接框，直线 45° 步进方向。
+          if (event.ctrlKey && kind === 'circle') {
+            const span = Math.max(Math.abs(current.x - drag.startX), Math.abs(current.y - drag.startY));
+            current.x = drag.startX + Math.sign(current.x - drag.startX || 1) * span;
+            current.y = drag.startY + Math.sign(current.y - drag.startY || 1) * span;
+          } else if (event.ctrlKey && kind === 'line') {
+            const dx = current.x - drag.startX;
+            const dy = current.y - drag.startY;
+            const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+            const dist = Math.hypot(dx, dy);
+            current.x = drag.startX + Math.cos(angle) * dist;
+            current.y = drag.startY + Math.sin(angle) * dist;
+          }
+          drag.currentX = current.x;
+          drag.currentY = current.y;
+          if (kind === 'line') {
+            // 框随方向：直线预览直接记录两端点的页面坐标。
+            state.shapeTool.preview = {
+              shape: 'line',
+              x1: drag.startX, y1: drag.startY,
+              x2: current.x, y2: current.y
+            };
+          } else {
+            state.shapeTool.preview = {
+              x: Math.min(drag.startX, current.x),
+              y: Math.min(drag.startY, current.y),
+              width: Math.abs(current.x - drag.startX),
+              height: Math.abs(current.y - drag.startY),
+              shape: kind
+            };
+          }
           appCtx.viewport.scheduleRedraw(['overlay']);
           return;
         }
@@ -794,6 +833,39 @@
           return;
         }
     
+        if (surface.drag.type === 'line-endpoint') {
+          const lineDrag = surface.drag;
+          const item = lineDrag.item;
+          const pp = appCtx.viewport.toPage(appCtx.chrome.overlayPoint(event).x, appCtx.chrome.overlayPoint(event).y);
+          // 框随方向：固定端点锚定，指针决定 长度 + 方向（旋转），外接框随之重排。
+          const radians = model.rotationRadians(item);
+          const centerX = item.x + item.width / 2;
+          const centerY = item.y + item.height / 2;
+          const cosR = Math.cos(radians);
+          const sinR = Math.sin(radians);
+          const sign = lineDrag.endpoint === 'p2' ? 1 : -1;
+          const fixedPage = {
+            x: centerX - sign * (item.width / 2) * cosR,
+            y: centerY - sign * (item.width / 2) * sinR
+          };
+          let dx = pp.x - fixedPage.x;
+          let dy = pp.y - fixedPage.y;
+          if (event.ctrlKey) {
+            const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+            const dist = Math.hypot(dx, dy);
+            dx = Math.cos(angle) * dist;
+            dy = Math.sin(angle) * dist;
+          }
+          item.width = Math.max(1, Math.hypot(dx, dy));
+          item.rotation = Math.atan2(dy, dx) * 180 / Math.PI;
+          item.height = Math.max(1, item.strokeWidth || 8);
+          item.x = fixedPage.x + dx / 2 - item.width / 2;
+          item.y = fixedPage.y + dy / 2 - item.height / 2;
+          shape.clampShape(item);
+          appCtx.viewport.scheduleRedraw(lineDrag.background ? ['bg', 'overlay'] : ['content', 'overlay']);
+          return;
+        }
+
         if (surface.drag.type === 'resize') {
           resizeDrag(dx, dy);
           appCtx.viewport.scheduleRedraw(surface.drag.background ? ['bg', 'overlay'] : ['content', 'overlay']);
@@ -955,15 +1027,27 @@
         const page = model.getPage(state.project, drag.pageId);
         if (!page) return;
         const pageSize = state.project.pageSize;
+        const kind = state.shapeTool.kind || 'rect';
         let rect;
         if (!drag.moved) {
-          const size = Math.min(240, pageSize.width, pageSize.height);
-          rect = {
-            x: clamp(drag.startX - size / 2, 0, Math.max(0, pageSize.width - size)),
-            y: clamp(drag.startY - size / 2, 0, Math.max(0, pageSize.height - size)),
-            width: size,
-            height: size
-          };
+          if (kind === 'line') {
+            const width = Math.min(240, pageSize.width);
+            const height = Math.min(8, pageSize.height);
+            rect = {
+              x: clamp(drag.startX - width / 2, 0, Math.max(0, pageSize.width - width)),
+              y: clamp(drag.startY - height / 2, 0, Math.max(0, pageSize.height - height)),
+              width: width,
+              height: height
+            };
+          } else {
+            const size = Math.min(240, pageSize.width, pageSize.height);
+            rect = {
+              x: clamp(drag.startX - size / 2, 0, Math.max(0, pageSize.width - size)),
+              y: clamp(drag.startY - size / 2, 0, Math.max(0, pageSize.height - size)),
+              width: size,
+              height: size
+            };
+          }
         } else {
           const current = {
             x: drag.currentX == null ? drag.startX : drag.currentX,
@@ -978,22 +1062,40 @@
         }
         if (drag.target === 'background' && !model.canEditPageBackground(state.project, page)) return;
         actions.pushUndo('添加图形');
+        let created;
         if (drag.target === 'background') {
-          const item = shape.createBackgroundShape(
+          created = shape.createBackgroundShape(
             Math.round(rect.x), Math.round(rect.y),
             Math.round(rect.width), Math.round(rect.height)
           );
-          page.background.items.push(item);
-          state.selection = { type: 'backgroundItem', itemId: item.id };
+          page.background.items.push(created);
+          state.selection = { type: 'backgroundItem', itemId: created.id };
         } else {
-          const element = shape.createShapeElement(
+          created = shape.createShapeElement(
             Math.round(rect.x), Math.round(rect.y),
             Math.round(rect.width), Math.round(rect.height)
           );
-          page.elements.push(element);
-          state.selection = { type: 'element', id: element.id };
+          page.elements.push(created);
+          state.selection = { type: 'element', id: created.id };
         }
+        created.shape = kind;
+        if (kind === 'line') {
+          // 框随方向：框长 = 线长，框高 = 线粗，方向由旋转表达；框中心锚定线段中点。
+          if (drag.moved) {
+            const dx = drag.currentX - drag.startX;
+            const dy = drag.currentY - drag.startY;
+            created.width = Math.max(1, Math.hypot(dx, dy));
+            created.rotation = Math.atan2(dy, dx) * 180 / Math.PI;
+            created.height = Math.max(1, created.strokeWidth || shape.DEFAULT_SHAPE.strokeWidth);
+            created.x = (drag.startX + drag.currentX) / 2 - created.width / 2;
+            created.y = (drag.startY + drag.currentY) / 2 - created.height / 2;
+          }
+          created.height = Math.max(1, created.strokeWidth || shape.DEFAULT_SHAPE.strokeWidth);
+        }
+        shape.clampShape(created);
         actions.exitShapeTool();
+        // 拖拽松手即完成：这里没有其它渲染触发点，必须显式整帧刷新。
+        ui.renderAll();
         ui.toast(drag.target === 'background' ? '已添加背景图形。' : '已添加图形。');
       }
 
@@ -1008,6 +1110,9 @@
         if (finished.type === 'shape-draw') {
           createShapeFromDrag(finished);
           if (state.shapeTool) state.shapeTool.preview = null;
+        }
+        if (finished.type === 'line-endpoint') {
+          ui.renderAll();
         }
         if (finished.type === 'page-size') {
           state.project.pageSize.width = Math.round(clamp(state.project.pageSize.width, 320, 5000));

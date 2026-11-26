@@ -240,6 +240,7 @@
       L.app.insertImage();
     });
     initImageSourceMenu();
+    initShapeToolMenu();
     const addShapeButton = document.getElementById('btn-add-shape');
     if (addShapeButton) {
       addShapeButton.addEventListener('click', function () {
@@ -405,60 +406,35 @@
     return '添加图片（来源：' + IMAGE_SOURCE_NAMES[source] + '，也可 Ctrl+V 粘贴）';
   }
 
-  function initImageSourceMenu() {
-    const split = document.querySelector('.tool-split[data-split="image"]');
-    if (!split) return;
-    const caret = document.getElementById('btn-add-image-more');
-    const menu = split.querySelector('.tool-flyout');
-    if (!caret || !menu) return;
-
-    function syncChecked() {
-      const layer = currentImageLayer();
-      menu.querySelectorAll('.menu-item').forEach(function (item) {
-        item.setAttribute('aria-checked', item.dataset.source === imageSourceMemory[layer] ? 'true' : 'false');
-      });
-    }
-
-    function openMenu() {
-      syncChecked();
+  // 分裂按钮弹层共用行为：箭头开合、↑↓ 循环、Esc 归还焦点、Tab/点外部关闭。
+  // 菜单项是原生 button：Enter/空格由浏览器产生 click，无需在此重复处理。
+  function bindFlyout(caret, menu, handlers) {
+    function open() {
+      if (handlers.sync) handlers.sync();
       menu.hidden = false;
       caret.setAttribute('aria-expanded', 'true');
       const checked = menu.querySelector('.menu-item[aria-checked="true"]') || menu.querySelector('.menu-item');
       if (checked) checked.focus();
       setTimeout(function () { document.addEventListener('pointerdown', onOutside); }, 0);
     }
-
-    function closeMenu(refocus) {
+    function close(refocus) {
       if (menu.hidden) return;
       menu.hidden = true;
       caret.setAttribute('aria-expanded', 'false');
       document.removeEventListener('pointerdown', onOutside);
       if (refocus) caret.focus();
     }
-
     function onOutside(event) {
-      if (!split.contains(event.target)) closeMenu(false);
+      if (!caret.parentElement.contains(event.target)) close(false);
     }
-
-    // 菜单项是原生 button：Enter/空格由浏览器产生 click，无需在此重复处理。
-    function choose(source) {
-      if (!IMAGE_SOURCE_NAMES[source]) return;
-      imageSourceMemory[currentImageLayer()] = source;
-      closeMenu(true);
-      if (L.app) {
-        L.app.updateInsertButtons();
-        L.app.insertImage(source);
-      }
-    }
-
     caret.addEventListener('click', function () {
-      if (menu.hidden) openMenu();
-      else closeMenu(true);
+      if (menu.hidden) open();
+      else close(true);
     });
     caret.addEventListener('keydown', function (event) {
       if (event.key === 'ArrowDown' && menu.hidden) {
         event.preventDefault();
-        openMenu();
+        open();
       }
     });
     menu.addEventListener('keydown', function (event) {
@@ -472,14 +448,61 @@
         items[(index - 1 + items.length) % items.length].focus();
       } else if (event.key === 'Escape') {
         event.stopPropagation();
-        closeMenu(true);
+        close(true);
       } else if (event.key === 'Tab') {
-        closeMenu(false);
+        close(false);
       }
     });
     menu.addEventListener('click', function (event) {
       const item = event.target.closest('.menu-item');
-      if (item) choose(item.dataset.source);
+      if (item && handlers.choose) handlers.choose(item, function () { close(true); });
+    });
+  }
+
+  function initImageSourceMenu() {
+    const split = document.querySelector('.tool-split[data-split="image"]');
+    if (!split) return;
+    const caret = split.querySelector('.caret-btn');
+    const menu = split.querySelector('.tool-flyout');
+    if (!caret || !menu) return;
+    bindFlyout(caret, menu, {
+      sync: function () {
+        const layer = currentImageLayer();
+        menu.querySelectorAll('.menu-item').forEach(function (item) {
+          item.setAttribute('aria-checked', item.dataset.source === imageSourceMemory[layer] ? 'true' : 'false');
+        });
+      },
+      choose: function (item, done) {
+        const source = item.dataset.source;
+        if (!IMAGE_SOURCE_NAMES[source]) return;
+        imageSourceMemory[currentImageLayer()] = source;
+        done();
+        if (L.app) {
+          L.app.updateInsertButtons();
+          L.app.insertImage(source);
+        }
+      }
+    });
+  }
+
+  function initShapeToolMenu() {
+    const split = document.querySelector('.tool-split[data-split="shape"]');
+    if (!split) return;
+    const caret = split.querySelector('.caret-btn');
+    const menu = split.querySelector('.tool-flyout');
+    if (!caret || !menu) return;
+    bindFlyout(caret, menu, {
+      sync: function () {
+        const kind = L.app && L.app.state ? L.app.state.shapeTool.kind : 'rect';
+        menu.querySelectorAll('.menu-item').forEach(function (item) {
+          item.setAttribute('aria-checked', item.dataset.kind === kind ? 'true' : 'false');
+        });
+      },
+      choose: function (item, done) {
+        if (!L.app || !L.app.setShapeToolKind) return;
+        L.app.setShapeToolKind(item.dataset.kind);
+        done();
+      }
     });
   }
 

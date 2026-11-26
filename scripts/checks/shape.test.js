@@ -133,3 +133,37 @@ test('命中：菱形空白角、正圆角外侧与负圆角缺口都不命中',
   assert.equal(shape.shapeContains(concave, 95, 95), false);
   assert.equal(shape.shapeContains(concave, 60, 60), true);
 });
+
+test('命中：圆形按椭圆方程，外接框四角不命中', function () {
+  const circle = { shape: 'circle', width: 200, height: 100, strokeWidth: 8 };
+  assert.equal(shape.shapeContains(circle, 0, 0), true);
+  assert.equal(shape.shapeContains(circle, 60, 20), true);
+  assert.equal(shape.shapeContains(circle, 98, 48), false);
+  assert.equal(shape.shapeContains(circle, 90, 47), false);
+});
+
+test('命中：直线为框内水平中线带，厚度即框高', function () {
+  const line = { shape: 'line', width: 200, height: 8, strokeWidth: 8 };
+  assert.equal(shape.shapeContains(line, 0, 0), true);
+  assert.equal(shape.shapeContains(line, 80, 2), true);
+  assert.equal(shape.shapeContains(line, 80, 10), false);
+  assert.equal(shape.shapeContains(line, -90, -90), false);
+});
+
+test('夹取：line 框高同步线粗、厚度上限为线长一半，非 line 删除 taper', function () {
+  const line = { shape: 'line', width: 200, height: 8, strokeWidth: 20, radius: 5, taper: -5 };
+  shape.clampShape(line);
+  assert.equal(line.radius, 0);
+  assert.equal(line.height, 20);   // 框高同步为线粗
+  assert.equal(line.strokeWidth, 20);
+  assert.equal(line.taper, 0);
+
+  const thick = { shape: 'line', width: 200, height: 8, strokeWidth: 300 };
+  shape.clampShape(thick);
+  assert.equal(thick.strokeWidth, 100); // 上限 = 线长一半
+  assert.equal(thick.height, 100);
+
+  const rect = { shape: 'rect', width: 200, height: 100, taper: 10 };
+  shape.clampShape(rect);
+  assert.equal('taper' in rect, false);
+});

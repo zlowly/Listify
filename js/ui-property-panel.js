@@ -1218,6 +1218,10 @@
     const page = options && options.page;
     const project = L.app.state.project;
     const isDiamond = item.shape === 'diamond';
+    const isLine = item.shape === 'line';
+    const lineLength = Math.max(1, item.width);
+    const lineAngle = item.rotation || 0;
+    const shapeNames = { rect: '方形', diamond: '菱形', circle: '圆形', line: '直线' };
     const inradius = Math.max(0, shape.shapeInradius(item));
     const concave = Math.max(0, shape.shapeConcaveLimit(item));
     const angle = Math.round(shape.diamondAngle(item.width, item.height));
@@ -1227,11 +1231,14 @@
           '<p class="hint">所属背景：第 ' + pageNumber(project, page) + ' 页' +
             (isSource ? '（全局来源，修改会影响所有页面）' : '') + '</p>')
       : propGroup('info', '自由图形',
-          '<p class="hint">' + (isDiamond ? '菱形' : '方形') + '，缩放时宽高可独立调整。</p>');
+          '<p class="hint">' + (shapeNames[item.shape] || '方形') +
+          (isLine ? '，拖拽端点手柄调整长度与方向。' : '，缩放时宽高可独立调整。') + '</p>');
     const geometry =
       field('形状', selectInput('prop-shape-kind', [
         { value: 'rect', label: '方形' },
-        { value: 'diamond', label: '菱形' }
+        { value: 'diamond', label: '菱形' },
+        { value: 'circle', label: '圆形' },
+        { value: 'line', label: '直线' }
       ], item.shape || 'rect')) +
       (isDiamond
         ? fieldHelp('内夹角', numberInput('prop-shape-angle', angle, 0, 90, 1, false, 5) + '<span class="unit">°</span>',
@@ -1242,21 +1249,28 @@
         { value: 'stroke', label: '边框' }
       ], item.mode || 'fill')) +
       field('颜色', colorInput('prop-shape-color', item.color || shape.DEFAULT_SHAPE.color, false)) +
-      fieldHelp('圆角', numberInput('prop-shape-radius', Math.round(item.radius || 0), -Math.ceil(concave), Math.floor(inradius), 1, false, 5) +
-        '<span class="unit">px</span>', '0 为直角，正数外凸，负数内凹；上限随形状与尺寸变化。') +
-      (item.mode === 'stroke'
+      (isLine
+        ? fieldHelp('两端渐尖', numberInput('prop-shape-taper', Math.round(item.taper || 0), 0, 9999, 1, false, 5) +
+            '<span class="unit">px</span>', '线段两端各从该距离开始逐渐变尖，0 则保持恒定线粗。')
+        : fieldHelp('圆角', numberInput('prop-shape-radius', Math.round(item.radius || 0), -Math.ceil(concave), Math.floor(inradius), 1, false, 5) +
+            '<span class="unit">px</span>', '0 为直角，正数外凸，负数内凹；上限随形状与尺寸变化。')) +
+      (item.mode === 'stroke' || isLine
         ? fieldHelp('边框厚度', numberInput('prop-shape-stroke', Math.round(item.strokeWidth || 0), 0, Math.floor(inradius), 1, false, 5) +
-            '<span class="unit">px</span>', '边框绘制在图形内侧，可见厚度即此值。')
+            '<span class="unit">px</span>', isLine ? '线段的粗细。' : '边框绘制在图形内侧，可见厚度即此值。')
         : '');
     const layout =
       fieldPair(
         '位置 X', numberInput('prop-shape-x', Math.round(item.x), -20000, 20000, 1, false, 10),
         '位置 Y', numberInput('prop-shape-y', Math.round(item.y), -20000, 20000, 1, false, 10)
       ) +
-      fieldPair(
-        '宽度', numberInput('prop-shape-w', Math.round(item.width), 1, 20000, 1, false, 10),
-        '高度', numberInput('prop-shape-h', Math.round(item.height), 1, 20000, 1, false, 10)
-      ) +
+      (isLine
+        ? fieldPair(
+            '长度', numberInput('prop-shape-length', Math.round(lineLength), 1, 20000, 1, false, 10),
+            '角度', numberInput('prop-shape-line-angle', Math.round(lineAngle), -180, 180, 1, false, 5) +
+              '<span class="unit">°</span>')
+        : fieldPair(
+            '宽度', numberInput('prop-shape-w', Math.round(item.width), 1, 20000, 1, false, 10),
+            '高度', numberInput('prop-shape-h', Math.round(item.height), 1, 20000, 1, false, 10))) +
       field('旋转', numberInput('prop-shape-rotation', Math.round(item.rotation || 0), -180, 180, 1, false, 45) +
         '<span class="unit">°</span>');
     ui.els.propertyPanel.innerHTML =
@@ -1291,6 +1305,10 @@
       L.app.setShapeField('strokeWidth', Number(valueOf('prop-shape-stroke')) || 0);
       ui.renderAll();
     });
+    bind('prop-shape-taper', 'change', function () {
+      L.app.setShapeField('taper', Math.max(0, Number(valueOf('prop-shape-taper')) || 0));
+      ui.renderAll();
+    });
     bind('prop-shape-x', 'change', function () { L.app.setShapeField('x', Number(valueOf('prop-shape-x')) || 0); });
     bind('prop-shape-y', 'change', function () { L.app.setShapeField('y', Number(valueOf('prop-shape-y')) || 0); });
     bind('prop-shape-w', 'change', function () {
@@ -1299,6 +1317,14 @@
     });
     bind('prop-shape-h', 'change', function () {
       L.app.setShapeField('height', Math.max(1, Number(valueOf('prop-shape-h')) || 1));
+      ui.renderAll();
+    });
+    bind('prop-shape-length', 'change', function () {
+      L.app.setLineShapeGeometry(Math.max(1, Number(valueOf('prop-shape-length')) || 1), Number(valueOf('prop-shape-line-angle')) || 0);
+      ui.renderAll();
+    });
+    bind('prop-shape-line-angle', 'change', function () {
+      L.app.setLineShapeGeometry(Math.max(1, Number(valueOf('prop-shape-length')) || 1), Number(valueOf('prop-shape-line-angle')) || 0);
       ui.renderAll();
     });
     bind('prop-shape-rotation', 'change', function () {

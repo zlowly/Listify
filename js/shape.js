@@ -12,7 +12,7 @@
   const L = window.Listify = window.Listify || {};
   const EPSILON = 1e-9;
 
-  const SHAPE_KINDS = ['rect', 'diamond'];
+  const SHAPE_KINDS = ['rect', 'diamond', 'circle', 'line'];
   const SHAPE_MODES = ['fill', 'stroke'];
   const DEFAULT_SHAPE = {
     shape: 'rect',
@@ -20,6 +20,7 @@
     color: '#333333',
     radius: 0,
     strokeWidth: 8,
+    taper: 0,
     opacity: 1,
     blur: 0,
     brightness: 1,
@@ -46,14 +47,17 @@
   function normalizeShape(shape) {
     const source = shape && typeof shape === 'object' ? shape : {};
     const size = localSize(source.width, source.height);
+    const kind = SHAPE_KINDS.indexOf(source.shape) >= 0 ? source.shape : 'rect';
+    const line = kind === 'line';
     return {
-      shape: SHAPE_KINDS.indexOf(source.shape) >= 0 ? source.shape : 'rect',
+      shape: kind,
       mode: SHAPE_MODES.indexOf(source.mode) >= 0 ? source.mode : 'fill',
       color: typeof source.color === 'string' && source.color ? source.color : DEFAULT_SHAPE.color,
       width: size.width,
       height: size.height,
-      radius: finite(source.radius, 0),
-      strokeWidth: finite(source.strokeWidth, DEFAULT_SHAPE.strokeWidth)
+      radius: kind === 'line' ? 0 : finite(source.radius, 0),
+      strokeWidth: finite(source.strokeWidth, DEFAULT_SHAPE.strokeWidth),
+      taper: line ? Math.max(0, finite(source.taper, 0)) : 0
     };
   }
 
@@ -109,12 +113,15 @@
 
   /* ---------- 圆角与边框上限 ---------- */
 
-  // 正圆角 / 边框厚度上限：内切圆半径。
+  // 正圆角 / 边框厚度上限：内切圆半径；直线以线长一半为上限。
   function shapeInradius(shape) {
     const value = normalizeShape(shape);
     if (value.shape === 'diamond') {
       const halfDiagonal = Math.hypot(value.width / 2, value.height / 2);
       return value.width * value.height / (4 * halfDiagonal);
+    }
+    if (value.shape === 'line') {
+      return value.width / 2;
     }
     return Math.min(value.width, value.height) / 2;
   }
@@ -135,10 +142,27 @@
     shape.width = Math.max(1, finite(shape.width, 240));
     shape.height = Math.max(1, finite(shape.height, 240));
     if (typeof shape.color !== 'string' || !shape.color) shape.color = DEFAULT_SHAPE.color;
-    const inradius = shapeInradius(shape);
-    const concave = shapeConcaveLimit(shape);
-    shape.radius = L.model.clamp(finite(shape.radius, 0), -concave, inradius);
-    shape.strokeWidth = L.model.clamp(finite(shape.strokeWidth, DEFAULT_SHAPE.strokeWidth), 0, inradius);
+    if (shape.shape === 'line') {
+      // 直线没有圆角语义：切换或归一时强制为 0。
+      shape.radius = 0;
+      delete shape.x1;
+      delete shape.y1;
+      delete shape.x2;
+      delete shape.y2;
+      shape.taper = Math.max(0, finite(shape.taper, 0));
+    } else {
+      shape.radius = L.model.clamp(finite(shape.radius, 0), -shapeConcaveLimit(shape), shapeInradius(shape));
+      delete shape.x1;
+      delete shape.y1;
+      delete shape.x2;
+      delete shape.y2;
+      delete shape.taper;
+    }
+    shape.strokeWidth = L.model.clamp(finite(shape.strokeWidth, DEFAULT_SHAPE.strokeWidth), 0, shapeInradius(shape));
+    if (shape.shape === 'line') {
+      // 框高即线粗：厚度夹取完成后再同步，避免被旧值锁死。
+      shape.height = Math.max(1, shape.strokeWidth);
+    }
     shape.opacity = L.model.clamp(finite(shape.opacity, 1), 0, 1);
     shape.blur = Math.max(0, finite(shape.blur, 0));
     shape.brightness = finite(shape.brightness, 1);
@@ -396,12 +420,30 @@
     return inside;
   }
 
+  // 直线在图形局部坐标（外接框中心原点）下的两个端点：恒为水平中线，方向由元素旋转表达。
+  function lineSegment(value) {
+    const halfW = value.width / 2;
+    return [
+      { x: -halfW, y: 0 },
+      { x: halfW, y: 0 }
+    ];
+  }
+
   function shapeContains(shape, localX, localY) {
     const value = normalizeShape(shape);
     const x = finite(localX, 0);
     const y = finite(localY, 0);
     if (Math.abs(x) > value.width / 2 + EPSILON || Math.abs(y) > value.height / 2 + EPSILON) {
       return false;
+    }
+    if (value.shape === 'circle') {
+      const rx = value.width / 2 + EPSILON;
+      const ry = value.height / 2 + EPSILON;
+      return (x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1;
+    }
+    if (value.shape === 'line') {
+      const segment = lineSegment(value);
+      return distanceToSegment({ x: x, y: y }, segment[0], segment[1]) <= value.strokeWidth / 2 + EPSILON;
     }
     const inradius = shapeInradius(value);
     const concave = shapeConcaveLimit(value);
@@ -436,6 +478,7 @@
     clampShape: clampShape,
     shapeOutline: shapeOutline,
     shapeContains: shapeContains,
+    lineSegment: lineSegment,
     outlinePoints: outlinePoints
   };
 })();

@@ -602,6 +602,18 @@
   }
 
   function traceShape(ctx, item) {
+    if (item.shape === 'circle') {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, item.width / 2, item.height / 2, 0, 0, Math.PI * 2);
+      return;
+    }
+    if (item.shape === 'line') {
+      const segment = shape.lineSegment(item);
+      ctx.beginPath();
+      ctx.moveTo(segment[0].x, segment[0].y);
+      ctx.lineTo(segment[1].x, segment[1].y);
+      return;
+    }
     const outline = shape.shapeOutline(item);
     ctx.beginPath();
     ctx.moveTo(outline.start.x, outline.start.y);
@@ -618,8 +630,58 @@
     if (outline.closed) ctx.closePath();
   }
 
+  // 直线两端渐尖（taper > 0）：锥形多边形一次填充；中段保持完整线粗，
+  // 线长不足以容纳两侧渐尖时按比例缩小实际渐尖距离。
+  function traceTaperedLine(ctx, item) {
+    const segment = shape.lineSegment(item);
+    const a = segment[0];
+    const b = segment[1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    const unit = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+    const normal = { x: -unit.y, y: unit.x };
+    const half = Math.max(0, Number(item.strokeWidth) || 0) / 2;
+    const taper = Math.max(0, Number(item.taper) || 0);
+    const maxTaper = length * 0.4;
+    const taperLen = Math.min(taper, maxTaper);
+    const points = [];
+    function push(axis, side) {
+      points.push({
+        x: a.x + unit.x * axis + normal.x * side,
+        y: a.y + unit.y * axis + normal.y * side
+      });
+    }
+    push(taperLen, half);
+    push(length - taperLen, half);
+    push(length, 0);
+    push(length - taperLen, -half);
+    push(taperLen, -half);
+    push(0, 0);
+    ctx.beginPath();
+    points.forEach(function (point, index) {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+  }
+
   function paintShape(ctx, item) {
     const strokeWidth = Math.max(0, Number(item.strokeWidth) || 0);
+    if (item.shape === 'line') {
+      if (strokeWidth <= 0) return;
+      const color = item.color || shape.DEFAULT_SHAPE.color;
+      if ((Number(item.taper) || 0) > 0) {
+        traceTaperedLine(ctx, item);
+        ctx.fillStyle = color;
+        ctx.fill();
+        return;
+      }
+      traceShape(ctx, item);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = strokeWidth;
+      ctx.lineCap = 'butt';
+      ctx.stroke();
+      return;
+    }
     if (item.mode === 'stroke') {
       if (strokeWidth <= 0) return;
       // 先裁剪到实际路径，再用双倍线宽描边；只有内侧一半可见，
